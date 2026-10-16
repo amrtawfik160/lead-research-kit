@@ -8,11 +8,19 @@ from lead_research.providers import PROVIDERS, get_provider
 
 ENV = {'HUNTER_API_KEY': 'fixture-secret', 'VERIFALIA_TOKEN': 'fixture-secret',
        'CLEAROUT_API_KEY': 'fixture-secret', 'ZEROBOUNCE_API_KEY': 'fixture-secret',
-       'SERPER_API_KEY': 'fixture-secret', 'BRAVE_API_KEY': 'fixture-secret'}
+       'SERPER_API_KEY': 'fixture-secret', 'BRAVE_API_KEY': 'fixture-secret',
+       'APOLLO_API_KEY': 'fixture-secret', 'PROSPEO_API_KEY': 'fixture-secret', 'GOOGLE_MAPS_API_KEY': 'fixture-secret',
+       'EXA_API_KEY': 'fixture-secret', 'TOMBA_API_KEY': 'fixture-secret', 'TOMBA_SECRET': 'fixture-secret',
+       'ICYPEAS_API_KEY': 'fixture-secret', 'REOON_API_KEY': 'fixture-secret', 'MILLIONVERIFIER_API_KEY': 'fixture-secret'}
 # Lead-source operations take their own payload shapes (see tests/test_discovery.py).
 OPERATION_PAYLOADS = {'discover': {'filters': {'query': 'real estate companies in Texas'}},
                       'domain_search': {'domain': 'example.org'}, 'search': {'query': 'site:linkedin.com/in "CEO"'},
-                      'places': {'area': 'Austin', 'state': 'TX'}}
+                      'places': {'area': 'Austin', 'state': 'TX'},
+                      'text_search': {'text_query': 'real estate brokerage in Austin, TX'},
+                      'people_enrich': {'apollo_id': 'a1b2c3d4e5f6a7b8'}, 'enrich': {'person_id': 'a1b2c3d4e5f6a7b8'},
+                      'linkedin_email': {'linkedin_url': 'https://www.linkedin.com/in/alex-example'}}
+# people_search criteria are provider-specific (Apollo vs Prospeo enums).
+PEOPLE_SEARCH = {'apollo': {'criteria': {'titles': ['CEO']}}, 'prospeo': {'criteria': {'websites': ['example.org']}}}
 PAYLOAD = {'email': 'alex@example.org', 'domain': 'example.org', 'full_name': 'Alex Example',
            'first_name': 'Alex', 'last_name': 'Example'}
 
@@ -23,10 +31,12 @@ class ProviderTests(unittest.TestCase):
 
     def test_contract_all_six(self):
         self.assertEqual(set(PROVIDERS), {'hunter', 'verifalia', 'clearout', 'zerobounce', 'hunter-insight', 'disify',
-                                          'serper', 'brave', 'overpass'})
+                                          'serper', 'brave', 'overpass', 'apollo', 'prospeo', 'google_places', 'exa',
+                                          'tomba', 'icypeas', 'reoon', 'millionverifier'})
         for p in PROVIDERS.values():
             for operation in p.operations:
-                request = p.request(operation, OPERATION_PAYLOADS.get(operation, PAYLOAD), ENV)
+                payload = PEOPLE_SEARCH[p.id] if operation == 'people_search' else OPERATION_PAYLOADS.get(operation, PAYLOAD)
+                request = p.request(operation, payload, ENV)
                 self.assertTrue(request.url.startswith('https://'))
                 self.assertGreater(p.min_spacing[operation], 0)
             with self.assertRaisesRegex(PolicyError, '^unsupported_operation$'):
@@ -53,7 +63,8 @@ class ProviderTests(unittest.TestCase):
                 out = p.parse(p.operations[0], Response(status, {'secret': 'fixture-secret'}))
                 self.assertEqual((out.assessment, out.error), ('error', code))
                 self.assertNotIn('fixture-secret', repr(out))
-            for data in ({}, [], None, {'error': 'fixture-secret'}, {'errors': ['fixture-secret']}):
+            # Google Places (New) answers a zero-match Text Search with {} (covered in test_providers_v3).
+            for data in ([], None, {'error': 'fixture-secret'}, {'errors': ['fixture-secret']}) + (() if p.id == 'google_places' else ({},)):
                 out = p.parse(p.operations[0], Response(200, data))
                 self.assertEqual(out.assessment, 'error')
                 self.assertNotIn('fixture-secret', repr(out))

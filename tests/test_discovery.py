@@ -400,6 +400,85 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(len(US_STATES), 51)
 
 
+class V3JobBuilderTests(unittest.TestCase):
+    def test_apollo_jobs(self):
+        from lead_research.discovery import apollo_jobs
+        jobs = apollo_jobs(['CEO', 'Owner'], ['Texas', 'Florida', 'Texas'], pages=2)
+        self.assertEqual(len(jobs), 4)
+        first = normalize_job(jobs[0])['payload']['criteria']
+        self.assertEqual(first, {'titles': ['CEO', 'Owner'], 'seniorities': ['owner', 'founder', 'c_suite', 'partner'],
+                                 'employee_ranges': ['1,10', '11,50', '51,200'], 'organization_locations': ['Texas'],
+                                 'page': 1, 'per_page': 100})
+        self.assertEqual(jobs[1]['payload']['criteria']['page'], 2)
+        people = apollo_jobs([], ['Austin, Texas'], location_field='person_locations', employee_ranges=())
+        self.assertEqual(people[0]['payload']['criteria']['person_locations'], ['Austin, Texas'])
+        with self.assertRaises(PolicyError):
+            apollo_jobs(['CEO'], ['Texas'], pages=501)
+        with self.assertRaises(PolicyError):
+            apollo_jobs(['CEO'], ['Texas'], location_field='evil')
+
+    def test_enrich_and_linkedin_jobs(self):
+        from lead_research.discovery import apollo_enrich_jobs, prospeo_enrich_jobs, tomba_linkedin_jobs
+        prospects = [{'apollo_id': '67bdafd0c3a4c50001bbd7c2', 'lead_id': 7}, {'apollo_id': '67bdafd0c3a4c50001bbd7c2'},
+                     {'full_name': 'Jane Example', 'company_website': 'example.org'}, {'email': 'x@example.org', 'apollo_id': 'a' * 10},
+                     {'linkedin_url': 'https://www.linkedin.com/in/jane-example/', 'prospeo_id': 'aaaacd817619fba3d254cd64'},
+                     {'full_name': 'No Domain'}]
+        jobs = apollo_enrich_jobs(prospects)
+        self.assertEqual([j['payload'] for j in jobs], [
+            {'apollo_id': '67bdafd0c3a4c50001bbd7c2', 'lead_id': '7'}, {'name': 'Jane Example', 'domain': 'example.org'},
+            {'linkedin_url': 'https://www.linkedin.com/in/jane-example/'}])
+        for job in jobs:
+            normalize_job(job)
+        self.assertEqual(prospeo_enrich_jobs(prospects)[-1]['payload'], {'person_id': 'aaaacd817619fba3d254cd64'})
+        urls = tomba_linkedin_jobs(['https://uk.linkedin.com/in/jane-example?trk=1', 'https://www.linkedin.com/in/jane-example/',
+                                    'https://example.org/in/x', {'linkedin_url': 'https://www.linkedin.com/in/sam-sample', 'lead_id': 3}])
+        self.assertEqual([j['payload'] for j in urls], [{'linkedin_url': 'https://www.linkedin.com/in/jane-example/'},
+                                                        {'linkedin_url': 'https://www.linkedin.com/in/sam-sample/', 'lead_id': '3'}])
+
+    def test_prospeo_jobs_chunk_domains(self):
+        from lead_research.discovery import prospeo_jobs
+        domains = ['www.site%d.example.org' % i for i in range(1001)] + ['site0.example.org']
+        jobs = prospeo_jobs(domains, titles=['CEO'])
+        self.assertEqual([len(j['payload']['criteria']['websites']) for j in jobs], [500, 500, 1])
+        criteria = normalize_job(jobs[0])['payload']['criteria']
+        self.assertEqual((criteria['title_match_mode'], criteria['seniorities'], criteria['page']),
+                         ('CONTAINS', ['Founder/Owner', 'C-Suite', 'Partner'], 1))
+        with self.assertRaises(PolicyError):
+            prospeo_jobs(domains, chunk=501)
+
+    def test_places_and_exa_jobs(self):
+        from lead_research.discovery import exa_jobs, exa_people_queries, places_jobs, places_queries
+        self.assertEqual(places_queries([('Austin', 'TX')]), ['real estate brokerage in Austin, TX',
+                                                              'commercial real estate firm in Austin, TX',
+                                                              'property management company in Austin, TX'])
+        jobs = places_jobs([{'city': 'Miami', 'state': 'FL'}, 'luxury realtor in Austin, TX', 'luxury realtor in Austin, TX'],
+                           included_type='real_estate_agency')
+        self.assertEqual(len(jobs), 4)
+        self.assertEqual(normalize_job(jobs[-1])['payload'], {'text_query': 'luxury realtor in Austin, TX', 'page_size': 20,
+                                                              'included_type': 'real_estate_agency'})
+        with self.assertRaises(PolicyError):
+            places_queries(['Austin'])
+        queries = exa_people_queries(['CEO'], ['Austin, Texas'])
+        self.assertEqual(queries, ['CEO at a real estate company in Austin, Texas'])
+        self.assertEqual(normalize_job(exa_jobs(queries)[0])['payload'], {'query': queries[0]})
+
+    def test_v3_identity_and_unknown_keys(self):
+        a = normalize_job({'provider': 'google_places', 'operation': 'text_search', 'payload': {'text_query': 'Realty in Austin, TX'}})
+        b = normalize_job({'provider': 'google_places', 'operation': 'text_search',
+                           'payload': {'text_query': ' realty  in austin, tx ', 'page_size': 20}})
+        self.assertEqual(input_key('text_search', a['payload']), input_key('text_search', b['payload']))
+        c = normalize_job({'provider': 'google_places', 'operation': 'text_search', 'payload': {**a['payload'], 'page_cursor': 'abc'}})
+        self.assertNotEqual(input_key('text_search', a['payload']), input_key('text_search', c['payload']))
+        x = normalize_job({'provider': 'apollo', 'operation': 'people_enrich', 'payload': {'name': 'Jane  Example', 'domain': 'www.example.org'}})
+        y = normalize_job({'provider': 'apollo', 'operation': 'people_enrich', 'payload': {'name': 'jane example', 'domain': 'example.org'}})
+        self.assertEqual(input_key('people_enrich', x['payload']), input_key('people_enrich', y['payload']))
+        for job in ({'provider': 'serper', 'operation': 'people_search', 'payload': {'criteria': {'titles': ['CEO']}}},
+                    {'provider': 'tomba', 'operation': 'linkedin_email', 'payload': {'linkedin_url': 'x', 'api_key': 'k'}},
+                    {'provider': 'prospeo', 'operation': 'enrich', 'payload': {'person_id': 'aaaacd817619fba3d254cd64', 'secret': 1}}):
+            with self.assertRaises(PolicyError):
+                normalize_job(job)
+
+
 class ConfigMigrationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

@@ -2,7 +2,7 @@
 
 An evidence-first Python toolkit for finding business contacts and researching their work emails without mixing guesses, public sources, and provider claims
 
-**Status: v0.2.0 alpha, local CLI, Python 3.11+, no runtime dependencies**
+**Status: v0.3.0 alpha, local CLI, Python 3.11+, no runtime dependencies**
 
 This is a clean source-code project. It contains synthetic examples, not the contact database, account state, API credentials, or captures from the research that inspired it. Source repository: https://github.com/amrtawfik160/lead-research-kit. No package has been published to PyPI.
 
@@ -20,6 +20,46 @@ This is a clean source-code project. It contains synthetic examples, not the con
 - Exports public emails, candidates, provider results and accepted options separately
 
 It does **not** send email, probe SMTP, register accounts, rotate identities/IPs, bypass access restrictions, scrape private profiles, infer company revenue, or establish that an email belongs to a particular person.
+
+## Fresh leads every day
+
+```bash
+lead-research --workspace /private/ws history import old-leads.csv     # never deliver these again
+lead-research --workspace /private/ws daily --target 500               # preview: plans only, nothing sent or recorded
+lead-research --workspace /private/ws daily --target 500 --execute     # writes daily/<date>/leads.csv and remembers it
+```
+
+One `daily --execute` run:
+
+1. **Polls** any saved pending finder/verifier jobs
+2. **Public records** (free): pulls new or updated decision makers from Texas TREC (designated brokers of every brokerage), New York DOS (principal and owner brokers), Colorado DORA (responsible brokers) and SEC Form D (executives of new real-estate offerings). Cursors make each day a delta
+3. **Resolve**: finds the website of each public-record firm with one search query (Serper or Brave), skipping portals, directories and franchise parents
+4. **Discover** more companies when the backlog is short: Hunter Discover (free calls), Google Places (1,000 free requests a month), OpenStreetMap. Markets rotate so each day covers new states and metros
+5. **Crawl** the oldest uncrawled company sites in parallel for published names, titles, emails and email patterns
+6. **Find** emails for fresh decision makers whose site hides them (Hunter, ZeroBounce, Tomba, Icypeas, whichever is funded first)
+7. **Verify** pattern guesses and finder results (Reoon, MillionVerifier, Clearout, Verifalia, ...), promoting only valid ones
+8. **Select** the best fresh A/B leads with a work email, never anyone delivered before (matched by LinkedIn, email or name + company)
+9. **Writes** `leads.csv` (6 columns), `leads-details.csv` (tier, score, email source, evidence URL) and `report.json` (per-step counts, shortfall and what to enable next)
+
+Steps without an enabled, funded provider are skipped and reported, never forced. Tune with `--sources`, `--record-sources`, `--cap resolve=800`, `--max-domains`, `--min-tier A`.
+
+### What it takes to reach 500 a day
+
+Measured: a crawled brokerage site yields about 0.3 fresh decision makers with a published work email, so 500/day needs about 1,700 fresh company sites a day, or fewer with a finder filling the gaps.
+
+| Setup | Monthly cost | Realistic daily output |
+|---|---|---|
+| Free only: public records + OSM + crawl, no search key | $0 | Low: records give names and firms but most firm websites stay unknown |
+| + Serper (resolve firms, LinkedIn URLs), Hunter Discover, Google Places free tier, Reoon free verifications | ~$0–50 (Serper is $1 per 1,000 queries after 2,500 free) | ~150–300 |
+| + a pay-per-found finder (e.g. Icypeas ~$0.01–0.04 per found email) and MillionVerifier/Reoon | ~$100–150 | 500+ |
+
+### Keys
+
+Put keys in your environment (see `.env.example`), never in the repo: `SERPER_API_KEY`, `BRAVE_API_KEY`, `HUNTER_API_KEY`, `GOOGLE_MAPS_API_KEY`, `APOLLO_API_KEY`, `PROSPEO_API_KEY`, `ICYPEAS_API_KEY`, `TOMBA_API_KEY`/`TOMBA_SECRET`, `REOON_API_KEY`, `MILLIONVERIFIER_API_KEY`, `EXA_API_KEY`, plus `SEC_USER_AGENT="Your Name you@company.com"` for SEC and optional `SOCRATA_APP_TOKEN`. Then `provider enable <name>` and `budget confirm <name> --pools ... --free` with the allowance you actually want spent.
+
+### Public-record terms
+
+`records list` shows each source's terms. California DRE (not for mass mailing) and Washington DOL (commercial use prohibited) are deliberately excluded. Florida's DBPR files are behind Cloudflare, so download them yourself and use `records load fl-dbpr-file FILE`. License data is not consent: follow CAN-SPAM and your own legal advice for outreach.
 
 ## Build a clean lead list fast
 
@@ -193,6 +233,18 @@ lead-research --workspace /private/path/research audit
 | Hunter Discover / Domain Search | Company discovery, decision makers at a domain | Discover uses its own local counter; Domain Search uses Hunter search credits |
 | Serper / Brave | Search-engine LinkedIn X-ray | Serper `num` fixed at 10 so 1 query = 1 credit |
 | OpenStreetMap Overpass | Real-estate offices in a place | Free fair-use API, 5s spacing, ODbL attribution |
+| Apollo | People API Search (`people_search`), single-person enrichment (`people_enrich`) | Search is 0 credits (local `search_requests` counter) and returns obfuscated last names (`name_complete: false`); enrichment is one person per job, 1 `credits`, personal emails and phones never revealed |
+| Prospeo | Person search over ≤500 company websites (`people_search`), person enrichment (`enrich`) | 1 credit per search page (25 people, no emails) or per email found; `NO_RESULTS`/`NO_MATCH` (HTTP 400) are not-found, not errors |
+| Google Places | Text Search (`text_search`) for brokerages and property managers | Fixed Enterprise field mask (website + phone) = 1 `enterprise_requests`; next pages via `page_cursor` |
+| Exa | `search` in the `people` category (LinkedIn-style profiles) | 10 results per query, no paging; reuses the X-ray profile parser |
+| Tomba | Email Finder (`find`), LinkedIn Finder (`linkedin_email`) | Key + secret headers; 30s spacing matches the Free plan's 2 finder requests/minute |
+| Icypeas | Email discovery (`find`) | Asynchronous: the submit returns `pending`; finish it with `resume` (read-only result POST, never resubmitted). A pending attempt blocks new requests until resumed |
+| Reoon | POWER-mode single verification | Only power-mode `safe` counts as valid; catch-all, role, disposable, spamtrap and inbox-full stay unknown with risk flags |
+| MillionVerifier | Single API verification | Demo keys (`livemode: false`) are refused; `quality: risky/bad` becomes a risk flag |
+
+Automatic routing tries providers in configuration order. Existing providers keep their priority; Reoon then MillionVerifier are the last `verify` options, so a saved configuration never silently changes which account a verification spends. Each verifier is its own independence group.
+
+Environment variables: `HUNTER_API_KEY`, `VERIFALIA_TOKEN` (or `VERIFALIA_USERNAME` + `VERIFALIA_PASSWORD`), `CLEAROUT_API_KEY`, `ZEROBOUNCE_API_KEY`, `SERPER_API_KEY`, `BRAVE_API_KEY`, `APOLLO_API_KEY`, `PROSPEO_API_KEY`, `GOOGLE_MAPS_API_KEY`, `EXA_API_KEY`, `TOMBA_API_KEY` + `TOMBA_SECRET`, `ICYPEAS_API_KEY`, `REOON_API_KEY`, `MILLIONVERIFIER_API_KEY`. Reoon and MillionVerifier take the key as a query parameter (their only documented method); it stays in the request object and is never stored.
 
 Adapters retain selected facts, not raw arbitrary provider bodies, names/geodata/gender enrichment or credential-bearing URLs. Live compatibility and account entitlement must be checked with a small authorized canary before scaling. Tests use mocked schemas, not live accounts. Some free services permit internal use but require approval for hosted resale or third-party API products; see [provider operations](skills/lead-research/references/provider-operations.md).
 

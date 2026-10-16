@@ -11,11 +11,12 @@ import re
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, quote_plus, urlencode, urlsplit
 
-from .discovery import clean_text, linkedin_from_handle, parse_linkedin_result, safe_link
+from .discovery import canonical_linkedin, clean_text, linkedin_from_handle, parse_linkedin_result, safe_link
 from .models import Outcome, PolicyError, ProviderError, Request
-from .policy import (HUNTER_DEPARTMENTS, HUNTER_SENIORITIES, OSM_DEFAULT_TAGS, OSM_TAG_ALLOWLIST, US_STATES,
-                     domain_search_options, normalize_discover_filters, normalize_domain, normalize_email,
-                     overpass_area, search_query, us_state_code, validate_evidence_url)
+from .policy import (APOLLO_SENIORITIES, HUNTER_DEPARTMENTS, HUNTER_SENIORITIES, OSM_DEFAULT_TAGS, OSM_TAG_ALLOWLIST,
+                     US_STATES, apollo_criteria, domain_search_options, enrich_identity, linkedin_profile_url,
+                     normalize_discover_filters, normalize_domain, normalize_email, overpass_area, prospeo_criteria,
+                     search_query, strict_payload, us_state_code, validate_evidence_url)
 from .transport import MAX_RESPONSE_CEILING, validate_url
 
 
@@ -581,7 +582,7 @@ def _safe_tree(value, depth=0):
     return None
 
 
-def _company_domain(value):
+def _company_domain(value, blocked=()):
     """Normalize a website-ish value to a registrable company host, or None for socials/invalid."""
     if not isinstance(value, str) or not value.strip() or len(value) > 500:
         return None
@@ -594,7 +595,7 @@ def _company_domain(value):
         return None
     if host.startswith('www.'):
         host = host[4:]
-    if any(host == s or host.endswith('.' + s) for s in _SOCIAL_HOSTS):
+    if any(host == s or host.endswith('.' + s) for s in _SOCIAL_HOSTS + tuple(blocked)):
         return None
     return host
 
@@ -875,8 +876,762 @@ class Overpass(Provider):
         return Outcome('results' if companies else 'not_found', fields=fields)
 
 
+# ---------------------------------------------------------------------------
+# v3 adapters: Apollo, Prospeo, Google Places, Exa, Tomba, Icypeas, Reoon,
+# MillionVerifier. All are disabled by default with zero budgets (configuration.py).
+# ---------------------------------------------------------------------------
+
+class _NoBalance(Provider):
+    """v3 adapters expose no balance sync; an error body still maps to a safe error code."""
+
+    def parse_balance(self, response):
+        _balance_base(response)
+        raise ProviderError('balance_unsupported')
+
+
+_PROVIDER_ID = re.compile(r'[A-Za-z0-9]{8,64}')
+_SEARCH_ID = re.compile(r'[A-Za-z0-9_-]{1,128}')
+_PLACE_ID = re.compile(r'[A-Za-z0-9_-]{10,300}')
+_CURSOR_TEXT = re.compile(r'[A-Za-z0-9_-]{1,2048}')
+_PHONE = re.compile(r'[+0-9 ().-]{7,32}')
+# Site-builder / franchise-hosting hosts are not a company's own domain.
+_BUILDER_HOSTS = ('wixsite.com', 'godaddysites.com', 'squarespace.com', 'weebly.com', 'wordpress.com', 'blogspot.com',
+                  'webflow.io', 'carrd.co', 'square.site', 'myshopify.com', 'jimdosite.com', 'strikingly.com',
+                  'site123.me', 'mystrikingly.com', 'ueniweb.com', 'placester.net', 'kw.com', 'remax.com',
+                  'coldwellbanker.com', 'century21.com', 'exprealty.com', 'compass.com', 'bhhs.com', 'sothebysrealty.com')
+
+
+def _revealed_email(value):
+    """A real mailbox, never a masked preview such as 'jane.*****@example.org'."""
+    email = _email(value)
+    if not email or '*' in email:
+        return None
+    try:
+        return normalize_email(email)
+    except PolicyError:
+        return None
+
+
+def _bool(data, key):
+    value = data.get(key)
+    return value if type(value) is bool else None
+
+
+def _phone(value):
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value if _PHONE.fullmatch(value) else None
+
+
+def _first_last(payload):
+    """Finder name parts from first_name/last_name, full_name, or the legacy 'name'."""
+    if 'first_name' in payload and 'last_name' in payload:
+        return _text(payload, 'first_name'), _text(payload, 'last_name')
+    parts = _text(payload, 'full_name' if 'full_name' in payload else 'name').split(maxsplit=1)
+    if len(parts) != 2:
+        raise PolicyError('invalid_payload')
+    return parts[0], parts[1]
+
+
+def _finder_domain(payload):
+    domain = normalize_domain(_text(payload, 'domain'))
+    return domain[4:] if domain.startswith('www.') else domain
+
+
+def _paging_free(payload):
+    if any(k in payload for k in ('num', 'page', 'count', 'offset')):
+        raise PolicyError('invalid_payload')
+
+
+def _verification_status(value):
+    return value if value in ('valid', 'accept_all', 'unknown', 'invalid') else None
+
+
+# Apollo documents these contact email statuses (contact_email_status[]).
+_APOLLO_EMAIL_STATUSES = ('verified', 'unverified', 'likely to engage', 'unavailable')
+
+
+def _apollo_person(item):
+    if not isinstance(item, dict):
+        return None
+    apollo_id = item.get('id') if isinstance(item.get('id'), str) and _PROVIDER_ID.fullmatch(item['id']) else None
+    first = clean_text(item.get('first_name'), 60)
+    last = clean_text(item.get('last_name'), 60)
+    hidden = clean_text(item.get('last_name_obfuscated'), 60)
+    if last and '*' in last:
+        hidden, last = last, None
+    complete = bool(first and last)
+    if not apollo_id and not complete:
+        return None
+    org = item.get('organization') if isinstance(item.get('organization'), dict) else {}
+    website = _company_domain(org.get('primary_domain')) or _company_domain(org.get('website_url'))
+    seniority = item.get('seniority')
+    location = ', '.join(p for p in (clean_text(item.get('city'), 80), clean_text(item.get('state'), 80)) if p) or None
+    return {'apollo_id': apollo_id, 'first_name': first, 'last_name': last,
+            'last_name_obfuscated': None if complete else hidden,
+            'full_name': (first + ' ' + last) if complete else None,
+            'display_name': ' '.join(p for p in (first, last or hidden) if p) or None,
+            'name_complete': complete, 'title': clean_text(item.get('title'), 150),
+            'linkedin_url': canonical_linkedin(item.get('linkedin_url')) if isinstance(item.get('linkedin_url'), str) else None,
+            'company': clean_text(org.get('name'), 200), 'company_website': website, 'location': location,
+            'has_email': _bool(item, 'has_email'),
+            'seniority': seniority if seniority in APOLLO_SENIORITIES else None,
+            'source': 'apollo', 'source_url': None}
+
+
+class Apollo(_NoBalance):
+    """Apollo.io People API Search (0 credits) and single-person People Enrichment.
+
+    Docs (verified 2026-10): https://docs.apollo.io/reference/people-api-search -
+    POST https://api.apollo.io/api/v1/mixed_people/api_search with filters as query
+    parameters (person_titles[], include_similar_titles, person_seniorities[],
+    person_locations[], organization_locations[], q_organization_domains_list[],
+    organization_num_employees_ranges[], q_keywords, page, per_page); 100 per page, 500 pages.
+    The response is {total_entries, people[{id, first_name, last_name_obfuscated, title,
+    has_email, organization{name, has_* flags}}]}: no emails, phones, LinkedIn or domains.
+    https://docs.apollo.io/reference/people-enrichment - POST /api/v1/people/match (id,
+    linkedin_url, or name + domain) -> {person{first_name, last_name, linkedin_url, title,
+    email, email_status, match_confidence, organization{name, website_url, primary_domain}}}.
+    reveal_personal_emails/reveal_phone_number stay false (no webhook, no 8-credit mobiles).
+    Auth: x-api-key header. Search is free of credits, so 'search_requests' is a local counter.
+    Spacing 1.5s fits the free plan's documented per-minute limits.
+    """
+    id = 'apollo'
+    independence_group = 'apollo'
+    operations = ('people_search', 'people_enrich')
+    auth_env = ('APOLLO_API_KEY',)
+    min_spacing = {'people_search': 1.5, 'people_enrich': 1.5}
+    origin = 'https://api.apollo.io'
+
+    def _headers(self, env):
+        return {'x-api-key': _secret(env, 'APOLLO_API_KEY'), 'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache', 'Accept': 'application/json'}
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        if operation == 'people_search':
+            criteria = apollo_criteria(strict_payload(operation, payload).get('criteria'))
+            query = []
+            for key, param in (('titles', 'person_titles[]'), ('seniorities', 'person_seniorities[]'),
+                               ('person_locations', 'person_locations[]'),
+                               ('organization_locations', 'organization_locations[]'),
+                               ('domains', 'q_organization_domains_list[]'),
+                               ('employee_ranges', 'organization_num_employees_ranges[]')):
+                query.extend((param, value) for value in criteria.get(key, ()))
+            if 'keywords' in criteria:
+                query.append(('q_keywords', criteria['keywords']))
+            if 'include_similar_titles' in criteria:
+                query.append(('include_similar_titles', 'true' if criteria['include_similar_titles'] else 'false'))
+            query += [('page', criteria['page']), ('per_page', criteria['per_page'])]
+            return self._request('POST', '/api/v1/mixed_people/api_search?' + urlencode(query), self._headers(env))
+        identity = enrich_identity(operation, payload)
+        if identity.get('apollo_id'):
+            query = [('id', identity['apollo_id'])]
+        elif identity.get('linkedin_url'):
+            query = [('linkedin_url', identity['linkedin_url'])]
+        else:
+            query = [('name', identity['name']), ('domain', identity['domain'])]
+        query += [('reveal_personal_emails', 'false'), ('reveal_phone_number', 'false')]
+        return self._request('POST', '/api/v1/people/match?' + urlencode(query), self._headers(env))
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        if 'error_code' in j or 'error_details' in j:
+            return _error('provider_application_error')
+        if operation == 'people_search':
+            people = j.get('people')
+            if not isinstance(people, list):
+                return _error('invalid_response')
+            prospects = [row for row in (_apollo_person(item) for item in people[:100]) if row]
+            if people and not prospects:
+                return _error('invalid_response')
+            return Outcome('results' if prospects else 'not_found',
+                           fields={'prospects': prospects, 'total_results': _int(j.get('total_entries'))})
+        if 'person' not in j:
+            return _error('invalid_response')
+        person = j['person']
+        if person is None:
+            return Outcome('not_found', fields={'match_confidence': None})
+        row = _apollo_person(person)
+        if not row:
+            return _error('invalid_response')
+        confidence = person.get('match_confidence')
+        confidence = confidence if confidence in ('high', 'medium', 'low', 'none') else None
+        status = person.get('email_status') if person.get('email_status') in _APOLLO_EMAIL_STATUSES else None
+        email = _revealed_email(person.get('email'))
+        row.update(email=email, email_status=status,
+                   email_verification='valid' if email and status == 'verified' else None)
+        fields = {'match_confidence': confidence, 'verification_is_fresh': False, 'prospect': row}
+        if status:
+            fields['finder_verification_status'] = status
+        if confidence == 'none':
+            return Outcome('not_found', fields={'match_confidence': confidence})
+        if email:
+            return Outcome('candidate', email, fields=fields)
+        return Outcome('not_found', fields=fields)
+
+
+# Prospeo returns business outcomes (no results/no match) as HTTP 400 + error_code.
+_PROSPEO_NOT_FOUND = ('NO_RESULTS', 'NO_MATCH')
+_PROSPEO_ERRORS = {'INVALID_API_KEY': 'auth', 'INSUFFICIENT_CREDITS': 'quota'}
+
+
+def _prospeo_person(person, company):
+    if not isinstance(person, dict):
+        return None
+    company = company if isinstance(company, dict) else {}
+    person_id = person.get('person_id') if isinstance(person.get('person_id'), str) and _PROVIDER_ID.fullmatch(person['person_id']) else None
+    first, last = clean_text(person.get('first_name'), 60), clean_text(person.get('last_name'), 60)
+    full = clean_text(person.get('full_name'), 120) or (' '.join(p for p in (first, last) if p) or None)
+    if not person_id and not full:
+        return None
+    location = person.get('location') if isinstance(person.get('location'), dict) else {}
+    place = ', '.join(p for p in (clean_text(location.get('city'), 80), clean_text(location.get('state'), 80)) if p) or None
+    country = location.get('country_code') if isinstance(location.get('country_code'), str) and re.fullmatch(r'[A-Z]{2}', location['country_code']) else None
+    return {'prospeo_id': person_id, 'full_name': full, 'first_name': first, 'last_name': last,
+            'name_complete': bool(first and last) or bool(full and len(full.split()) >= 2),
+            'title': clean_text(person.get('current_job_title'), 150),
+            'linkedin_url': canonical_linkedin(person.get('linkedin_url')) if isinstance(person.get('linkedin_url'), str) else None,
+            'location': place, 'snippet_country': country, 'company': clean_text(company.get('name'), 200),
+            'company_website': _company_domain(company.get('domain')) or _company_domain(company.get('website')),
+            'source': 'prospeo', 'source_url': None}
+
+
+class Prospeo(_NoBalance):
+    """Prospeo Search Person (no emails) and Enrich Person (one person per job).
+
+    Docs (verified 2026-10): https://prospeo.io/api-docs/search-person - POST
+    https://api.prospeo.io/search-person {page, filters}; 25 results/page, 1 credit per page
+    that returns people (repeat pages within 30 days are free, "free": true). Filters used:
+    company.websites.include (<= 500 root domains), person_job_title {include, match_mode},
+    person_seniority.include, person_location_search.include, company_location_search.include,
+    max_person_per_company (https://prospeo.io/api-docs/filters-documentation). Response
+    {error, free, results[{person, company}], pagination{current_page, per_page, total_page,
+    total_count}}. https://prospeo.io/api-docs/enrich-person - POST /enrich-person
+    {only_verified_email, enrich_mobile, data{person_id | linkedin_url | full_name +
+    company_website}} -> {error, free_enrichment, person{..., email{status, revealed, email}},
+    company}; 1 credit per email found. Errors are HTTP 400 with error_code (NO_RESULTS,
+    NO_MATCH, INVALID_API_KEY, INSUFFICIENT_CREDITS, ...). Auth: X-KEY header.
+    Spacing: search endpoints are rate-limited below enrich (5/s on Starter), so 2s / 0.5s.
+    """
+    id = 'prospeo'
+    independence_group = 'prospeo'
+    operations = ('people_search', 'enrich')
+    auth_env = ('PROSPEO_API_KEY',)
+    min_spacing = {'people_search': 2.0, 'enrich': 0.5}
+    origin = 'https://api.prospeo.io'
+    parses_client_errors = True
+
+    def _headers(self, env):
+        return {'X-KEY': _secret(env, 'PROSPEO_API_KEY'), 'Content-Type': 'application/json'}
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        if operation == 'people_search':
+            criteria = prospeo_criteria(strict_payload(operation, payload).get('criteria'))
+            filters = {}
+            if 'websites' in criteria:
+                filters['company'] = {'websites': {'include': criteria['websites']}}
+            if 'titles' in criteria:
+                filters['person_job_title'] = {'include': criteria['titles'], 'match_mode': criteria['title_match_mode']}
+            if 'seniorities' in criteria:
+                filters['person_seniority'] = {'include': criteria['seniorities']}
+            if 'person_locations' in criteria:
+                filters['person_location_search'] = {'include': criteria['person_locations']}
+            if 'company_locations' in criteria:
+                filters['company_location_search'] = {'include': criteria['company_locations']}
+            if 'max_person_per_company' in criteria:
+                filters['max_person_per_company'] = criteria['max_person_per_company']
+            return self._request('POST', '/search-person', self._headers(env), {'page': criteria['page'], 'filters': filters})
+        identity = enrich_identity(operation, payload)
+        if identity.get('person_id'):
+            data = {'person_id': identity['person_id']}
+        elif identity.get('linkedin_url'):
+            data = {'linkedin_url': identity['linkedin_url']}
+        else:
+            data = {'full_name': identity['name'], 'company_website': identity['domain']}
+        body = {'only_verified_email': False, 'enrich_mobile': False, 'data': data}
+        return self._request('POST', '/enrich-person', self._headers(env), body)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        j = response.data if response.json_valid and isinstance(response.data, dict) else None
+        if j is not None and response.status in (200, 400) and j.get('error') is True:
+            code = j.get('error_code')
+            if code in _PROSPEO_NOT_FOUND:
+                return Outcome('not_found', fields={'error_code': code})
+            return _error(_PROSPEO_ERRORS.get(code, 'provider_application_error'))
+        failure = http_failure(response)
+        if failure:
+            return failure
+        if j.get('error') is not False:
+            return _error('invalid_response')
+        if operation == 'people_search':
+            results = j.get('results')
+            if not isinstance(results, list):
+                return _error('invalid_response')
+            prospects = [row for row in (_prospeo_person(r.get('person'), r.get('company'))
+                                         for r in results[:25] if isinstance(r, dict)) if row]
+            if results and not prospects:
+                return _error('invalid_response')
+            page = j.get('pagination') if isinstance(j.get('pagination'), dict) else {}
+            return Outcome('results' if prospects else 'not_found', fields={
+                'prospects': prospects, 'total_results': _int(page.get('total_count')),
+                'total_pages': _int(page.get('total_page')), 'free': _bool(j, 'free')})
+        row = _prospeo_person(j.get('person'), j.get('company'))
+        if not row:
+            return _error('invalid_response')
+        mail = j['person'].get('email') if isinstance(j['person'].get('email'), dict) else {}
+        status = mail.get('status') if mail.get('status') in ('VERIFIED', 'UNAVAILABLE') else None
+        email = _revealed_email(mail.get('email')) if mail.get('revealed') is True else None
+        row.update(email=email, email_status=status,
+                   email_verification='valid' if email and status == 'VERIFIED' else None)
+        fields = {'verification_is_fresh': False, 'prospect': row, 'free_enrichment': _bool(j, 'free_enrichment')}
+        if status:
+            fields['finder_verification_status'] = status.lower()
+        return Outcome('candidate' if email else 'not_found', email, fields=fields)
+
+
+class GooglePlaces(_NoBalance):
+    """Google Places API (New) Text Search with a fixed Enterprise field mask.
+
+    Docs (verified 2026-10): https://developers.google.com/maps/documentation/places/web-service/text-search
+    POST https://places.googleapis.com/v1/places:searchText {textQuery, pageSize 1-20,
+    pageToken, regionCode, includedType}; headers X-Goog-Api-Key and X-Goog-FieldMask.
+    websiteUri / nationalPhoneNumber put the request in the Text Search Enterprise SKU.
+    Response {places[{id, displayName{text}, websiteUri, nationalPhoneNumber,
+    formattedAddress, addressComponents[{longText, shortText, types}], types}], nextPageToken};
+    an empty match returns {}. A pageToken request must repeat the other parameters.
+    """
+    id = 'google_places'
+    independence_group = 'google_places'
+    operations = ('text_search',)
+    auth_env = ('GOOGLE_MAPS_API_KEY',)
+    min_spacing = {'text_search': 0.2}
+    origin = 'https://places.googleapis.com'
+    FIELD_MASK = ('places.id,places.displayName,places.websiteUri,places.nationalPhoneNumber,places.formattedAddress,'
+                  'places.addressComponents,places.types,nextPageToken')
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        clean = strict_payload(operation, payload)
+        if 'text_query' not in clean:
+            raise PolicyError('invalid_payload')
+        body = {'textQuery': clean['text_query'], 'pageSize': clean.get('page_size', 20), 'regionCode': 'US'}
+        if clean.get('included_type'):
+            body['includedType'] = clean['included_type']
+        if clean.get('page_cursor'):
+            body['pageToken'] = clean['page_cursor']
+        headers = {'X-Goog-Api-Key': _secret(env, 'GOOGLE_MAPS_API_KEY'), 'X-Goog-FieldMask': self.FIELD_MASK,
+                   'Content-Type': 'application/json'}
+        return self._request('POST', '/v1/places:searchText', headers, body)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        places = j.get('places', [])
+        if not isinstance(places, list):
+            return _error('invalid_response')
+        companies = []
+        for item in places[:20]:
+            if not isinstance(item, dict):
+                continue
+            place_id = item.get('id') if isinstance(item.get('id'), str) and _PLACE_ID.fullmatch(item['id']) else None
+            display = item.get('displayName') if isinstance(item.get('displayName'), dict) else {}
+            name = clean_text(display.get('text'), 200)
+            if not place_id or not name:
+                continue
+            parts = {}
+            for comp in item.get('addressComponents') or []:
+                if isinstance(comp, dict) and isinstance(comp.get('types'), list):
+                    for kind in ('locality', 'administrative_area_level_1', 'postal_code', 'country'):
+                        if kind in comp['types'] and kind not in parts:
+                            parts[kind] = comp.get('shortText') if kind != 'locality' else comp.get('longText')
+            state = parts.get('administrative_area_level_1')
+            types = [v for v in item.get('types') or [] if isinstance(v, str) and re.fullmatch(r'[a-z_]{2,60}', v)][:20]
+            companies.append({'organization': name, 'domain': _company_domain(item.get('websiteUri'), _BUILDER_HOSTS) or '',
+                              'phone': _phone(item.get('nationalPhoneNumber')),
+                              'address': clean_text(item.get('formattedAddress'), 300),
+                              'city': clean_text(parts.get('locality'), 80),
+                              'state': state if isinstance(state, str) and state in US_STATES else None,
+                              'postal_code': parts['postal_code'] if isinstance(parts.get('postal_code'), str) and re.fullmatch(r'[0-9]{5}(?:-[0-9]{4})?', parts['postal_code']) else None,
+                              'country': parts['country'] if isinstance(parts.get('country'), str) and re.fullmatch(r'[A-Z]{2}', parts['country']) else None,
+                              'types': types, 'place_id': place_id, 'source': 'google_places'})
+        if places and not companies:
+            return _error('invalid_response')
+        cursor = j.get('nextPageToken')
+        fields = {'companies': companies,
+                  'next_page_cursor': cursor if isinstance(cursor, str) and _CURSOR_TEXT.fullmatch(cursor) else None}
+        return Outcome('results' if companies else 'not_found', fields=fields)
+
+
+class Exa(_NoBalance):
+    """Exa neural search restricted to the 'people' category (LinkedIn-style profiles).
+
+    Docs (verified 2026-10): https://docs.exa.ai/reference/search - POST https://api.exa.ai/search
+    {query, type 'auto', category 'people', numResults, userLocation}; auth x-api-key header;
+    response {results[{title, url, id, author, text?, highlights?}], requestId}. The legacy
+    'linkedin profile' category is no longer listed; 'people' replaces it. numResults is fixed
+    at 10 so a ledger query is one search request; paging keys are rejected.
+    """
+    id = 'exa'
+    independence_group = 'exa'
+    operations = ('search',)
+    auth_env = ('EXA_API_KEY',)
+    min_spacing = {'search': 0.25}
+    origin = 'https://api.exa.ai'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        _paging_free(payload)
+        body = {'query': search_query(payload.get('query')), 'type': 'auto', 'category': 'people',
+                'numResults': 10, 'userLocation': 'US'}
+        headers = {'x-api-key': _secret(env, 'EXA_API_KEY'), 'Content-Type': 'application/json'}
+        return self._request('POST', '/search', headers, body)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        items = response.data.get('results')
+        if not isinstance(items, list):
+            return _error('invalid_response')
+        rows = []
+        for item in items[:100]:
+            if not isinstance(item, dict):
+                continue
+            highlights = item.get('highlights')
+            snippet = item.get('text') if isinstance(item.get('text'), str) else (
+                ' · '.join(h for h in highlights if isinstance(h, str)) if isinstance(highlights, list) else None)
+            rows.append({'title': item.get('title'), 'url': item.get('url'), 'snippet': snippet})
+        results, prospects = _serp_rows(rows, 'title', 'url', 'snippet')
+        prospects = [{**row, 'source': 'exa'} for row in prospects]
+        return Outcome('results' if results else 'not_found', fields={'prospects': prospects, 'results': results})
+
+
+_TOMBA_NOT_FOUND = ('unknown_record', 'not_found', 'claimed_email', 'claimed_linkedin')
+_TOMBA_ERRORS = {'authentication_failed': 'auth', 'api_key_expired': 'auth', 'invalid_token': 'auth',
+                 'insufficient_scope': 'auth', 'forbidden': 'auth', 'quota_exceeded': 'quota', 'rate_limit': 'rate_limit'}
+
+
+class Tomba(_NoBalance):
+    """Tomba Email Finder and LinkedIn Finder.
+
+    Docs (verified 2026-10): https://docs.tomba.io/api/finder and https://docs.tomba.io/openapi.md -
+    GET https://api.tomba.io/v1/email-finder?domain&first_name&last_name and
+    GET /v1/linkedin?url= (param name per the official SDK, github.com/tomba-io/python).
+    Headers X-Tomba-Key / X-Tomba-Secret. 200 {data{email|null, first_name, last_name,
+    full_name, website_url, company, position, linkedin, score, accept_all, type,
+    verification{status}}}; errors {errors{type, message, code}} with 400 unknown_record for
+    webmail/disposable domains and 451 claimed_* for withheld people.
+    Spacing: https://docs.tomba.io/rate-limits lists 1/s, 2/min, 5/day for finders on the
+    Free plan, so 30s (Basic+ plans allow ~1/s; spacing only ever slows requests down).
+    """
+    id = 'tomba'
+    independence_group = 'tomba'
+    operations = ('find', 'linkedin_email')
+    auth_env = ('TOMBA_API_KEY', 'TOMBA_SECRET')
+    min_spacing = {'find': 30.0, 'linkedin_email': 30.0}
+    origin = 'https://api.tomba.io'
+    parses_client_errors = True
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        headers = {'X-Tomba-Key': _secret(env, 'TOMBA_API_KEY'), 'X-Tomba-Secret': _secret(env, 'TOMBA_SECRET'),
+                   'Accept': 'application/json'}
+        if operation == 'linkedin_email':
+            url = linkedin_profile_url(strict_payload(operation, payload).get('linkedin_url'))
+            return self._request('GET', '/v1/linkedin?' + urlencode({'url': url}), headers, timeout=120)
+        first, last = _first_last(payload)
+        query = {'domain': _finder_domain(payload), 'first_name': first, 'last_name': last}
+        return self._request('GET', '/v1/email-finder?' + urlencode(query), headers, timeout=120)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        j = response.data if response.json_valid and isinstance(response.data, dict) else None
+        errors = j.get('errors') if j is not None else None
+        if isinstance(errors, dict) and isinstance(errors.get('type'), str):
+            if errors['type'] in _TOMBA_NOT_FOUND:
+                return Outcome('not_found', fields={'reason': errors['type']})
+            return _error(_TOMBA_ERRORS.get(errors['type'], 'provider_application_error'))
+        failure = http_failure(response)
+        if failure:
+            return failure
+        data = j.get('data')
+        if not isinstance(data, dict) or 'email' not in data:
+            return _error('invalid_response')
+        verification = data.get('verification') if isinstance(data.get('verification'), dict) else {}
+        status = _verification_status(verification.get('status'))
+        score = data.get('score') if type(data.get('score')) is int and 0 <= data['score'] <= 100 else None
+        first, last = clean_text(data.get('first_name'), 60), clean_text(data.get('last_name'), 60)
+        flags = _risks(data)
+        if data.get('accept_all') is True:
+            flags.append('catch_all')
+        if data.get('type') == 'generic':
+            flags.append('role')
+        email = _revealed_email(data.get('email'))
+        prospect = {'full_name': clean_text(data.get('full_name'), 120) or (' '.join(p for p in (first, last) if p) or None),
+                    'first_name': first, 'last_name': last, 'name_complete': bool(first and last),
+                    'title': clean_text(data.get('position'), 150), 'company': clean_text(data.get('company'), 200),
+                    'company_website': _company_domain(data.get('website_url')),
+                    'linkedin_url': linkedin_from_handle(data.get('linkedin')), 'email': email,
+                    'email_confidence': score, 'email_verification': status, 'source': 'tomba', 'source_url': None}
+        fields = {'score': score, 'verification_is_fresh': False, 'prospect': prospect, **_informational_fields(data)}
+        if status:
+            fields['finder_verification_status'] = status
+        if email:
+            return Outcome('candidate', email, tuple(dict.fromkeys(flags)), fields)
+        if data['email'] is None:
+            return Outcome('not_found', fields=fields)
+        return _error('invalid_response')
+
+
+_ICYPEAS_QUEUED = ('NONE', 'SCHEDULED', 'IN_PROGRESS')
+_ICYPEAS_CERTAINTY = ('ultra_sure', 'very_sure', 'probable')
+
+
+class Icypeas(_NoBalance):
+    """Icypeas single email discovery: asynchronous submit, then a read-only result POST.
+
+    Docs (verified 2026-10): https://api-doc.icypeas.com/find-emails/email-discovery -
+    POST https://app.icypeas.com/api/email-search {firstname, lastname, domainOrCompany}
+    -> {success, item{_id, status 'NONE'}}; https://api-doc.icypeas.com/fetch-results/search-item -
+    POST /api/bulk-single-searchs/read {id} -> {success, items[{status, results{firstname,
+    lastname, fullname, emails[{email, certainty}]}}]}. Statuses NONE/SCHEDULED/IN_PROGRESS
+    are still queued; DEBITED/FOUND, NOT_FOUND/DEBITED_NOT_FOUND, BAD_INPUT,
+    INSUFFICIENT_FUNDS, ABORTED are terminal (/how-works/search_statuses). Certainties
+    ultra_sure/very_sure/probable (/how-works/certainties). Auth: Authorization header holding
+    only the API key (getting-started; changelog 1.4.0). Credits: 1 per found email
+    (/how-works/credit-cost); the read route is free and limited to 30 calls/min.
+
+    The submit returns 'pending' with a same-origin job pointer; finish it with the existing
+    Runner.resume (supports_pending=True, poll_methods=('POST',) because the documented read
+    route is a non-mutating POST). As for Verifalia, a pending attempt blocks new reservations
+    until it is resumed to completion. A '/api/sync/email-search' route appears only in
+    marketing copy, not in the API reference, so it is not used.
+    """
+    id = 'icypeas'
+    independence_group = 'icypeas'
+    operations = ('find',)
+    auth_env = ('ICYPEAS_API_KEY',)
+    min_spacing = {'find': 0.2, 'poll': 2.5}
+    origin = 'https://app.icypeas.com'
+    supports_pending = True
+    poll_methods = ('POST',)
+    READ_PATH = '/api/bulk-single-searchs/read'
+
+    def _headers(self, env):
+        return {'Authorization': _secret(env, 'ICYPEAS_API_KEY'), 'Content-Type': 'application/json'}
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        first, last = _first_last(payload)
+        body = {'firstname': first, 'lastname': last, 'domainOrCompany': _finder_domain(payload)}
+        return self._request('POST', '/api/email-search', self._headers(env), body)
+
+    def _job_id(self, url):
+        match = re.fullmatch(re.escape(self.origin + self.READ_PATH) + r'\?id=([A-Za-z0-9_-]{1,128})', url) if isinstance(url, str) else None
+        if not match:
+            raise PolicyError('unsafe_job_url')
+        return match.group(1)
+
+    def poll_request(self, job_url, env):
+        """Read the stored result for the submitted search; never resubmits the search."""
+        return self._request('POST', self.READ_PATH, self._headers(env), {'id': self._job_id(job_url)})
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        if j.get('success') is not True or 'validationErrors' in j:
+            return _error('provider_application_error')
+        if 'item' in j:
+            item = j['item'] if isinstance(j['item'], dict) else {}
+            ident = item.get('_id')
+            if not isinstance(ident, str) or not _SEARCH_ID.fullmatch(ident) or item.get('status') not in _ICYPEAS_QUEUED:
+                return _error('invalid_response')
+            return Outcome('pending', job_url=self.origin + self.READ_PATH + '?id=' + ident)
+        items = j.get('items')
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):
+            return _error('invalid_response')
+        item = items[0]
+        status = item.get('status')
+        if status in _ICYPEAS_QUEUED:
+            return Outcome('pending')
+        if status == 'INSUFFICIENT_FUNDS':
+            return _error('quota')
+        if status in ('NOT_FOUND', 'DEBITED_NOT_FOUND', 'BAD_INPUT'):
+            return Outcome('not_found', fields={'status': status})
+        if status not in ('FOUND', 'DEBITED'):
+            return _error('provider_application_error' if status == 'ABORTED' else 'invalid_response')
+        results = item.get('results') if isinstance(item.get('results'), dict) else {}
+        best = None
+        for entry in results.get('emails') or []:
+            if not isinstance(entry, dict) or not isinstance(entry.get('certainty'), str):
+                continue
+            certainty = entry['certainty'].lower()
+            email = _revealed_email(entry.get('email'))
+            if email and certainty in _ICYPEAS_CERTAINTY and (
+                    best is None or _ICYPEAS_CERTAINTY.index(certainty) < _ICYPEAS_CERTAINTY.index(best[1])):
+                best = (email, certainty)
+        first, last = clean_text(results.get('firstname'), 60), clean_text(results.get('lastname'), 60)
+        prospect = {'full_name': clean_text(results.get('fullname'), 120) or (' '.join(p for p in (first, last) if p) or None),
+                    'first_name': first, 'last_name': last, 'name_complete': bool(first and last),
+                    'email': best[0] if best else None, 'email_certainty': best[1] if best else None,
+                    'source': 'icypeas', 'source_url': None}
+        fields = {'status': status, 'verification_is_fresh': False, 'prospect': prospect}
+        if not best:
+            return Outcome('not_found', fields=fields)
+        return Outcome('candidate', best[0], fields={**fields, 'certainty': best[1]})
+
+
+class Reoon(_NoBalance):
+    """Reoon Email Verifier single verification in POWER mode.
+
+    Docs (verified 2026-10): https://www.reoon.com/articles/api-documentation-of-reoon-email-verifier/ -
+    GET https://emailverifier.reoon.com/api/v1/verify?email=&key=&mode=power -> {email, status
+    (safe|invalid|disabled|disposable|inbox_full|catch_all|role_account|spamtrap|unknown),
+    overall_score, is_safe_to_send, is_deliverable, is_catch_all, is_disposable,
+    is_role_account, is_spamtrap, has_inbox_full, is_disabled, is_free_email, mx_accepts_mail,
+    can_connect_smtp, verification_mode}. QUICK mode never checks inboxes, so only a power-mode
+    'safe' counts as provider_valid. Power mode can take over a minute (timeout 90s); the
+    docs ask for <= 5 parallel threads, and this runner is serial (1s spacing).
+    """
+    id = 'reoon'
+    independence_group = 'reoon'
+    operations = ('verify',)
+    auth_env = ('REOON_API_KEY',)
+    min_spacing = {'verify': 1.0}
+    origin = 'https://emailverifier.reoon.com'
+    MAPPING = {'safe': 'provider_valid', 'invalid': 'provider_invalid', 'disabled': 'provider_invalid',
+               'catch_all': 'catch_all', 'unknown': 'unknown', 'inbox_full': 'unknown', 'spamtrap': 'unknown',
+               'disposable': 'unknown', 'role_account': 'unknown', 'valid': 'unknown'}
+    FLAGS = {'is_disposable': 'disposable', 'is_role_account': 'role_account', 'is_spamtrap': 'spamtrap',
+             'is_catch_all': 'catch_all', 'has_inbox_full': 'inbox_full', 'is_disabled': 'disabled'}
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        query = {'email': _text(payload, 'email'), 'key': _secret(env, 'REOON_API_KEY'), 'mode': 'power'}
+        return self._request('GET', '/api/v1/verify?' + urlencode(query), timeout=90)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        status = j.get('status')
+        if status == 'error' or 'reason' in j:
+            return _error('provider_application_error')
+        if not isinstance(status, str) or status not in self.MAPPING:
+            return _error('invalid_response')
+        email = _email(j.get('email'))
+        if not email:
+            return _error('invalid_response')
+        assessment = self.MAPPING[status]
+        flags = [flag for key, flag in self.FLAGS.items() if j.get(key) is True]
+        if status in ('inbox_full', 'spamtrap', 'disposable', 'role_account', 'catch_all', 'disabled'):
+            flags.append(status)
+        power = j.get('verification_mode') == 'power'
+        if not power:
+            flags.append('quick_mode_only')
+        if assessment == 'provider_valid' and (not power or j.get('is_safe_to_send') is False):
+            assessment = 'unknown'
+        fields = {'status': status, 'verification_mode': j.get('verification_mode') if j.get('verification_mode') in ('power', 'quick') else None}
+        score = j.get('overall_score')
+        if type(score) is int and 0 <= score <= 100:
+            fields['overall_score'] = score
+        for key in ('is_safe_to_send', 'is_deliverable', 'can_connect_smtp', 'mx_accepts_mail', 'is_valid_syntax'):
+            if type(j.get(key)) is bool:
+                fields[key] = j[key]
+        if type(j.get('is_free_email')) is bool:
+            fields['free'] = j['is_free_email']
+        return Outcome(assessment, email, tuple(dict.fromkeys(flags)), fields)
+
+
+_MV_RESULTS = {'ok': ('provider_valid', 1), 'catch_all': ('catch_all', 2), 'unknown': ('unknown', 3),
+               'disposable': ('unknown', 5), 'invalid': ('provider_invalid', 6)}
+_MV_SUBRESULTS = frozenset({'unknown', 'ok', 'internal_error', 'invalid_syntax', 'no_local_ip_available', 'dns_server_failed',
+                            'dns_no_mx', 'dns_no_a', 'could_not_connect', 'no_code_in_banner', 'invalid_banner_code',
+                            'no_code_in_ehlo_response', 'no_code_in_helo_response', 'no_code_in_mail_from_response',
+                            'no_code_in_rcpt_to_response', 'ip_blocked', 'no_mailbox', 'mailbox_disabled', 'mailbox_full',
+                            'greylisted', 'connection_lost', 'connection_timeout', 'connection_refused',
+                            'connection_reset_by_peer', 'connection_no_route_to_host', 'host_not_accept_incoming_mail',
+                            'mail_service_unavailable', 'bad_domain', 'dns_error', 'anti_spam_system', 'dns_no_domain',
+                            'dns_refused', 'timeout_error'})
+
+
+class MillionVerifier(_NoBalance):
+    """MillionVerifier Single API (real-time verification).
+
+    Docs (verified 2026-10): https://developer.millionverifier.com/ (OpenAPI 3.1.0) -
+    GET https://api.millionverifier.com/api/v3/?api=KEY&email=&timeout=2..60 -> {email,
+    quality ('', good, bad, risky), result (ok|catch_all|unknown|error|disposable|invalid),
+    resultcode 1-6, subresult, free, role, didyoumean, credits, executiontime, error,
+    livemode}. Bad keys / missing email come back as 200 with result 'error' and an error
+    message; demo keys report livemode false and return random results, so they are refused.
+    """
+    id = 'millionverifier'
+    independence_group = 'millionverifier'
+    operations = ('verify',)
+    auth_env = ('MILLIONVERIFIER_API_KEY',)
+    min_spacing = {'verify': 1.0}
+    origin = 'https://api.millionverifier.com'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        query = {'api': _secret(env, 'MILLIONVERIFIER_API_KEY'), 'email': _text(payload, 'email'), 'timeout': 10}
+        return self._request('GET', '/api/v3/?' + urlencode(query), timeout=30)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        j = response.data if response.status == 200 and response.json_valid and isinstance(response.data, dict) else None
+        if j is not None and (j.get('result') == 'error' or (isinstance(j.get('error'), str) and j['error'].strip())):
+            text = str(j.get('error') or '').lower()
+            return _error('auth' if 'apikey' in text or 'api key' in text else 'quota' if 'credit' in text
+                          else 'provider_application_error')
+        failure = http_failure(response)
+        if failure:
+            return failure
+        if j.get('livemode') is False:
+            return _error('provider_application_error')
+        result = j.get('result')
+        if not isinstance(result, str) or result not in _MV_RESULTS:
+            return _error('invalid_response')
+        assessment, code = _MV_RESULTS[result]
+        if 'resultcode' in j and j['resultcode'] != code:
+            return _error('invalid_response')
+        email = _email(j.get('email'))
+        if not email:
+            return _error('invalid_response')
+        flags = _risks(j)
+        if result in ('disposable', 'catch_all'):
+            flags.append(result)
+        quality = j.get('quality') if j.get('quality') in ('', 'good', 'bad', 'risky') else None
+        if quality in ('bad', 'risky'):
+            flags.append('quality_' + quality)
+        fields = {'result': result, 'quality': quality, **_informational_fields(j)}
+        if j.get('subresult') in _MV_SUBRESULTS:
+            fields['subresult'] = j['subresult']
+        if type(j.get('role')) is bool:
+            fields['role'] = j['role']
+        return Outcome(assessment, email, tuple(dict.fromkeys(flags)), fields)
+
+
 PROVIDERS = {provider.id: provider for provider in (Hunter(), Verifalia(), Clearout(), ZeroBounce(), HunterInsight(), Disify(),
-                                                    Serper(), Brave(), Overpass())}
+                                                    Serper(), Brave(), Overpass(), Apollo(), Prospeo(), GooglePlaces(),
+                                                    Exa(), Tomba(), Icypeas(), Reoon(), MillionVerifier())}
 
 
 def get_provider(provider_id):

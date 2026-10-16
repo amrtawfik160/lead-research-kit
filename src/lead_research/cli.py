@@ -83,6 +83,25 @@ def parser():
     bu.add_argument('--output',required=True,help='Output directory');bu.add_argument('--import',dest='imports',action='append',default=[],help='Lead rows from any tool (repeatable)')
     bu.add_argument('--prospects',action='append',default=[],help='Output of `collect` (repeatable)');bu.add_argument('--crawl',action='append',default=[],help='Output of `crawl` (repeatable)')
     bu.add_argument('--from-workspace',action='store_true',help='Also use prospects/companies from this workspace and its verification results');_target_args(bu)
+    dy=s.add_parser('daily',help='Produce today\'s fresh lead file: refill domains, crawl, score, skip anything delivered before')
+    dy.add_argument('--target',type=int,default=500);dy.add_argument('--execute',action='store_true',help='Fetch, spend confirmed budgets and record delivery (default: preview only)')
+    dy.add_argument('--output-root',help='Folder for dated outputs (default: <workspace>/daily)');dy.add_argument('--date',help='Override the batch date, YYYY-MM-DD')
+    dy.add_argument('--sources',default='records,resolve,hunter-discover,google-places,osm,crawl,find-emails,verify',help='Comma list from: records, resolve, hunter-discover, google-places, osm, apollo, crawl, hunter-domains, find-emails, verify, xray-linkedin')
+    dy.add_argument('--record-sources',default='tx-trec,ny-dos,co-dora,sec-form-d',help='Public-record feeds to pull (empty to skip)')
+    dy.add_argument('--search-provider',choices=['serper','brave'],default='serper',help='Used to find websites for public-record firms and LinkedIn URLs')
+    dy.add_argument('--records',action='append',default=[],help='JSON with companies/prospects from `records` importers (repeatable)')
+    dy.add_argument('--max-domains',type=int,help='Domains to crawl today (default: target / 0.3 x 1.2)');dy.add_argument('--workers',type=int,default=24)
+    dy.add_argument('--allow-missing-email',action='store_true',help='Also deliver leads without a work email');dy.add_argument('--min-tier',choices=['A','B'],default='B')
+    dy.add_argument('--cap',action='append',default=[],help='Per-source daily cap, e.g. hunter-domains=50 (repeatable)')
+    rc=s.add_parser('records',help='Public license and SEC records: decision makers at real-estate firms (free)')
+    rs=rc.add_subparsers(dest='records_action',required=True)
+    rs.add_parser('list',help='Available sources and their reuse terms')
+    rf=rs.add_parser('fetch',help='Download one source (network; read-only public data)');rf.add_argument('source');rf.add_argument('--since',help='YYYY-MM-DD');rf.add_argument('--max-rows',type=int,default=5000);rf.add_argument('--output',required=True)
+    rl=rs.add_parser('load',help='Parse a file you downloaded yourself (fl-dbpr-file or generic-csv)');rl.add_argument('source');rl.add_argument('path');rl.add_argument('--output',required=True)
+    hi=s.add_parser('history',help='Remember delivered leads so daily files stay fresh')
+    hs=hi.add_subparsers(dest='history_action',required=True)
+    hm=hs.add_parser('import',help='Mark leads in earlier files as already delivered');hm.add_argument('files',nargs='+');hm.add_argument('--batch',default='imported')
+    hs.add_parser('stats')
     d=s.add_parser('demo',help='Run a synthetic offline demonstration in an empty workspace')
     d.add_argument('--output',required=True)
     return p
@@ -202,6 +221,13 @@ def _demo(store,output):
 def main(argv=None):
     args=parser().parse_args(argv)
     work=Path(args.workspace).expanduser().resolve()
+    if args.command=='records':
+        from .records import SOURCES, EXCLUDED_SOURCES, fetch_source, load_local_file
+        if args.records_action=='list':
+            emit({'sources':{k:{'description':v.get('description'),'terms':v.get('terms_note')} for k,v in SOURCES.items()},'excluded':EXCLUDED_SOURCES});return 0
+        data=fetch_source(args.source,since=args.since,max_rows=args.max_rows) if args.records_action=='fetch' else load_local_file(args.source,args.path)
+        out=Path(args.output);out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(data,indent=2,ensure_ascii=False)+'\n',encoding='utf-8');out.chmod(0o600)
+        emit({'source':data['source'],'companies':len(data['companies']),'prospects':len(data['prospects']),'output':str(out),'terms':data.get('terms_note')});return 0
     if args.command in ('clean','jobs'):
         emit(_offline_command(args,work),getattr(args,'output',None) if args.command=='jobs' else None);return 0
     work.mkdir(mode=0o700,parents=True,exist_ok=True);work.chmod(0o700)
@@ -255,6 +281,28 @@ def main(argv=None):
             result={'audit_ok':store.verify_audit()}
             if not result['audit_ok']:emit(result);return 2
         elif args.command=='demo':result=_demo(store,args.output)
+        elif args.command=='daily':
+            from .daily import run_daily, DEFAULT_SOURCES, OPTIONAL_SOURCES
+            sources=tuple(x.strip() for x in args.sources.split(',') if x.strip())
+            if set(sources)-set(DEFAULT_SOURCES)-set(OPTIONAL_SOURCES):raise PolicyError('unknown_daily_source')
+            if not 1<=args.target<=5000:raise PolicyError('target_out_of_range')
+            caps={}
+            for item in args.cap:
+                name,_,value=item.partition('=')
+                if not value.isdigit():raise PolicyError('invalid_cap')
+                caps[name.strip()]=int(value)
+            records=[json.loads(Path(f).read_text(encoding='utf-8')) for f in args.records]
+            names=tuple(x.strip() for x in args.record_sources.split(',') if x.strip())
+            result=run_daily(work,store,config,target=args.target,execute=args.execute,day=args.date,sources=sources+('build',),output_root=args.output_root,
+                             max_domains=args.max_domains,workers=args.workers,require_email=not args.allow_missing_email,min_tier=args.min_tier,caps=caps,record_sources=records,
+                             record_source_names=names,search_provider=args.search_provider)
+        elif args.command=='history':
+            from .daily import History, import_history
+            if args.history_action=='import':result=import_history(work,args.files,args.batch)
+            else:
+                h=History(work/'lead-history.sqlite3')
+                try:result=h.stats()
+                finally:h.close()
         elif args.command=='collect':
             from .discovery import collect
             result=collect(store)
@@ -271,15 +319,16 @@ def main(argv=None):
             written=write_build(build(imports=imports,prospects=prospects,site_results=sites,companies=companies,store=store,target=_target(args)),args.output)
             result={'output':written['paths'],'summary':written['summary']}
         else:result={'contacts':len(store.contacts()),'held':sum(bool(r.get('held')) for r in store.contacts()),'budgets':store.budgets(),'providers':{p:store.provider_state(p) for p in config['providers']},'unresolved_attempts':[{'id':a['id'],'provider':a['provider'],'state':a['state']} for a in store.attempts() if a['state'] in ('reserved','sent','pending','uncertain')],'audit_ok':store.verify_audit()}
-        emit(result,getattr(args,'output',None) if args.command not in ('demo','build') else None)
+        emit(result,getattr(args,'output',None) if args.command not in ('demo','build','daily','history') else None)
         if isinstance(result,dict) and result.get('stopped'):return 2
         return 0
     finally:store.close()
 
 
 def entrypoint():
+    from .records import RecordsError
     try:return main()
-    except (PolicyError,ProviderError,BudgetError,BusyError) as error:
+    except (PolicyError,ProviderError,BudgetError,BusyError,RecordsError) as error:
         # These exceptions carry stable public codes, not raw provider messages
         print(json.dumps({'error':str(error)}),file=sys.stderr);return 2
     except (OSError,ValueError,KeyError,TypeError):

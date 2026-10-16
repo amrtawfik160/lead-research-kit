@@ -18,6 +18,15 @@ DISCOVERY_PAYLOAD_KEYS = {
     'domain_search': frozenset({'domain', 'limit', 'decision_maker', 'required_field', 'seniority', 'department'}),
     'search': frozenset({'query', 'num', 'page', 'count', 'offset'}),
     'places': frozenset({'area', 'state', 'tags'}),
+    # Apollo / Prospeo people search: one provider-validated 'criteria' object.
+    'people_search': frozenset({'criteria'}),
+    # Google Places Text Search (New). 'page_cursor' carries nextPageToken (a key
+    # named *token* would be dropped by redact()).
+    'text_search': frozenset({'text_query', 'page_size', 'page_cursor', 'included_type'}),
+    # Single-person enrichment / LinkedIn finder: exactly one identity form each.
+    'people_enrich': frozenset({'apollo_id', 'linkedin_url', 'name', 'domain'}),
+    'enrich': frozenset({'person_id', 'linkedin_url', 'name', 'domain'}),
+    'linkedin_email': frozenset({'linkedin_url'}),
 }
 DISCOVERY_OPERATIONS = frozenset(DISCOVERY_PAYLOAD_KEYS)
 COMMON_PAYLOAD_KEYS = frozenset({'lead_id', 'provenance'})
@@ -196,7 +205,7 @@ DOMAIN_SEARCH_DEFAULTS = {'limit': 10, 'decision_maker': True, 'required_field':
 OSM_TAG_ALLOWLIST = ('office=estate_agent', 'office=property_management', 'shop=estate_agent')
 OSM_DEFAULT_TAGS = ('office=estate_agent',)
 SEARCH_PAGING_DEFAULTS = {'num': 10, 'page': 1, 'count': 20, 'offset': 0}
-SEARCH_PAGING_BY_PROVIDER = {'serper': frozenset({'num', 'page'}), 'brave': frozenset({'count', 'offset'})}
+SEARCH_PAGING_BY_PROVIDER = {'serper': frozenset({'num', 'page'}), 'brave': frozenset({'count', 'offset'}), 'exa': frozenset()}
 
 
 def _controls(value):
@@ -393,6 +402,7 @@ def _sanitize_discovery_keys(clean):
         clean['state'] = us_state_code(clean['state'])
     if 'tags' in clean:
         clean['tags'] = _enum_list(clean['tags'], OSM_TAG_ALLOWLIST, allow_empty=False)
+    _sanitize_v3_keys(clean)
 
 
 def domain_search_options(payload):
@@ -447,6 +457,8 @@ def _normalize_discovery_job(job, operation):
         if 'area' not in payload:
             raise PolicyError('places_requires_area')
         payload.setdefault('tags', list(OSM_DEFAULT_TAGS))
+    else:
+        payload = _normalize_v3_payload(str(job.get('provider', '')), operation, payload)
     return {'provider': str(job.get('provider', '')), 'operation': operation,
             'payload': payload, 'crosscheck': False}
 
@@ -462,5 +474,259 @@ def discovery_identity(operation, payload):
         return {'domain': domain, 'options': domain_search_options(payload)}
     if operation == 'search':
         return {'query': payload.get('query'), 'paging': search_paging(payload)}
+    if operation in V3_OPERATIONS:
+        return _v3_identity(operation, payload)
     return {'area': (payload.get('area') or '').casefold(), 'state': payload.get('state'),
             'tags': list(payload.get('tags') or OSM_DEFAULT_TAGS)}
+
+
+# ---------------------------------------------------------------------------
+# v3 lead-source operations (Apollo, Prospeo, Google Places, Tomba, enrichment).
+# Generic sanitize checks are provider-agnostic and idempotent (Store.reserve
+# re-sanitizes without knowing the provider); provider-specific rules run in
+# normalize_job, which knows the provider.
+# ---------------------------------------------------------------------------
+
+V3_OPERATIONS = frozenset({'people_search', 'text_search', 'people_enrich', 'enrich', 'linkedin_email'})
+
+# https://docs.apollo.io/reference/people-api-search (person_seniorities[] options)
+APOLLO_SENIORITIES = ('owner', 'founder', 'c_suite', 'partner', 'vp', 'head', 'director', 'manager', 'senior',
+                      'entry', 'intern')
+APOLLO_CRITERIA_KEYS = frozenset({'titles', 'seniorities', 'person_locations', 'organization_locations', 'domains',
+                                  'employee_ranges', 'keywords', 'include_similar_titles', 'page', 'per_page'})
+# https://prospeo.io/api-docs/enum/seniorities and /api-docs/filters-documentation
+PROSPEO_SENIORITIES = ('Founder/Owner', 'C-Suite', 'Partner', 'Vice President', 'Head', 'Director', 'Manager',
+                       'Senior', 'Entry', 'Intern')
+PROSPEO_TITLE_MODES = ('CONTAINS', 'EXACT', 'SIMILAR')
+PROSPEO_CRITERIA_KEYS = frozenset({'websites', 'titles', 'title_match_mode', 'seniorities', 'person_locations',
+                                   'company_locations', 'max_person_per_company', 'page'})
+CRITERIA_KEYS = APOLLO_CRITERIA_KEYS | PROSPEO_CRITERIA_KEYS
+_ID = re.compile(r'[A-Za-z0-9]{8,64}')
+_CURSOR = re.compile(r'[A-Za-z0-9_-]{1,2048}')
+_PLACE_TYPE = re.compile(r'[a-z][a-z_]{1,59}')
+_TERM = re.compile(r"[\w .,&'()/+#-]+")
+
+
+def _term_list(value, *, max_items, max_len, min_len=1):
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= max_items:
+        raise PolicyError('invalid_criteria')
+    out = []
+    for item in value:
+        text = _bounded_text(item, max_len, min_len=min_len, error='invalid_criteria')
+        if not _TERM.fullmatch(text):
+            raise PolicyError('invalid_criteria')
+        if text.casefold() not in {o.casefold() for o in out}:
+            out.append(text)
+    return sorted(out, key=str.casefold)
+
+
+def _root_domains(value, max_items):
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= max_items:
+        raise PolicyError('invalid_criteria')
+    out = set()
+    for item in value:
+        domain = normalize_domain(item)
+        out.add(domain[4:] if domain.startswith('www.') else domain)
+    return sorted(out)
+
+
+def _generic_criteria(value):
+    """Shape-only check used by sanitize_payload: known keys and bounded JSON scalars/lists."""
+    if not isinstance(value, dict) or not value or set(value) - CRITERIA_KEYS:
+        raise PolicyError('invalid_criteria')
+    for key, item in value.items():
+        if isinstance(item, (list, tuple)):
+            if len(item) > 1000 or any(not isinstance(v, str) or len(v) > 200 or _controls(v) for v in item):
+                raise PolicyError('invalid_criteria')
+        elif isinstance(item, str):
+            if len(item) > 300 or _controls(item):
+                raise PolicyError('invalid_criteria')
+        elif not (type(item) in (int, bool)):
+            raise PolicyError('invalid_criteria')
+    return {k: list(v) if isinstance(v, tuple) else v for k, v in value.items()}
+
+
+def apollo_criteria(value):
+    """Canonical Apollo People API Search filters (defaults applied: page 1, per_page 100).
+
+    Source: https://docs.apollo.io/reference/people-api-search (50,000 record display
+    limit: 100 per page, up to 500 pages; q_organization_domains_list[] up to 1,000).
+    """
+    if not isinstance(value, dict) or set(value) - APOLLO_CRITERIA_KEYS:
+        raise PolicyError('invalid_criteria')
+    out = {}
+    if 'titles' in value:
+        out['titles'] = _term_list(value['titles'], max_items=100, max_len=100, min_len=2)
+    if 'seniorities' in value:
+        out['seniorities'] = _enum_list(value['seniorities'], APOLLO_SENIORITIES, error='invalid_criteria', allow_empty=False)
+    for key in ('person_locations', 'organization_locations'):
+        if key in value:
+            out[key] = _term_list(value[key], max_items=50, max_len=100, min_len=2)
+    if 'domains' in value:
+        out['domains'] = _root_domains(value['domains'], 1000)
+    if 'employee_ranges' in value:
+        ranges = value['employee_ranges']
+        if isinstance(ranges, str):
+            ranges = [ranges]
+        if not isinstance(ranges, (list, tuple)) or not 1 <= len(ranges) <= 20:
+            raise PolicyError('invalid_criteria')
+        clean = set()
+        for item in ranges:
+            match = re.fullmatch(r'([0-9]{1,7}),([0-9]{1,7})', item) if isinstance(item, str) else None
+            if not match or int(match.group(1)) > int(match.group(2)) or int(match.group(2)) == 0:
+                raise PolicyError('invalid_criteria')
+            clean.add(str(int(match.group(1))) + ',' + str(int(match.group(2))))
+        out['employee_ranges'] = sorted(clean, key=lambda r: tuple(int(x) for x in r.split(',')))
+    if 'keywords' in value:
+        out['keywords'] = _bounded_text(value['keywords'], 200, min_len=2, error='invalid_criteria')
+    if 'include_similar_titles' in value:
+        if type(value['include_similar_titles']) is not bool:
+            raise PolicyError('invalid_criteria')
+        out['include_similar_titles'] = value['include_similar_titles']
+    if not set(out) & {'titles', 'seniorities', 'person_locations', 'organization_locations', 'domains', 'keywords'}:
+        raise PolicyError('people_search_requires_filter')
+    out['page'] = _strict_int(value.get('page', 1), 1, 500, 'invalid_criteria')
+    out['per_page'] = _strict_int(value.get('per_page', 100), 1, 100, 'invalid_criteria')
+    return out
+
+
+def prospeo_criteria(value):
+    """Canonical Prospeo /search-person filters (defaults: page 1, title_match_mode CONTAINS).
+
+    Source: https://prospeo.io/api-docs/search-person and /api-docs/filters-documentation
+    (company.websites <= 500 root domains, person_job_title <= 100 titles of 2-100 chars,
+    location strings <= 100, max_person_per_company 1-100, page <= 1000, 25 results/page).
+    """
+    if not isinstance(value, dict) or set(value) - PROSPEO_CRITERIA_KEYS:
+        raise PolicyError('invalid_criteria')
+    out = {}
+    if 'websites' in value:
+        out['websites'] = _root_domains(value['websites'], 500)
+    if 'titles' in value:
+        out['titles'] = _term_list(value['titles'], max_items=100, max_len=100, min_len=2)
+        mode = value.get('title_match_mode', 'CONTAINS')
+        if mode not in PROSPEO_TITLE_MODES:
+            raise PolicyError('invalid_criteria')
+        out['title_match_mode'] = mode
+    elif 'title_match_mode' in value:
+        raise PolicyError('invalid_criteria')
+    if 'seniorities' in value:
+        out['seniorities'] = _enum_list(value['seniorities'], PROSPEO_SENIORITIES, error='invalid_criteria', allow_empty=False)
+    for key in ('person_locations', 'company_locations'):
+        if key in value:
+            out[key] = _term_list(value[key], max_items=100, max_len=200)
+    if 'max_person_per_company' in value:
+        out['max_person_per_company'] = _strict_int(value['max_person_per_company'], 1, 100, 'invalid_criteria')
+    if not set(out) & {'websites', 'titles', 'seniorities', 'person_locations', 'company_locations'}:
+        raise PolicyError('people_search_requires_filter')
+    out['page'] = _strict_int(value.get('page', 1), 1, 1000, 'invalid_criteria')
+    return out
+
+
+def _linkedin(value):
+    from .discovery import canonical_linkedin  # discovery imports policy at module load
+    url = canonical_linkedin(value) if isinstance(value, str) else None
+    if not url:
+        raise PolicyError('invalid_linkedin_url')
+    return url
+
+
+def _sanitize_v3_keys(clean):
+    if 'criteria' in clean:
+        clean['criteria'] = _generic_criteria(clean['criteria'])
+    if 'text_query' in clean:
+        clean['text_query'] = _bounded_text(clean['text_query'], 200, min_len=3)
+    if 'page_size' in clean:
+        clean['page_size'] = _strict_int(clean['page_size'], 1, 20)
+    if 'page_cursor' in clean and (not isinstance(clean['page_cursor'], str) or not _CURSOR.fullmatch(clean['page_cursor'])):
+        raise PolicyError('invalid_payload')
+    if 'included_type' in clean and (not isinstance(clean['included_type'], str) or not _PLACE_TYPE.fullmatch(clean['included_type'])):
+        raise PolicyError('invalid_payload')
+    for key in ('apollo_id', 'person_id'):
+        if key in clean and (not isinstance(clean[key], str) or not _ID.fullmatch(clean[key])):
+            raise PolicyError('invalid_payload')
+    if 'linkedin_url' in clean:
+        clean['linkedin_url'] = _linkedin(clean['linkedin_url'])
+
+
+def _person_name(value):
+    name = _bounded_text(value, 120, min_len=2)
+    if len(name.split()) < 2 or not all(c.isalpha() or c in " .'-" for c in name):
+        raise PolicyError('invalid_payload')
+    return name
+
+
+def _identity_payload(payload, id_key):
+    """Exactly one identity: provider id, LinkedIn URL, or full name + company domain."""
+    forms = [k for k in (id_key, 'linkedin_url') if k and k in payload]
+    has_name = 'name' in payload or 'domain' in payload
+    if len(forms) + has_name != 1:
+        raise PolicyError('enrich_requires_one_identity')
+    if has_name:
+        if 'name' not in payload or not payload.get('domain'):
+            raise PolicyError('enrich_requires_name_and_domain')
+        payload['name'] = _person_name(payload['name'])
+        if payload['domain'].startswith('www.'):
+            payload['domain'] = normalize_domain(payload['domain'][4:])
+    return payload
+
+
+def _normalize_v3_payload(provider, operation, payload):
+    if operation == 'people_search':
+        criteria = payload.get('criteria')
+        if criteria is None:
+            raise PolicyError('people_search_requires_criteria')
+        if provider == 'apollo':
+            payload['criteria'] = apollo_criteria(criteria)
+        elif provider == 'prospeo':
+            payload['criteria'] = prospeo_criteria(criteria)
+        else:
+            raise PolicyError('unsupported_operation')
+    elif operation == 'text_search':
+        if 'text_query' not in payload:
+            raise PolicyError('text_search_requires_query')
+        payload.setdefault('page_size', 20)
+    elif operation == 'people_enrich':
+        _identity_payload(payload, 'apollo_id')
+    elif operation == 'enrich':
+        _identity_payload(payload, 'person_id')
+    elif operation == 'linkedin_email':
+        if 'linkedin_url' not in payload:
+            raise PolicyError('linkedin_email_requires_url')
+    else:
+        raise PolicyError('unsupported_operation')
+    return payload
+
+
+def _v3_identity(operation, payload):
+    if operation == 'people_search':
+        return {'criteria': payload.get('criteria')}
+    if operation == 'text_search':
+        return {'text_query': (payload.get('text_query') or '').casefold(), 'page_size': payload.get('page_size', 20),
+                'page_cursor': payload.get('page_cursor'), 'included_type': payload.get('included_type')}
+    identity = {k: payload[k] for k in ('apollo_id', 'person_id', 'linkedin_url', 'domain') if payload.get(k)}
+    if payload.get('name'):
+        identity['name'] = ' '.join(str(payload['name']).casefold().split())
+    return identity
+
+
+def strict_payload(operation, payload):
+    """Adapter-side guard: reject unknown keys, then apply generic sanitizing."""
+    allowed = DISCOVERY_PAYLOAD_KEYS[operation] | COMMON_PAYLOAD_KEYS
+    if not isinstance(payload, dict) or set(payload) - allowed:
+        raise PolicyError('unexpected_payload_key')
+    return sanitize_payload(payload)
+
+
+def enrich_identity(operation, payload):
+    """Validated single-person identity for 'people_enrich' (Apollo) or 'enrich' (Prospeo)."""
+    clean = strict_payload(operation, payload)
+    return _identity_payload(clean, {'people_enrich': 'apollo_id', 'enrich': 'person_id'}[operation])
+
+
+def linkedin_profile_url(value):
+    return _linkedin(value)

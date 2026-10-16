@@ -14,12 +14,26 @@ DEFAULT = {'version':1,'providers':{
  'disify':{'enabled':False,'charges':{'signals':{'signal_requests':'1'}}},
  'serper':{'enabled':False,'charges':{'search':{'queries':'1'}}},
  'brave':{'enabled':False,'charges':{'search':{'queries':'1'}}},
- 'overpass':{'enabled':False,'charges':{'places':{'requests':'1'}}}
+ 'overpass':{'enabled':False,'charges':{'places':{'requests':'1'}}},
+ # v3 additions. Dict order is auto-route order: existing providers keep priority so a
+ # saved config never silently changes which account a job spends; among the new
+ # verifiers Reoon (daily free credits) precedes MillionVerifier (paid credits).
+ # Apollo search is 0 credits, so its pool is a local request counter.
+ 'apollo':{'enabled':False,'charges':{'people_search':{'search_requests':'1'},'people_enrich':{'credits':'1'}}},
+ 'prospeo':{'enabled':False,'charges':{'people_search':{'credits':'1'},'enrich':{'credits':'1'}}},
+ 'google_places':{'enabled':False,'charges':{'text_search':{'enterprise_requests':'1'}}},
+ 'exa':{'enabled':False,'charges':{'search':{'queries':'1'}}},
+ 'tomba':{'enabled':False,'charges':{'find':{'credits':'1'},'linkedin_email':{'credits':'1'}}},
+ 'icypeas':{'enabled':False,'charges':{'find':{'credits':'1'}}},
+ 'reoon':{'enabled':False,'charges':{'verify':{'credits':'1'}}},
+ 'millionverifier':{'enabled':False,'charges':{'verify':{'credits':'1'}}}
 }}
 
 # Additions after the first v1 release. A saved v1 file may lack exactly these;
 # they are filled from DEFAULT (providers disabled). Nothing else may be missing.
-MIGRATION_ADDED_PROVIDERS = frozenset({'serper', 'brave', 'overpass'})
+MIGRATION_ADDED_PROVIDERS = frozenset({'serper', 'brave', 'overpass',
+                                       'apollo', 'prospeo', 'google_places', 'exa', 'tomba', 'icypeas',
+                                       'reoon', 'millionverifier'})
 MIGRATION_ADDED_CHARGES = {'hunter': frozenset({'discover', 'domain_search'})}
 
 def default_config():

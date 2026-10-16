@@ -608,6 +608,8 @@ def _classify_segment(segment):
         return 'principal', 'principal'
     if re.search(r'\bmanaging director\b', s):
         return 'managing_director', 'managing_director'
+    if re.search(r'^\s*(executive officer|managing member|general partner)\s*$', s):
+        return 'c_level', 'executive_officer'
     if re.search(r'\bchief of staff\b', s):
         return 'other', 'other'
     if re.search(r'\bchief\s+[a-z]+(\s+[a-z]+)?\s+officer\b|\b(coo|cfo|cto|cio|cmo|cro|cdo|cpo|cso|cco|cao|cbo)\b', s):

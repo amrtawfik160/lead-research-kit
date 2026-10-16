@@ -11,6 +11,9 @@ OFFICIAL_ORIGINS = frozenset({
     'https://api.hunter.io', 'https://api-1.verifalia.com',
     'https://api.clearout.io', 'https://api.zerobounce.net', 'https://disify.com',
     'https://google.serper.dev', 'https://api.search.brave.com', 'https://overpass-api.de',
+    'https://api.apollo.io', 'https://api.prospeo.io', 'https://places.googleapis.com', 'https://api.exa.ai',
+    'https://api.tomba.io', 'https://app.icypeas.com', 'https://emailverifier.reoon.com',
+    'https://api.millionverifier.com',
 })
 # Hard ceiling for any per-request response cap (Overpass place lists can be large).
 MAX_RESPONSE_CEILING = 5 * 1024 * 1024

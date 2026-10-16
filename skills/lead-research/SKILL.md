@@ -7,6 +7,15 @@ description: "Find, clean, score and enrich B2B leads into a 6-column CSV (Full 
 
 Use `lead-research --help`, or the bundled `scripts/lead-research` launcher. Its `--print-project-root` option locates the implementation. Operate through the CLI; keep workspace data separate from public source code.
 
+## Daily fresh leads
+
+1. Check `history stats` and `status`. For a new workspace, `history import` every file already delivered
+2. Run `daily --target N` (preview) and read `report.json`: which steps would run, which are skipped for missing keys or budgets
+3. Run `daily --target N --execute`. Deliver `daily/<date>/leads.csv` and state delivered vs target, email sources, and the report's shortfall advice
+4. When short, follow the advice (fund a search provider for firm websites, raise caps, enable a finder/verifier) instead of loosening quality rules
+
+Completion: today's file exists, has exactly the 6 headers, contains only people never delivered before, and the shortfall (if any) is explained with the next concrete fix
+
 ## Fast path: a clean 6-column list
 
 1. Existing list: `lead-research clean INPUT --output DIR`. Read `quality-summary.json`; report clean/review/rejected counts and top issues

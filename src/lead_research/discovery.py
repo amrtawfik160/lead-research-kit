@@ -12,6 +12,13 @@ Sources for request/response shapes:
 - Brave Web Search: GET https://api.search.brave.com/res/v1/web/search
   (q, count<=20, offset<=9, country) -> web.results[] {title, url, description}
 - Overpass API: https://wiki.openstreetmap.org/wiki/Overpass_API (map_to_area, out tags center)
+- Apollo People API Search / Enrichment: https://docs.apollo.io/reference/people-api-search,
+  https://docs.apollo.io/reference/people-enrichment
+- Prospeo Search / Enrich Person: https://prospeo.io/api-docs/search-person, /api-docs/enrich-person
+- Google Places Text Search (New):
+  https://developers.google.com/maps/documentation/places/web-service/text-search
+- Exa search (category 'people'): https://docs.exa.ai/reference/search
+- Tomba LinkedIn Finder: https://docs.tomba.io/api/finder
 """
 from __future__ import annotations
 
@@ -25,7 +32,10 @@ from .policy import (HUNTER_HEADCOUNTS, OSM_DEFAULT_TAGS, US_STATES, normalize_d
 
 __all__ = ['US_STATES', 'DEFAULT_DM_TITLES', 'HUNTER_REAL_ESTATE_INDUSTRIES', 'DISCOVERY_OPERATIONS',
            'canonical_linkedin', 'parse_linkedin_result', 'build_xray_queries', 'xray_jobs',
-           'hunter_discover_jobs', 'hunter_domain_jobs', 'osm_jobs', 'collect', 'clean_text', 'safe_link']
+           'hunter_discover_jobs', 'hunter_domain_jobs', 'osm_jobs', 'collect', 'clean_text', 'safe_link',
+           'apollo_jobs', 'apollo_enrich_jobs', 'prospeo_jobs', 'prospeo_enrich_jobs', 'tomba_linkedin_jobs',
+           'places_queries', 'places_jobs', 'exa_people_queries', 'exa_jobs', 'PLACES_QUERY_TEMPLATES',
+           'FINDER_OPERATIONS']
 
 DEFAULT_DM_TITLES = ('CEO', 'Founder', 'Owner', 'President', 'Principal', 'Managing Partner',
                      'Managing Broker', 'Broker/Owner', 'Designated Broker', 'Managing Director')
@@ -35,7 +45,11 @@ DEFAULT_DM_TITLES = ('CEO', 'Founder', 'Owner', 'President', 'Principal', 'Manag
 HUNTER_REAL_ESTATE_INDUSTRIES = ('Real Estate', 'Real Estate Agents and Brokers', 'Commercial Real Estate',
                                  'Leasing Residential Real Estate', 'Leasing Non-residential Real Estate')
 
-DISCOVERY_OPERATIONS = ('discover', 'domain_search', 'search', 'places')
+DISCOVERY_OPERATIONS = ('discover', 'domain_search', 'search', 'places', 'people_search', 'text_search')
+# Single-person operations whose 'candidate' email (and enriched identity) become prospects.
+FINDER_OPERATIONS = ('find', 'people_enrich', 'enrich', 'linkedin_email')
+PLACES_QUERY_TEMPLATES = ('real estate brokerage in {city}, {state}', 'commercial real estate firm in {city}, {state}',
+                          'property management company in {city}, {state}')
 MAX_XRAY_QUERY = 300
 
 _LINKEDIN_HOST = re.compile(r'(?:(?:www|m|[a-z]{2})\.)?linkedin\.com')
@@ -363,7 +377,183 @@ def osm_jobs(areas, tags=OSM_DEFAULT_TAGS):
     return jobs
 
 
+def _chunks(items, size):
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _root_domain_list(domains):
+    out = []
+    for domain in domains:
+        clean = normalize_domain(domain)
+        clean = clean[4:] if clean.startswith('www.') else clean
+        if clean not in out:
+            out.append(clean)
+    return out
+
+
+def _metro(item):
+    if isinstance(item, dict):
+        return _term(item.get('city')), _term(item.get('state'))
+    if isinstance(item, (tuple, list)) and len(item) == 2:
+        return _term(item[0]), _term(item[1])
+    raise PolicyError('invalid_metro')
+
+
+def apollo_jobs(titles, locations, seniorities=('owner', 'founder', 'c_suite', 'partner'), pages=1,
+                employee_ranges=('1,10', '11,50', '51,200'), location_field='organization_locations',
+                keywords=None, include_similar_titles=None, per_page=100):
+    """Apollo People API Search jobs (0 credits each): one per location per page.
+
+    location_field is 'organization_locations' (company HQ) or 'person_locations'.
+    Results carry apollo_id and obfuscated last names; finish them with apollo_enrich_jobs.
+    """
+    if location_field not in ('organization_locations', 'person_locations') or type(pages) is not int or not 1 <= pages <= 500:
+        raise PolicyError('invalid_apollo_jobs')
+    jobs = []
+    for location in list(dict.fromkeys(_term(l) for l in locations)) or [None]:
+        for page in range(1, pages + 1):
+            criteria = {'page': page, 'per_page': per_page}
+            if titles:
+                criteria['titles'] = list(titles)
+            if seniorities:
+                criteria['seniorities'] = list(seniorities)
+            if employee_ranges:
+                criteria['employee_ranges'] = list(employee_ranges)
+            if location:
+                criteria[location_field] = [location]
+            if keywords:
+                criteria['keywords'] = keywords
+            if include_similar_titles is not None:
+                criteria['include_similar_titles'] = include_similar_titles
+            jobs.append({'provider': 'apollo', 'operation': 'people_search', 'payload': {'criteria': criteria}})
+    return jobs
+
+
+def _enrich_jobs(provider, operation, id_key, payload_key, prospects):
+    jobs, seen = [], set()
+    for row in prospects:
+        if not isinstance(row, dict) or row.get('email'):
+            continue
+        if row.get(id_key):
+            payload = {payload_key: row[id_key]}
+        elif row.get('linkedin_url'):
+            payload = {'linkedin_url': row['linkedin_url']}
+        elif row.get('full_name') and row.get('company_website'):
+            payload = {'name': row['full_name'], 'domain': row['company_website']}
+        else:
+            continue
+        key = tuple(sorted(payload.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        if row.get('lead_id'):
+            payload['lead_id'] = str(row['lead_id'])
+        jobs.append({'provider': provider, 'operation': operation, 'payload': payload})
+    return jobs
+
+
+def apollo_enrich_jobs(prospects):
+    """One Apollo people/match job per prospect still lacking an email (1 person per job)."""
+    return _enrich_jobs('apollo', 'people_enrich', 'apollo_id', 'apollo_id', prospects)
+
+
+def prospeo_enrich_jobs(prospects):
+    """One Prospeo enrich-person job per prospect still lacking an email."""
+    return _enrich_jobs('prospeo', 'enrich', 'prospeo_id', 'person_id', prospects)
+
+
+def prospeo_jobs(domains, titles=None, seniorities=('Founder/Owner', 'C-Suite', 'Partner'), pages=1,
+                 title_match_mode='CONTAINS', max_person_per_company=None, chunk=500):
+    """Prospeo search-person jobs over company websites, in chunks of <= 500 root domains."""
+    if type(chunk) is not int or not 1 <= chunk <= 500 or type(pages) is not int or not 1 <= pages <= 1000:
+        raise PolicyError('invalid_prospeo_jobs')
+    jobs = []
+    for group in _chunks(_root_domain_list(domains), chunk):
+        for page in range(1, pages + 1):
+            criteria = {'websites': group, 'page': page}
+            if titles:
+                criteria.update(titles=list(titles), title_match_mode=title_match_mode)
+            if seniorities:
+                criteria['seniorities'] = list(seniorities)
+            if max_person_per_company:
+                criteria['max_person_per_company'] = max_person_per_company
+            jobs.append({'provider': 'prospeo', 'operation': 'people_search', 'payload': {'criteria': criteria}})
+    return jobs
+
+
+def tomba_linkedin_jobs(items):
+    """Tomba LinkedIn Finder jobs from prospects (dicts with linkedin_url) or profile URLs."""
+    jobs, seen = [], set()
+    for item in items:
+        if isinstance(item, dict):
+            if item.get('email'):
+                continue
+            url, lead_id = item.get('linkedin_url'), item.get('lead_id')
+        else:
+            url, lead_id = item, None
+        url = canonical_linkedin(url) if isinstance(url, str) else None
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        payload = {'linkedin_url': url}
+        if lead_id:
+            payload['lead_id'] = str(lead_id)
+        jobs.append({'provider': 'tomba', 'operation': 'linkedin_email', 'payload': payload})
+    return jobs
+
+
+def places_queries(metros, templates=PLACES_QUERY_TEMPLATES):
+    """Default Text Search queries per (city, state) metro, e.g. 'real estate brokerage in Austin, TX'."""
+    out = []
+    for metro in metros:
+        city, state = _metro(metro)
+        for template in templates:
+            query = template.format(city=city, state=state)
+            if query not in out:
+                out.append(query)
+    return out
+
+
+def places_jobs(items, page_size=20, included_type=None):
+    """Google Places text_search jobs from query strings and/or (city, state) metros.
+
+    Metros expand through places_queries(). Next pages: re-run with the attempt's
+    'next_page_cursor' as payload 'page_cursor' (same text_query and options).
+    """
+    queries = []
+    for item in items:
+        for query in ([item] if isinstance(item, str) else places_queries([item])):
+            if query not in queries:
+                queries.append(query)
+    jobs = []
+    for query in queries:
+        payload = {'text_query': query, 'page_size': page_size}
+        if included_type:
+            payload['included_type'] = included_type
+        jobs.append({'provider': 'google_places', 'operation': 'text_search', 'payload': payload})
+    return jobs
+
+
+def exa_people_queries(titles, locations, industry='real estate'):
+    """Natural-language Exa 'people' queries (Exa ignores site: operators)."""
+    out = []
+    for location in list(dict.fromkeys(_term(l) for l in locations)) or [None]:
+        for title in dict.fromkeys(_term(t) for t in titles):
+            query = f'{title} at a {_term(industry)} company' + (f' in {location}' if location else '')
+            if query not in out:
+                out.append(query)
+    return out
+
+
+def exa_jobs(queries):
+    return [{'provider': 'exa', 'operation': 'search', 'payload': {'query': q}} for q in dict.fromkeys(queries)]
+
+
 def _merge(target, row):
+    if row.get('name_complete') is True and target.get('name_complete') is False:
+        # A full name from enrichment replaces a partial (obfuscated) search name.
+        target['name_complete'] = True
+        target['last_name_obfuscated'] = None
     for key, value in row.items():
         if target.get(key) in (None, '', []) and value not in (None, '', []):
             target[key] = value
@@ -376,6 +566,9 @@ def _prospect_keys(row):
     keys = []
     if row.get('linkedin_url'):
         keys.append(('linkedin', row['linkedin_url']))
+    for key in ('apollo_id', 'prospeo_id'):
+        if row.get(key):
+            keys.append((key, row[key]))
     if row.get('email'):
         try:
             keys.append(('email', normalize_email(row['email'])))
@@ -391,6 +584,8 @@ def _company_keys(row):
         return [('domain', row['domain'])]
     if row.get('osm_id'):
         return [('osm', row['osm_id'])]
+    if row.get('place_id'):
+        return [('place', row['place_id'])]
     if row.get('organization'):
         return [('name', row['organization'].casefold(), (row.get('city') or '').casefold())]
     return []
@@ -413,6 +608,45 @@ def _dedupe(rows, keyfunc):
     return out
 
 
+_FINDER_VERIFICATION = ('valid', 'accept_all', 'unknown', 'invalid')
+
+
+def _finder_prospect(attempt, outcome):
+    """A prospect from a finder/enrichment attempt: its candidate email plus known identity.
+
+    'not_found' enrichments still contribute a completed identity (e.g. Apollo full name);
+    plain finder misses contribute nothing.
+    """
+    fields = outcome.get('fields') or {}
+    base = fields.get('prospect') if isinstance(fields.get('prospect'), dict) else {}
+    assessment = outcome.get('assessment')
+    if assessment != 'candidate' and not (assessment == 'not_found' and base and attempt['operation'] != 'find'):
+        return None
+    payload = attempt.get('payload') or {}
+    row = {k: v for k, v in base.items() if v not in (None, '', [])}
+    name = payload.get('name') if isinstance(payload.get('name'), str) else None
+    if not row.get('full_name') and name:
+        row['full_name'] = ' '.join(name.split())
+    if not row.get('company_website') and payload.get('domain'):
+        row['company_website'] = payload['domain']
+    for key, target in (('linkedin_url', 'linkedin_url'), ('apollo_id', 'apollo_id'), ('person_id', 'prospeo_id')):
+        if payload.get(key) and not row.get(target):
+            row[target] = payload[key]
+    if payload.get('lead_id'):
+        row.setdefault('lead_id', str(payload['lead_id']))
+    if assessment == 'candidate' and outcome.get('email'):
+        row['email'] = outcome['email']
+        row['email_source'] = attempt['provider'] + '_finder'
+        status = row.get('email_verification') or fields.get('finder_verification_status')
+        row['email_verification'] = status if status in _FINDER_VERIFICATION else None
+        if outcome.get('risk_flags'):
+            row['email_risk_flags'] = list(outcome['risk_flags'])
+    row.setdefault('source', attempt['provider'])
+    if not (row.get('full_name') or row.get('linkedin_url') or row.get('email') or row.get('apollo_id') or row.get('prospeo_id')):
+        return None
+    return row
+
+
 def collect(store):
     """Flatten completed lead-source attempts into deduplicated prospects and companies.
 
@@ -422,13 +656,19 @@ def collect(store):
     prospects, companies = [], []
     for attempt in store.attempts():
         outcome = attempt.get('outcome') or {}
-        if (attempt.get('operation') not in DISCOVERY_OPERATIONS or attempt.get('state') not in ('completed', 'reviewed')
-                or outcome.get('error') or outcome.get('assessment') != 'results'):
+        if attempt.get('state') not in ('completed', 'reviewed') or outcome.get('error'):
             continue
-        fields = outcome.get('fields') or {}
         meta = {'provider': attempt['provider'], 'attempt_id': attempt['id'],
                 'observed_at': attempt.get('finished_at') or attempt.get('sent_at')}
         source = {'provider': attempt['provider'], 'attempt_id': attempt['id'], 'operation': attempt['operation']}
+        if attempt.get('operation') in FINDER_OPERATIONS:
+            row = _finder_prospect(attempt, outcome)
+            if row:
+                prospects.append({**row, **meta, 'sources': [source]})
+            continue
+        if attempt.get('operation') not in DISCOVERY_OPERATIONS or outcome.get('assessment') != 'results':
+            continue
+        fields = outcome.get('fields') or {}
         for row in fields.get('prospects') or []:
             if isinstance(row, dict):
                 prospects.append({**row, **meta, 'sources': [source]})

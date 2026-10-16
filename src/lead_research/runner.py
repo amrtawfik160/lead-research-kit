@@ -13,6 +13,12 @@ def get_provider(id):
     return lookup(id)
 
 
+def _supports_pending(provider):
+    # Verifalia (202 + Location) and adapters that declare supports_pending=True and
+    # implement poll_request() for a same-origin, non-debiting result read.
+    return provider.id == 'verifalia' or getattr(provider, 'supports_pending', False) is True
+
+
 class Runner:
     def __init__(self, store, config, env=None, transport=None, sleep=time.sleep, clock=time.time):
         self.store, self.config = store, config
@@ -110,7 +116,10 @@ class Runner:
             return Outcome('error', error='rate_limit')
         if response.status >= 500:
             return Outcome('error', error='provider_error')
-        if response.status < 200 or response.status >= 300:
+        # Adapters that document business outcomes on 4xx (e.g. Prospeo NO_MATCH,
+        # Tomba unknown_record) opt in to classify them; everything else stays http_error.
+        client_errors = getattr(provider, 'parses_client_errors', False) is True and 400 <= response.status < 500
+        if (response.status < 200 or response.status >= 300) and not client_errors:
             return Outcome('error', error='http_error')
         outcome = provider.parse(operation, response)
         # List operations ('results'/'not_found') complete normally; adapters may
@@ -126,7 +135,12 @@ class Runner:
 
     def _finish_response(self, attempt, provider, response):
         outcome = self._outcome(provider, attempt['operation'], response, attempt['payload'])
-        if outcome.assessment == 'pending' and (provider.id != 'verifalia' or not outcome.job_url):
+        previous_job = (attempt.get('outcome') or {}).get('job_url')
+        if (outcome.assessment == 'pending' and not outcome.job_url and previous_job
+                and getattr(provider, 'supports_pending', False) is True):
+            # A poll that is still running keeps the job pointer it was issued with.
+            outcome = Outcome('pending', job_url=previous_job)
+        if outcome.assessment == 'pending' and (not _supports_pending(provider) or not outcome.job_url):
             outcome = Outcome('error', error='invalid_pending')
         state = 'pending' if outcome.assessment == 'pending' else 'completed'
         saved = self.store.finish(attempt['id'], outcome, state=state, http_status=response.status)
@@ -201,9 +215,9 @@ class Runner:
         item = {'attempt_id': attempt['id'], 'status': attempt['state'], 'poll_count': attempt['poll_count']}
         if not execute:
             return self._report([item], False)
-        if attempt['state'] != 'pending' or attempt['provider'] != 'verifalia':
-            raise PolicyError('only_pending_verifalia_can_resume')
         provider = get_provider(attempt['provider'])
+        if attempt['state'] != 'pending' or not _supports_pending(provider):
+            raise PolicyError('only_pending_verifalia_can_resume')
         entry = self.config.get('providers', {}).get(provider.id, {})
         if not entry.get('enabled') or self.store.provider_state(provider.id).get('paused') or not self._auth(provider):
             return self._report([{**item, 'status': 'skipped', 'reason': 'provider_unavailable'}], True)
@@ -212,7 +226,8 @@ class Runner:
         poll_sent = False
         try:
             request = provider.poll_request(attempt['outcome']['job_url'], self.env)
-            if request.method != 'GET':
+            # Polls are GET unless the adapter documents a read-only POST result route.
+            if request.method not in getattr(provider, 'poll_methods', ('GET',)):
                 raise PolicyError('poll_must_be_get')
             self._pace(provider, 'poll')
             self.store.note_poll(attempt_id, at=self.clock())

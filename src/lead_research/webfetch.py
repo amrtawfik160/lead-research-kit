@@ -194,10 +194,15 @@ class _PassThroughErrors(urllib.request.HTTPErrorProcessor):
     https_response = http_response
 
 
+def _trusted():
+    from .tls import trusted_context
+    return trusted_context()
+
+
 def build_default_opener() -> urllib.request.OpenerDirector:
     """Opener with IP pinning, no proxies, no cookies, no automatic redirects."""
     return urllib.request.build_opener(
-        urllib.request.ProxyHandler({}), _PinnedHTTPHandler(), _PinnedHTTPSHandler(),
+        urllib.request.ProxyHandler({}), _PinnedHTTPHandler(), _PinnedHTTPSHandler(context=_trusted()),
         _PassThroughErrors())
 
 
