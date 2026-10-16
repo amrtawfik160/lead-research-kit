@@ -7,7 +7,12 @@ from lead_research.models import PolicyError, ProviderError, Response
 from lead_research.providers import PROVIDERS, get_provider
 
 ENV = {'HUNTER_API_KEY': 'fixture-secret', 'VERIFALIA_TOKEN': 'fixture-secret',
-       'CLEAROUT_API_KEY': 'fixture-secret', 'ZEROBOUNCE_API_KEY': 'fixture-secret'}
+       'CLEAROUT_API_KEY': 'fixture-secret', 'ZEROBOUNCE_API_KEY': 'fixture-secret',
+       'SERPER_API_KEY': 'fixture-secret', 'BRAVE_API_KEY': 'fixture-secret'}
+# Lead-source operations take their own payload shapes (see tests/test_discovery.py).
+OPERATION_PAYLOADS = {'discover': {'filters': {'query': 'real estate companies in Texas'}},
+                      'domain_search': {'domain': 'example.org'}, 'search': {'query': 'site:linkedin.com/in "CEO"'},
+                      'places': {'area': 'Austin', 'state': 'TX'}}
 PAYLOAD = {'email': 'alex@example.org', 'domain': 'example.org', 'full_name': 'Alex Example',
            'first_name': 'Alex', 'last_name': 'Example'}
 
@@ -17,10 +22,11 @@ class ProviderTests(unittest.TestCase):
         return get_provider(provider).parse(operation, Response(status, data, headers or {}))
 
     def test_contract_all_six(self):
-        self.assertEqual(set(PROVIDERS), {'hunter', 'verifalia', 'clearout', 'zerobounce', 'hunter-insight', 'disify'})
+        self.assertEqual(set(PROVIDERS), {'hunter', 'verifalia', 'clearout', 'zerobounce', 'hunter-insight', 'disify',
+                                          'serper', 'brave', 'overpass'})
         for p in PROVIDERS.values():
             for operation in p.operations:
-                request = p.request(operation, PAYLOAD, ENV)
+                request = p.request(operation, OPERATION_PAYLOADS.get(operation, PAYLOAD), ENV)
                 self.assertTrue(request.url.startswith('https://'))
                 self.assertGreater(p.min_spacing[operation], 0)
             with self.assertRaisesRegex(PolicyError, '^unsupported_operation$'):

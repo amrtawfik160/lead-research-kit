@@ -1,11 +1,21 @@
 ---
 name: "lead-research"
-description: "Run evidence-first lead collection, work-email research, quota-controlled email finding or verification, and source-separated exports using the Lead Research Kit Python CLI"
+description: "Find, clean, score and enrich B2B leads into a 6-column CSV (Full Name, Title, Company, Company Website, LinkedIn URL, Email), crawl company websites for published emails, run evidence-first lead collection, work-email research, quota-controlled email finding or verification, and source-separated exports using the Lead Research Kit Python CLI"
 ---
 
 # Evidence-first lead research
 
 Use `lead-research --help`, or the bundled `scripts/lead-research` launcher. Its `--print-project-root` option locates the implementation. Operate through the CLI; keep workspace data separate from public source code.
+
+## Fast path: a clean 6-column list
+
+1. Existing list: `lead-research clean INPUT --output DIR`. Read `quality-summary.json`; report clean/review/rejected counts and top issues
+2. Missing emails: `crawl DIR/leads-clean.csv DIR/leads-review.csv --output crawl.json`, show the plan, then `--execute --workers 24`. Free and polite, so no spend approval is needed, but keep to the user's list
+3. New leads: prefer free sources first (`jobs hunter-discover`, `jobs osm`, then `crawl`). Use `jobs xray` and `jobs hunter-domains` only within confirmed budgets (section 4)
+4. `build --import ... --prospects ... --crawl ... --output FINAL`. Guesses stay in `email-candidates.csv` until a verifier says valid; then rebuild
+5. Deliver `leads-clean.csv`. Say how many rows have a work email, how many came from website evidence vs providers, and what went to review
+
+Completion: the delivered CSV has exactly the 6 headers, every Email is a work address from a website, provider result or verified guess, and rejected/review counts are reported
 
 ## 1. Inspect the workspace
 

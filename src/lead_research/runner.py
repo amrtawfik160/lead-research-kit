@@ -113,6 +113,11 @@ class Runner:
         if response.status < 200 or response.status >= 300:
             return Outcome('error', error='http_error')
         outcome = provider.parse(operation, response)
+        # List operations ('results'/'not_found') complete normally; adapters may
+        # additionally scope them to the requested input (e.g. queried domain).
+        scope = getattr(provider, 'scope_outcome', None)
+        if scope is not None and not outcome.error:
+            outcome = scope(operation, outcome, payload)
         if outcome.job_url:
             validate_evidence_url(outcome.job_url)
         if operation in {'verify', 'signals'} and outcome.email and outcome.email.lower() != payload['email']:

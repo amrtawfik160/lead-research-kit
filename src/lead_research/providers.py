@@ -5,13 +5,18 @@ never raw API errors, arbitrary server text, URLs with credentials, or account d
 Balances report proven free pools separately from unclassified total balances.
 """
 import base64
+import dataclasses
 import json
 import re
 from decimal import Decimal, InvalidOperation
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, quote_plus, urlencode, urlsplit
 
+from .discovery import clean_text, linkedin_from_handle, parse_linkedin_result, safe_link
 from .models import Outcome, PolicyError, ProviderError, Request
-from .transport import validate_url
+from .policy import (HUNTER_DEPARTMENTS, HUNTER_SENIORITIES, OSM_DEFAULT_TAGS, OSM_TAG_ALLOWLIST, US_STATES,
+                     domain_search_options, normalize_discover_filters, normalize_domain, normalize_email,
+                     overpass_area, search_query, us_state_code, validate_evidence_url)
+from .transport import MAX_RESPONSE_CEILING, validate_url
 
 
 def _error(code):
@@ -128,11 +133,12 @@ class Provider:
         if operation not in self.operations:
             raise PolicyError('unsupported_operation')
 
-    def _request(self, method, path, headers=None, body=None, timeout=30):
+    def _request(self, method, path, headers=None, body=None, timeout=30, raw_body=None, max_response_bytes=None):
         url = self.origin + path
         validate_url(url, {self.origin})
-        return Request(method, url, headers or {},
-                       json.dumps(body, separators=(',', ':')).encode() if body is not None else None, timeout)
+        data = raw_body if raw_body is not None else (
+            json.dumps(body, separators=(',', ':')).encode() if body is not None else None)
+        return Request(method, url, headers or {}, data, timeout, max_response_bytes)
 
     def request(self, operation, payload, env):
         """Build one official-origin Request; unsupported operations fail closed."""
@@ -154,9 +160,10 @@ class Provider:
 class Hunter(Provider):
     id = 'hunter'
     independence_group = 'hunter'
-    operations = ('find', 'verify')
+    operations = ('find', 'verify', 'discover', 'domain_search')
     auth_env = ('HUNTER_API_KEY',)
-    min_spacing = {'find': 10.0, 'verify': 10.0, 'balance': 10.0}
+    # Discover: 5 req/s and 50/min -> 1.2s. Domain Search: 15 req/s, 500/min -> 0.2s.
+    min_spacing = {'find': 10.0, 'verify': 10.0, 'balance': 10.0, 'discover': 1.2, 'domain_search': 0.2}
     origin = 'https://api.hunter.io'
 
     def _headers(self, env):
@@ -165,6 +172,20 @@ class Hunter(Provider):
     def request(self, operation, payload, env):
         """Finder produces candidates; only verifier supplies mailbox assessment."""
         self._operation(operation)
+        if operation == 'discover':
+            # Free call; the body is the filters object itself (no offset on free plans).
+            filters = normalize_discover_filters(payload.get('filters'))
+            return self._request('POST', '/v2/discover', {**self._headers(env), 'Content-Type': 'application/json'}, filters)
+        if operation == 'domain_search':
+            domain = normalize_domain(_text(payload, 'domain'))
+            options = domain_search_options(payload)
+            query = {'domain': domain[4:] if domain.startswith('www.') else domain, 'type': 'personal', 'limit': options['limit']}
+            if options['decision_maker']:
+                query['decision_maker'] = 'true'
+            for key in ('required_field', 'seniority', 'department'):
+                if options[key]:
+                    query[key] = ','.join(options[key])
+            return self._request('GET', '/v2/domain-search?' + urlencode(query), self._headers(env))
         query = ({'domain': _text(payload, 'domain'), 'full_name': _text(payload, 'full_name' if 'full_name' in payload else 'name')}
                  if operation == 'find' else {'email': _text(payload, 'email')})
         route = 'email-finder' if operation == 'find' else 'email-verifier'
@@ -175,6 +196,10 @@ class Hunter(Provider):
         failure = http_failure(response)
         if failure:
             return failure
+        if operation == 'discover':
+            return _parse_hunter_discover(response.data)
+        if operation == 'domain_search':
+            return _parse_hunter_domain_search(response.data)
         data = response.data.get('data')
         if not isinstance(data, dict):
             return _error('invalid_response')
@@ -204,6 +229,15 @@ class Hunter(Provider):
         if not email:
             return _error('invalid_response')
         return Outcome(mapping[status], email, tuple(dict.fromkeys(flags)), fields)
+
+    def scope_outcome(self, operation, outcome, payload):
+        """Keep only Domain Search prospects whose mailbox is at the queried domain."""
+        if operation != 'domain_search' or outcome.assessment != 'results':
+            return outcome
+        domain = payload.get('domain') or ''
+        prospects = [p for p in outcome.fields.get('prospects', []) if _at_domain(p.get('email'), domain)]
+        fields = {**outcome.fields, 'prospects': prospects}
+        return dataclasses.replace(outcome, assessment='results' if prospects else 'not_found', fields=fields)
 
     def balance_request(self, env):
         return self._request('GET', '/v2/account', self._headers(env))
@@ -510,7 +544,339 @@ class Disify(Provider):
         return Outcome('signals', risk_flags=tuple(_risks(j)), fields=fields)
 
 
-PROVIDERS = {provider.id: provider for provider in (Hunter(), Verifalia(), Clearout(), ZeroBounce(), HunterInsight(), Disify())}
+# ---------------------------------------------------------------------------
+# Lead-source parsing (list outcomes: 'results' or 'not_found').
+# ---------------------------------------------------------------------------
+
+_HUNTER_PATTERN = re.compile(r'\{(?:first|last|f|l)\}(?:[._-]?\{(?:first|last|f|l)\}){0,2}')
+_SOCIAL_HOSTS = ('facebook.com', 'instagram.com', 'linkedin.com', 'twitter.com', 'x.com', 'youtube.com', 'tiktok.com',
+                 'yelp.com', 'zillow.com', 'realtor.com', 'google.com', 'goo.gl', 'linktr.ee', 'pinterest.com',
+                 'trulia.com', 'redfin.com', 'homes.com', 'nextdoor.com', 'business.site', 'wa.me', 'bit.ly')
+OSM_ATTRIBUTION = '\u00a9 OpenStreetMap contributors, ODbL'
+
+
+def _at_domain(email, domain):
+    if not isinstance(email, str) or '@' not in email or not domain:
+        return False
+    host = email.rsplit('@', 1)[1].lower()
+    return host == domain or host.endswith('.' + domain)
+
+
+def _safe_tree(value, depth=0):
+    """Keep only dicts/lists/strings from provider metadata; bounded and URL-free."""
+    if depth > 5:
+        return None
+    if isinstance(value, dict):
+        out = {}
+        for key, item in list(value.items())[:50]:
+            if isinstance(key, str) and re.fullmatch(r'[a-z_]{1,40}', key):
+                clean = _safe_tree(item, depth + 1)
+                if clean not in (None, {}, []):
+                    out[key] = clean
+        return out
+    if isinstance(value, list):
+        return [c for c in (_safe_tree(v, depth + 1) for v in value[:100]) if c not in (None, {}, [])]
+    if isinstance(value, str):
+        return clean_text(value, 500)
+    return None
+
+
+def _company_domain(value):
+    """Normalize a website-ish value to a registrable company host, or None for socials/invalid."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 500:
+        return None
+    text = value.strip()
+    if '://' not in text:
+        text = 'https://' + text.lstrip('/')
+    try:
+        host = normalize_domain(urlsplit(text).hostname or '')
+    except (PolicyError, ValueError):
+        return None
+    if host.startswith('www.'):
+        host = host[4:]
+    if any(host == s or host.endswith('.' + s) for s in _SOCIAL_HOSTS):
+        return None
+    return host
+
+
+def _parse_hunter_discover(j):
+    data = j.get('data')
+    if not isinstance(data, list):
+        return _error('invalid_response')
+    companies = []
+    for item in data[:100]:
+        if not isinstance(item, dict):
+            continue
+        try:
+            domain = normalize_domain(item.get('domain'))
+        except PolicyError:
+            continue
+        counts = item.get('emails_count') if isinstance(item.get('emails_count'), dict) else {}
+        companies.append({'domain': domain, 'organization': clean_text(item.get('organization'), 200),
+                          'emails_count_personal': _int(counts.get('personal')),
+                          'emails_count_total': _int(counts.get('total')), 'source': 'hunter_discover'})
+    if data and not companies:
+        return _error('invalid_response')
+    meta = j.get('meta') if isinstance(j.get('meta'), dict) else {}
+    fields = {'companies': companies, 'applied_filters': _safe_tree(meta.get('filters')) or {},
+              'total_results': _int(meta.get('results'))}
+    return Outcome('results' if companies else 'not_found', fields=fields)
+
+
+def _parse_hunter_domain_search(j):
+    data = j.get('data')
+    if not isinstance(data, dict) or not isinstance(data.get('emails'), list):
+        return _error('invalid_response')
+    try:
+        anchor = normalize_domain(data['domain']) if data.get('domain') is not None else None
+    except PolicyError:
+        return _error('invalid_response')
+    if anchor and anchor.startswith('www.'):
+        anchor = anchor[4:]
+    pattern = data.get('pattern')
+    organization = clean_text(data.get('organization'), 200)
+    fields = {'domain': anchor, 'organization': organization,
+              'pattern': pattern if isinstance(pattern, str) and _HUNTER_PATTERN.fullmatch(pattern) else None,
+              'accept_all': data.get('accept_all') if type(data.get('accept_all')) is bool else None}
+    if data['emails'] and not anchor:
+        return _error('invalid_response')
+    prospects = []
+    for item in data['emails'][:100]:
+        if not isinstance(item, dict) or item.get('type') != 'personal':
+            continue
+        email = _email(item.get('value'))
+        if not email:
+            continue
+        try:
+            email = normalize_email(email)
+        except PolicyError:
+            continue
+        if not _at_domain(email, anchor):
+            continue
+        first, last = clean_text(item.get('first_name'), 60), clean_text(item.get('last_name'), 60)
+        confidence = item.get('confidence')
+        verification = item.get('verification') if isinstance(item.get('verification'), dict) else {}
+        status = verification.get('status')
+        source_url = None
+        sources = item.get('sources')
+        if isinstance(sources, list) and sources and isinstance(sources[0], dict):
+            uri = sources[0].get('uri')
+            try:
+                source_url = validate_evidence_url(uri) if isinstance(uri, str) and len(uri) <= 2048 else None
+            except PolicyError:
+                source_url = None
+        prospects.append({
+            'full_name': ' '.join(p for p in (first, last) if p) or None, 'first_name': first, 'last_name': last,
+            'title': clean_text(item.get('position'), 150), 'email': email,
+            'email_confidence': confidence if type(confidence) is int and 0 <= confidence <= 100 else None,
+            'email_verification': status if status in ('valid', 'accept_all', 'unknown', 'invalid') else None,
+            'linkedin_url': linkedin_from_handle(item.get('linkedin')),
+            'seniority': item.get('seniority') if item.get('seniority') in HUNTER_SENIORITIES else None,
+            'department': item.get('department') if item.get('department') in HUNTER_DEPARTMENTS else None,
+            'decision_maker': item.get('decision_maker') is True, 'email_source': 'hunter_domain_search',
+            'company': organization, 'company_website': anchor, 'source': 'hunter', 'source_url': source_url})
+    meta = j.get('meta') if isinstance(j.get('meta'), dict) else {}
+    fields.update(prospects=prospects, total_results=_int(meta.get('results')))
+    return Outcome('results' if prospects else 'not_found', fields=fields)
+
+
+def _serp_rows(items, title_key, link_key, snippet_key):
+    results, prospects = [], []
+    for position, item in enumerate(items[:100], 1):
+        if not isinstance(item, dict):
+            continue
+        title, link, snippet = item.get(title_key), item.get(link_key), item.get(snippet_key)
+        rank = item.get('position') if type(item.get('position')) is int and item.get('position') > 0 else position
+        row = {'title': clean_text(title, 300), 'link': safe_link(link), 'snippet': clean_text(snippet, 500), 'position': rank}
+        if row['title'] or row['link']:
+            results.append(row)
+        prospect = parse_linkedin_result(title, snippet, link) if isinstance(link, str) else None
+        if prospect:
+            prospects.append({**prospect, 'position': rank})
+    return results, prospects
+
+
+class Serper(Provider):
+    """Google results via serper.dev. num is fixed at 10 because num > 10 bills 2 credits."""
+    id = 'serper'
+    independence_group = 'serper'
+    operations = ('search',)
+    auth_env = ('SERPER_API_KEY',)
+    min_spacing = {'search': 0.3}
+    origin = 'https://google.serper.dev'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        body = {'q': search_query(payload.get('query')), 'num': 10, 'gl': 'us', 'hl': 'en'}
+        if payload.get('num', 10) != 10 or any(k in payload for k in ('count', 'offset')):
+            raise PolicyError('invalid_payload')
+        page = payload.get('page', 1)
+        if type(page) is not int or not 1 <= page <= 10:
+            raise PolicyError('invalid_payload')
+        if page != 1:
+            body['page'] = page
+        headers = {'X-API-KEY': _secret(env, 'SERPER_API_KEY'), 'Content-Type': 'application/json'}
+        return self._request('POST', '/search', headers, body)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        if 'message' in j or 'statusCode' in j:
+            return _error('provider_application_error')
+        organic = j.get('organic')
+        if organic is None and isinstance(j.get('searchParameters'), dict):
+            organic = []
+        if not isinstance(organic, list):
+            return _error('invalid_response')
+        results, prospects = _serp_rows(organic, 'title', 'link', 'snippet')
+        return Outcome('results' if results else 'not_found', fields={'prospects': prospects, 'results': results})
+
+    def parse_balance(self, response):
+        _balance_base(response)
+        raise ProviderError('balance_unsupported')
+
+
+class Brave(Provider):
+    """Brave Search API web results; free credit plans are about 1 request/second."""
+    id = 'brave'
+    independence_group = 'brave'
+    operations = ('search',)
+    auth_env = ('BRAVE_API_KEY',)
+    min_spacing = {'search': 1.1}
+    origin = 'https://api.search.brave.com'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        if any(k in payload for k in ('num', 'page')):
+            raise PolicyError('invalid_payload')
+        count, offset = payload.get('count', 20), payload.get('offset', 0)
+        if type(count) is not int or not 1 <= count <= 20 or type(offset) is not int or not 0 <= offset <= 9:
+            raise PolicyError('invalid_payload')
+        query = {'q': search_query(payload.get('query')), 'count': count, 'country': 'us'}
+        if offset:
+            query['offset'] = offset
+        headers = {'X-Subscription-Token': _secret(env, 'BRAVE_API_KEY'), 'Accept': 'application/json'}
+        return self._request('GET', '/res/v1/web/search?' + urlencode(query), headers)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        if j.get('type') == 'ErrorResponse' or 'message' in j:
+            return _error('provider_application_error')
+        web = j.get('web')
+        if web is None and j.get('type') == 'search':
+            web = {'results': []}
+        if not isinstance(web, dict) or not isinstance(web.get('results'), list):
+            return _error('invalid_response')
+        results, prospects = _serp_rows(web['results'], 'title', 'url', 'description')
+        return Outcome('results' if results else 'not_found', fields={'prospects': prospects, 'results': results})
+
+    def parse_balance(self, response):
+        _balance_base(response)
+        raise ProviderError('balance_unsupported')
+
+
+def _ql_string(value):
+    if not isinstance(value, str) or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise PolicyError('invalid_area')
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def build_overpass_query(area, state=None, tags=OSM_DEFAULT_TAGS, limit=500):
+    """Build Overpass QL from validated parts only; raw QL is never accepted.
+
+    A state name alone resolves through its ISO3166-2 code. Other names resolve to
+    administrative boundary relations inside the US (or the given state) via map_to_area.
+    """
+    area = overpass_area(area)
+    tag_list = [t for t in OSM_TAG_ALLOWLIST if t in tags]
+    if not tag_list or set(tags) - set(OSM_TAG_ALLOWLIST) or type(limit) is not int or not 1 <= limit <= 1000:
+        raise PolicyError('invalid_payload')
+    state = us_state_code(state) if state else None
+    lines = ['[out:json][timeout:60];']
+    as_state = None
+    try:
+        as_state = us_state_code(area)
+    except PolicyError:
+        pass
+    if as_state and (state is None or state == as_state):
+        lines.append('area["ISO3166-2"=' + _ql_string('US-' + as_state) + ']->.a;')
+    else:
+        if state:
+            lines.append('area["ISO3166-2"=' + _ql_string('US-' + state) + ']->.s;')
+        else:
+            lines.append('area["ISO3166-1"="US"]["admin_level"="2"]->.s;')
+        lines.append('rel["boundary"="administrative"]["name"=' + _ql_string(area) + '](area.s)->.r;')
+        lines.append('.r map_to_area->.a;')
+    selectors = ''.join('nwr[' + _ql_string(k) + '=' + _ql_string(v) + '](area.a);'
+                        for k, v in (t.split('=', 1) for t in tag_list))
+    lines.append('(' + selectors + ');')
+    lines.append('out tags center ' + str(limit) + ';')
+    return '\n'.join(lines)
+
+
+class Overpass(Provider):
+    """OpenStreetMap Overpass API (no auth). Data © OpenStreetMap contributors, ODbL."""
+    id = 'overpass'
+    independence_group = 'overpass'
+    operations = ('places',)
+    auth_env = ()
+    min_spacing = {'places': 5.0}
+    origin = 'https://overpass-api.de'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        ql = build_overpass_query(payload.get('area'), payload.get('state'), payload.get('tags') or OSM_DEFAULT_TAGS)
+        headers = {'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json',
+                   'User-Agent': 'lead-research-kit (stdlib urllib)'}
+        return self._request('POST', '/api/interpreter', headers, raw_body=('data=' + quote_plus(ql)).encode('ascii'),
+                             timeout=90, max_response_bytes=MAX_RESPONSE_CEILING)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        if isinstance(j.get('remark'), str) and re.search(r'(?i)error|timed out|out of memory', j['remark']):
+            return _error('provider_application_error')
+        elements = j.get('elements')
+        if not isinstance(elements, list):
+            return _error('invalid_response')
+        companies = []
+        for item in elements[:1000]:
+            if not isinstance(item, dict) or not isinstance(item.get('tags'), dict):
+                continue
+            tags = item['tags']
+            name = clean_text(tags.get('name'), 200)
+            kind, ident = item.get('type'), item.get('id')
+            if not name or kind not in ('node', 'way', 'relation') or type(ident) is not int:
+                continue
+            domain = None
+            for key in ('website', 'contact:website', 'url'):
+                domain = _company_domain(tags.get(key))
+                if domain:
+                    break
+            phone = tags.get('phone') or tags.get('contact:phone')
+            phone = phone.split(';')[0].strip() if isinstance(phone, str) else None
+            state = tags.get('addr:state')
+            companies.append({'organization': name, 'domain': domain or '',
+                              'phone': phone if phone and re.fullmatch(r'[+0-9 ().-]{7,32}', phone) else None,
+                              'city': clean_text(tags.get('addr:city'), 80),
+                              'state': state if isinstance(state, str) and state.upper() in US_STATES else clean_text(state, 40),
+                              'source': 'openstreetmap', 'osm_id': kind + '/' + str(ident)})
+        fields = {'companies': companies, 'attribution': OSM_ATTRIBUTION}
+        return Outcome('results' if companies else 'not_found', fields=fields)
+
+
+PROVIDERS = {provider.id: provider for provider in (Hunter(), Verifalia(), Clearout(), ZeroBounce(), HunterInsight(), Disify(),
+                                                    Serper(), Brave(), Overpass())}
 
 
 def get_provider(provider_id):

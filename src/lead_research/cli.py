@@ -59,9 +59,112 @@ def parser():
     c.add_argument('attempt_id');c.add_argument('--reason',required=True)
     x=s.add_parser('export',help='Export private contact/evidence/provider categories separately');x.add_argument('directory')
     s.add_parser('status');s.add_parser('audit')
+    cl=s.add_parser('clean',help='Clean and score any lead CSV/JSON into the 6-column format (offline, no workspace needed)')
+    cl.add_argument('input');cl.add_argument('--output',required=True,help='Output directory');_target_args(cl)
+    cr=s.add_parser('crawl',help='Crawl company websites in parallel for published people, titles, emails and LinkedIn links')
+    cr.add_argument('sources',nargs='+',help='CSV/JSON/TXT files with website, domain or work-email columns, or bare domains')
+    cr.add_argument('--output',required=True,help='JSON file for crawl results');cr.add_argument('--execute',action='store_true',help='Actually fetch public websites (default only plans)')
+    cr.add_argument('--workers',type=int,default=16);cr.add_argument('--max-pages',type=int,default=6);cr.add_argument('--delay',type=float,default=1.0,help='Minimum seconds between requests to the same site')
+    cr.add_argument('--limit',type=int,default=0,help='Only crawl the first N domains');cr.add_argument('--no-cache',action='store_true')
+    j=s.add_parser('jobs',help='Prepare lead-source jobs for `run` (nothing is sent)')
+    js=j.add_subparsers(dest='jobs_action',required=True)
+    jx=js.add_parser('xray',help='Search-engine LinkedIn profile queries (Serper or Brave)')
+    jx.add_argument('--provider',choices=['serper','brave'],default='serper');jx.add_argument('--titles',help='Comma-separated titles (default: decision-maker titles)')
+    jx.add_argument('--locations',help='Semicolon-separated, e.g. "Austin, Texas;Miami, Florida"');jx.add_argument('--states',help='Comma-separated US state codes, or "all"')
+    jx.add_argument('--industry',default='real estate',help='Comma-separated industry terms');jx.add_argument('--pages',type=int,default=1);jx.add_argument('--output')
+    jh=js.add_parser('hunter-discover',help='Free Hunter Discover company searches, one per state x headcount')
+    jh.add_argument('--states',required=True,help='Comma-separated US state codes, or "all"');jh.add_argument('--headcounts',default='1-10,11-50,51-200');jh.add_argument('--output')
+    jd=js.add_parser('hunter-domains',help='Hunter Domain Search for decision makers at known company domains')
+    jd.add_argument('sources',nargs='+');jd.add_argument('--limit',type=int,default=10);jd.add_argument('--all-people',action='store_true',help='Do not filter to decision makers');jd.add_argument('--output')
+    jo=js.add_parser('osm',help='OpenStreetMap real-estate offices in US places (free, gives company websites)')
+    jo.add_argument('--areas',required=True,help='Semicolon-separated "City:ST" or "County:ST" entries');jo.add_argument('--output')
+    co=s.add_parser('collect',help='Gather prospects and companies from completed lead-source runs');co.add_argument('--output')
+    bu=s.add_parser('build',help='Merge sources, crawl results and imports into a scored 6-column lead CSV')
+    bu.add_argument('--output',required=True,help='Output directory');bu.add_argument('--import',dest='imports',action='append',default=[],help='Lead rows from any tool (repeatable)')
+    bu.add_argument('--prospects',action='append',default=[],help='Output of `collect` (repeatable)');bu.add_argument('--crawl',action='append',default=[],help='Output of `crawl` (repeatable)')
+    bu.add_argument('--from-workspace',action='store_true',help='Also use prospects/companies from this workspace and its verification results');_target_args(bu)
     d=s.add_parser('demo',help='Run a synthetic offline demonstration in an empty workspace')
     d.add_argument('--output',required=True)
     return p
+
+
+def _target_args(p):
+    p.add_argument('--min-tier',choices=['A','B','C'],default='B',help='Lowest tier written to leads-clean.csv')
+    p.add_argument('--allow-personal-email',action='store_true',help='Keep gmail/ISP addresses in the Email column')
+    p.add_argument('--keep-non-decision-makers',action='store_true',help='Do not reject agents, VPs, investors and other non-owner titles')
+
+
+def _target(args):
+    from .quality import Target
+    return Target(min_tier=args.min_tier,allow_personal_email=args.allow_personal_email,require_decision_maker=not args.keep_non_decision_makers)
+
+
+def _source_domains(sources):
+    from .pipeline import domains_from, read_any
+    rows=[]
+    for item in sources:
+        path=Path(item)
+        rows.extend(read_any(path) if path.is_file() else [{'domain':item}])
+    return domains_from(rows)
+
+
+def _states(value):
+    from .policy import US_STATES
+    codes=list(US_STATES) if value.strip().lower()=='all' else [v.strip().upper() for v in value.split(',') if v.strip()]
+    bad=[c for c in codes if c not in US_STATES]
+    if bad:raise PolicyError('unknown_us_state')
+    return codes
+
+
+def _offline_command(args,work):
+    """Commands that never touch provider accounts or the ledger."""
+    if args.command=='clean':
+        from .quality import clean_csv
+        return clean_csv(args.input,args.output,_target(args))
+    if args.command=='crawl':
+        domains=_source_domains(args.sources)
+        if args.limit>0:domains=domains[:args.limit]
+        if not 1<=args.workers<=64 or not 1<=args.max_pages<=20 or not 0.2<=args.delay<=30:raise PolicyError('crawl_limits_out_of_range')
+        plan={'domains':len(domains),'max_requests':len(domains)*(args.max_pages+2),'workers':args.workers,'per_site_delay_seconds':args.delay,'respects_robots_txt':True}
+        if not args.execute:return {'dry_run':True,**plan,'sample_domains':domains[:10],'next':'add --execute to crawl'}
+        from .extract import crawl_domains
+        from .webfetch import SafeFetcher
+        def progress(done,total,domain):
+            if done==total or done%10==0:print(json.dumps({'crawled':done,'of':total}),file=sys.stderr)
+        with SafeFetcher(cache_path=None if args.no_cache else work/'web-cache.sqlite3',per_host_delay=args.delay) as fetcher:
+            sites=crawl_domains(domains,fetcher,max_pages=args.max_pages,workers=args.workers,progress=progress)
+        out=Path(args.output);out.parent.mkdir(parents=True,exist_ok=True)
+        out.write_text(json.dumps({'sites':sites},indent=2,ensure_ascii=False)+'\n',encoding='utf-8');out.chmod(0o600)
+        people=sum(len(x['people']) for x in sites)
+        emails=sum(1 for x in sites for p in x['people'] if p.get('email'))
+        return {'dry_run':False,**plan,'output':str(out),'sites_ok':sum(x['status']=='ok' for x in sites),'sites_unreachable':sum(x['status']=='unreachable' for x in sites),'sites_blocked':sum(x['status']=='blocked' for x in sites),'people_found':people,'people_with_email':emails,'sites_with_email_pattern':sum(bool(x.get('pattern')) for x in sites)}
+    if args.command=='jobs':
+        from . import discovery
+        if args.jobs_action=='xray':
+            from .policy import US_STATES
+            titles=[t.strip() for t in args.titles.split(',')] if args.titles else list(discovery.DEFAULT_DM_TITLES)
+            locations=[l.strip() for l in (args.locations or '').split(';') if l.strip()]
+            if args.states:locations+=[US_STATES[c] for c in _states(args.states)]
+            if not locations:raise PolicyError('locations_or_states_required')
+            queries=discovery.build_xray_queries(titles,locations,industry_terms=tuple(t.strip() for t in args.industry.split(',') if t.strip()))
+            return discovery.xray_jobs(args.provider,queries,pages=args.pages)
+        if args.jobs_action=='hunter-discover':
+            return discovery.hunter_discover_jobs(_states(args.states),headcounts=tuple(h.strip() for h in args.headcounts.split(',') if h.strip()))
+        if args.jobs_action=='hunter-domains':
+            return discovery.hunter_domain_jobs(_source_domains(args.sources),limit=args.limit,decision_maker=not args.all_people)
+        areas=[]
+        for item in args.areas.split(';'):
+            if item.strip():
+                name,_,state=item.partition(':');areas.append((name.strip(),state.strip()) if state.strip() else name.strip())
+        return discovery.osm_jobs(areas)
+    return None
+
+
+def _companies(file):
+    """Company rows saved by `collect` (its JSON has 'prospects' and 'companies')."""
+    if not str(file).endswith('.json'):return []
+    data=json.loads(Path(file).read_text(encoding='utf-8'))
+    return [r for r in data.get('companies',[]) if isinstance(r,dict)] if isinstance(data,dict) else []
 
 
 def _balance(store,config,provider_id,execute):
@@ -99,7 +202,11 @@ def _demo(store,output):
 def main(argv=None):
     args=parser().parse_args(argv)
     work=Path(args.workspace).expanduser().resolve()
+    if args.command in ('clean','jobs'):
+        emit(_offline_command(args,work),getattr(args,'output',None) if args.command=='jobs' else None);return 0
     work.mkdir(mode=0o700,parents=True,exist_ok=True);work.chmod(0o700)
+    if args.command=='crawl':
+        emit(_offline_command(args,work));return 0
     cfg=work/'providers.json'
     if args.command in ('init','demo') and not cfg.exists():save_config(cfg,default_config())
     if not cfg.exists():raise PolicyError('run_init_first')
@@ -148,8 +255,23 @@ def main(argv=None):
             result={'audit_ok':store.verify_audit()}
             if not result['audit_ok']:emit(result);return 2
         elif args.command=='demo':result=_demo(store,args.output)
+        elif args.command=='collect':
+            from .discovery import collect
+            result=collect(store)
+        elif args.command=='build':
+            from .pipeline import build, read_any, write_build
+            imports=[r for f in args.imports for r in read_any(f)]
+            prospects=[r for f in args.prospects for r in read_any(f)]
+            companies=[r for f in args.prospects for r in _companies(f)]
+            sites=[r for f in args.crawl for r in read_any(f)]
+            if args.from_workspace:
+                from .discovery import collect
+                gathered=collect(store);prospects+=gathered['prospects'];companies+=gathered['companies']
+            if not (imports or prospects or sites):raise PolicyError('no_lead_sources_given')
+            written=write_build(build(imports=imports,prospects=prospects,site_results=sites,companies=companies,store=store,target=_target(args)),args.output)
+            result={'output':written['paths'],'summary':written['summary']}
         else:result={'contacts':len(store.contacts()),'held':sum(bool(r.get('held')) for r in store.contacts()),'budgets':store.budgets(),'providers':{p:store.provider_state(p) for p in config['providers']},'unresolved_attempts':[{'id':a['id'],'provider':a['provider'],'state':a['state']} for a in store.attempts() if a['state'] in ('reserved','sent','pending','uncertain')],'audit_ok':store.verify_audit()}
-        emit(result,getattr(args,'output',None) if args.command!='demo' else None)
+        emit(result,getattr(args,'output',None) if args.command not in ('demo','build') else None)
         if isinstance(result,dict) and result.get('stopped'):return 2
         return 0
     finally:store.close()

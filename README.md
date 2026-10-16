@@ -2,7 +2,7 @@
 
 An evidence-first Python toolkit for finding business contacts and researching their work emails without mixing guesses, public sources, and provider claims
 
-**Status: v0.1.0 alpha, local CLI, Python 3.11+, no runtime dependencies**
+**Status: v0.2.0 alpha, local CLI, Python 3.11+, no runtime dependencies**
 
 This is a clean source-code project. It contains synthetic examples, not the contact database, account state, API credentials, or captures from the research that inspired it. Source repository: https://github.com/amrtawfik160/lead-research-kit. No package has been published to PyPI.
 
@@ -20,6 +20,67 @@ This is a clean source-code project. It contains synthetic examples, not the con
 - Exports public emails, candidates, provider results and accepted options separately
 
 It does **not** send email, probe SMTP, register accounts, rotate identities/IPs, bypass access restrictions, scrape private profiles, infer company revenue, or establish that an email belongs to a particular person.
+
+## Build a clean lead list fast
+
+The output is always the same 6 columns:
+
+```
+Full Name,Title,Company,Company Website,LinkedIn URL,Email
+```
+
+### 1. Clean any list you already have (offline, seconds)
+
+```bash
+lead-research clean leads.csv --output out/
+```
+
+Reads exports from any tool (CSV/JSON, column names are matched loosely) and writes:
+
+- `leads-clean.csv`: tier A/B decision makers only, bad fields blanked instead of guessed
+- `leads-review.csv`: tier C rows with score, issues and email source
+- `leads-rejected.csv`: agents, investors, associations, non-US and multi-person rows, with reasons
+- `quality-summary.json`: counts and top issues
+
+What it fixes: "CEO at X" company fields, multi-part titles, credentials in names ("MBA", "CCIM"), percent-encoded or country LinkedIn URLs, websites copied from gmail/ISP/.edu/franchise-parent email domains (kw.com for an independent brokerage), personal and role emails in the Email column, duplicates by LinkedIn, email or name+domain. Options: `--min-tier A`, `--allow-personal-email`, `--keep-non-decision-makers`.
+
+### 2. Fill emails from company websites (free, parallel)
+
+```bash
+lead-research --workspace /private/ws crawl out/leads-clean.csv out/leads-review.csv --output crawl.json            # plan
+lead-research --workspace /private/ws crawl out/leads-clean.csv out/leads-review.csv --output crawl.json --execute --workers 24
+```
+
+Visits each company's homepage and its best team/about/leadership/agents/contact pages (max 6 per site), in parallel across sites, one request per site per second, honoring robots.txt, with an on-disk cache so re-runs are instant. It reads JSON-LD, microdata, mailto links, Cloudflare-protected and "[at]/[dot]" emails, LinkedIn links and name/title cards. It also learns each company's email pattern from the emails it publishes. Blocks private/internal addresses and pins connections to the checked IP.
+
+### 3. Find new companies and people
+
+| Source | Cost | What you get | Jobs command |
+|---|---|---|---|
+| Hunter Discover | Free API call | US real-estate company domains by state and size | `jobs hunter-discover --states all` |
+| OpenStreetMap | Free | Real-estate offices with websites in a city/county | `jobs osm --areas "Austin:TX;Miami:FL"` |
+| Serper (Google) / Brave | 2,500 free queries / $5 monthly credit | LinkedIn profiles (name, title, company, URL) from search results, without logging into LinkedIn | `jobs xray --provider serper --states TX,FL` |
+| Hunter Domain Search | 1 search each | Decision makers at a domain with work email, title, LinkedIn and confidence | `jobs hunter-domains crawl.json` |
+| Website crawl | Free | Published names, titles, emails, LinkedIn links | `crawl ... --execute` |
+
+Each jobs command writes a plan for `run`, which spends only enabled, confirmed budget:
+
+```bash
+lead-research --workspace /private/ws jobs hunter-discover --states TX,FL,AZ --output discover.json
+lead-research --workspace /private/ws run discover.json --execute --limit 50
+lead-research --workspace /private/ws collect --output found.json
+lead-research --workspace /private/ws crawl found.json --output crawl.json --execute
+```
+
+### 4. Merge and score everything
+
+```bash
+lead-research --workspace /private/ws build --import leads.csv --prospects found.json --crawl crawl.json --from-workspace --output final/
+```
+
+Website-published emails win. A guessed email (from a pattern the company publishes in at least 2 emails, or Hunter's pattern) never goes into the Email column directly. It goes to `final/email-candidates.csv` and `final/verify-jobs.json`. Verify with `run final/verify-jobs.json --execute`, then rebuild: only addresses a verifier calls valid (not catch-all) are promoted.
+
+A practical fast loop for a new market: `hunter-discover` (free) or `osm` (free) → `crawl` (free) → `hunter-domains` only for companies the crawl did not cover → `xray` to add LinkedIn URLs → `build` → verify candidates → `build` again.
 
 ## Quick start
 
@@ -129,6 +190,9 @@ lead-research --workspace /private/path/research audit
 | ZeroBounce | Finder, single verification, total balance read | Finder queries never borrow validation credits; no batch route |
 | Hunter Email Insight | Domain/pattern signals | Not mailbox verification |
 | DISIFY | Syntax/DNS/disposable signals | Not mailbox verification |
+| Hunter Discover / Domain Search | Company discovery, decision makers at a domain | Discover uses its own local counter; Domain Search uses Hunter search credits |
+| Serper / Brave | Search-engine LinkedIn X-ray | Serper `num` fixed at 10 so 1 query = 1 credit |
+| OpenStreetMap Overpass | Real-estate offices in a place | Free fair-use API, 5s spacing, ODbL attribution |
 
 Adapters retain selected facts, not raw arbitrary provider bodies, names/geodata/gender enrichment or credential-bearing URLs. Live compatibility and account entitlement must be checked with a small authorized canary before scaling. Tests use mocked schemas, not live accounts. Some free services permit internal use but require approval for hosted resale or third-party API products; see [provider operations](skills/lead-research/references/provider-operations.md).
 

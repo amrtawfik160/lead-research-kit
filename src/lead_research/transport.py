@@ -10,7 +10,10 @@ from .models import PolicyError, ProviderError, Request, Response
 OFFICIAL_ORIGINS = frozenset({
     'https://api.hunter.io', 'https://api-1.verifalia.com',
     'https://api.clearout.io', 'https://api.zerobounce.net', 'https://disify.com',
+    'https://google.serper.dev', 'https://api.search.brave.com', 'https://overpass-api.de',
 })
+# Hard ceiling for any per-request response cap (Overpass place lists can be large).
+MAX_RESPONSE_CEILING = 5 * 1024 * 1024
 
 
 def validate_url(url: str, origins=OFFICIAL_ORIGINS, *, evidence=False) -> str:
@@ -62,6 +65,11 @@ class UrllibTransport:
             headers[k] = v
         if request.body is not None and not isinstance(request.body, bytes):
             raise PolicyError('invalid_body')
+        limit = getattr(request, 'max_response_bytes', None)
+        if limit is None:
+            limit = self.max_response_bytes
+        elif type(limit) is not int or not 1 <= limit <= MAX_RESPONSE_CEILING:
+            raise PolicyError('invalid_response_limit')
         try:
             req = urllib.request.Request(request.url, request.body, headers, method=request.method)
             try:
@@ -72,8 +80,8 @@ class UrllibTransport:
                 status = result.code
                 if 300 <= status < 400:
                     raise PolicyError('redirect_blocked')
-                raw = result.read(self.max_response_bytes + 1)
-                if len(raw) > self.max_response_bytes:
+                raw = result.read(limit + 1)
+                if len(raw) > limit:
                     raise ProviderError('response_too_large')
                 response_headers = dict(result.headers.items())
             try:

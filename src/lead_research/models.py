@@ -9,6 +9,8 @@ class Request:
     headers: Mapping[str, str] = field(default_factory=dict, repr=False)
     body: bytes | None = field(default=None, repr=False)
     timeout: float = 30.0
+    # None keeps the transport's default cap; providers may request a bounded larger cap.
+    max_response_bytes: int | None = None
 
 @dataclass(frozen=True)
 class Response:
