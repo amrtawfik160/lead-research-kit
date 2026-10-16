@@ -211,12 +211,16 @@ class Store:
     def _save_attempt(self, attempt):
         self.db.execute('INSERT OR REPLACE INTO attempts VALUES(?,?,?,?,?,?,?,?)', (attempt['id'], attempt['provider'], attempt['operation'], attempt['input_key'], attempt['payload'].get('email'), attempt['independence'], attempt['state'], _json(attempt)))
 
-    def reserve(self, provider, operation, input_key, payload, chargesdict, independence):
+    def reserve(self, provider, operation, input_key, payload, chargesdict, independence, items=1):
+        """Debit before sending. ``items`` > 1 is a per-item charge: each pool's amount must be
+        exactly items x a fixed unit (0.5 or 1), for at most 100 items in one request."""
         payload = sanitize_payload(payload)
         charges = {str(p): parse_units(v, positive=True) for p, v in chargesdict.items()}
         if not charges:
             raise PolicyError('charges_required')
-        if any(v not in {500000, 1000000} for v in charges.values()):
+        if type(items) is not int or not 1 <= items <= 100:
+            raise PolicyError('unsupported_charge')
+        if any(v % items or v // items not in {500000, 1000000} for v in charges.values()):
             raise PolicyError('unsupported_charge')
         with self._tx():
             if self.provider_state(provider).get('paused'):
@@ -236,6 +240,8 @@ class Store:
             for pool, units in charges.items():
                 self.db.execute('UPDATE budgets SET remaining=remaining-? WHERE provider=? AND pool=?', (units, provider, pool))
             attempt = {'id': uuid.uuid4().hex, 'provider': provider, 'operation': operation, 'input_key': input_key, 'payload': payload, 'charges': charges, 'independence': independence, 'state': 'reserved', 'created_at': time.time(), 'poll_count': 0, 'sent_at': None, 'outcome': None}
+            if items != 1:
+                attempt['charge_items'] = items
             self._save_attempt(attempt)
             self._audit('reserve_and_debit', attempt)
         return attempt

@@ -13,6 +13,7 @@ Use `lead-research --help`, or the bundled `scripts/lead-research` launcher. Its
 2. Run `daily --target N` (preview) and read `report.json`: which steps would run, which are skipped for missing keys or budgets
 3. Run `daily --target N --execute`. Deliver `daily/<date>/leads.csv` and state delivered vs target, email sources, and the report's shortfall advice
 4. When short, follow the advice (fund a search provider for firm websites, raise caps, enable a finder/verifier) instead of loosening quality rules
+5. Long-term hygiene: import outreach results with `history feedback`, customers/do-not-contact with `history suppress`, and keep recurring free allowances current with `history refill`. Read `report.md` each morning for low budgets and stopped providers
 
 Completion: today's file exists, has exactly the 6 headers, contains only people never delivered before, and the shortfall (if any) is explained with the next concrete fix
 

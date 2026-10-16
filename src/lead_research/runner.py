@@ -5,12 +5,33 @@ import os
 import time
 
 from .models import BudgetError, BusyError, Outcome, PolicyError
-from .policy import input_key, normalize_job, parse_units, validate_evidence_url
+from .policy import format_units, input_key, normalize_job, parse_units, validate_evidence_url
+
+FIXED_CHARGE_UNITS = frozenset({500000, 1000000})
+MAX_CHARGE_ITEMS = 100
 
 
 def get_provider(id):
     from .providers import get_provider as lookup
     return lookup(id)
+
+
+def charge_items(provider, entry, operation, payload):
+    """Number of billed items for one request: 1, or len(payload list) for per-item operations.
+
+    Both sides must agree: the adapter declares per_item_charge {operation: payload_key} and the
+    saved config marks the operation in 'per_item'. A mismatch fails closed (unsupported_charge).
+    """
+    key = (getattr(provider, 'per_item_charge', None) or {}).get(operation)
+    marked = operation in (entry.get('per_item') or ())
+    if not key and not marked:
+        return 1
+    if not key or not marked:
+        raise PolicyError('unsupported_charge')
+    values = payload.get(key)
+    if not isinstance(values, list) or not 1 <= len(values) <= MAX_CHARGE_ITEMS:
+        raise PolicyError('invalid_payload')
+    return len(values)
 
 
 def _supports_pending(provider):
@@ -68,8 +89,14 @@ class Runner:
             if not job['charges']:
                 raise PolicyError('charges_required')
             units = {p: parse_units(v, positive=True) for p, v in job['charges'].items()}
-            if any(v not in {500000, 1000000} for v in units.values()):
+            if any(v not in FIXED_CHARGE_UNITS for v in units.values()):
                 raise PolicyError('unsupported_charge')
+            items = charge_items(provider, entry, job['operation'], job['payload'])
+            if items != 1:
+                # Per-item operations (e.g. a Serper mini-batch) quote and debit the full amount.
+                units = {p: v * items for p, v in units.items()}
+                job['charges'] = {p: format_units(v) for p, v in units.items()}
+                job['charge_items'] = items
             budgets = {(b['provider'], b['pool']): b['remaining_units'] for b in self.store.budgets()}
             if any(budgets.get((provider.id, p), 0) < value for p, value in units.items()):
                 reason = reason or 'insufficient_confirmed_free_budget'
@@ -178,7 +205,8 @@ class Runner:
             attempt = None
             try:
                 request = provider.request(item['operation'], item['payload'], self.env)
-                attempt = self.store.reserve(provider.id, item['operation'], item['input_key'], item['payload'], item['charges'], provider.independence_group)
+                attempt = self.store.reserve(provider.id, item['operation'], item['input_key'], item['payload'], item['charges'], provider.independence_group,
+                                            items=item.get('charge_items', 1))
                 self._pace(provider, item['operation'])
                 self.store.mark_sent(attempt['id'], at=self.clock())
                 calls += 1

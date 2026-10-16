@@ -124,7 +124,7 @@ class DailyTests(unittest.TestCase):
     def test_linkedin_helpers(self):
         rows = [{'full_name': 'Jordan Blake', 'company': 'Harbor Realty Group', 'linkedin_url': ''}]
         jobs = linkedin_match_jobs(rows)
-        self.assertIn('"Jordan Blake" "Harbor Realty Group"', jobs[0]['payload']['query'])
+        self.assertIn('"Jordan Blake" "Harbor Realty Group"', jobs[0]['payload']['queries'][0])
         filled = attach_linkedin(rows, [{'full_name': 'Jordan Blake', 'company': 'Harbor Realty Group LLC',
                                          'linkedin_url': 'https://www.linkedin.com/in/jordan-blake-example/'},
                                         {'full_name': 'Jordan Blake', 'company': 'Other Co',
@@ -154,9 +154,14 @@ class DailyTests(unittest.TestCase):
         class Serper:
             calls = 0
             def send(self, request):
+                import json as _json
                 Serper.calls += 1
-                return Response(200, {'organic': [
-                    {'title': 'Harbor Realty Group | Austin Texas Real Estate', 'link': 'https://harborrealty.example/', 'snippet': 'Travis County Texas brokerage', 'position': 1}]})
+                body = _json.loads(request.body)
+                organic = [{'title': 'Harbor Realty Group | Austin Texas Real Estate', 'link': 'https://harborrealty.example/',
+                            'snippet': 'Travis County Texas brokerage', 'position': 1}]
+                if isinstance(body, list):
+                    return Response(200, [{'searchParameters': {'q': item['q']}, 'organic': organic} for item in body])
+                return Response(200, {'organic': organic})
         records = [{'source': 'tx-trec',
                     'companies': [{'organization': 'Harbor Realty Group', 'county': 'Travis', 'state': 'TX', 'source': 'tx-trec', 'decision_maker': 'Jordan Blake'}],
                     'prospects': [{'full_name': 'Jordan Blake', 'title': 'Designated Broker', 'company': 'Harbor Realty Group', 'state': 'TX', 'source': 'tx-trec'}]}]
@@ -176,6 +181,37 @@ class DailyTests(unittest.TestCase):
         report = run_daily(self.work, self.store, self.config, target=5, execute=True, day='2026-01-01', sources=('records', 'build'),
                            record_source_names=('sec-form-d',), env={})
         self.assertIn('SEC_USER_AGENT', report['steps']['records']['sources']['sec-form-d'])
+
+    def test_suppression_feedback_and_source_quality(self):
+        self.seed([site('harbor.example', [person('Jordan', 'Blake', 'harbor.example'), person('Casey', 'Morgan', 'harbor.example', 'President')]),
+                   site('ridge.example', [person('Riley', 'Stone', 'ridge.example')])])
+        h = History(self.work / 'lead-history.sqlite3')
+        h.suppress([{'Company Website': 'ridge.example'}], 'customer')
+        h.close()
+        first = run_daily(self.work, self.store, self.config, target=1, sources=('build',), execute=True, day='2026-01-01')
+        self.assertEqual(first['delivered'], 1)
+        delivered_email = first['files']['leads']
+        import csv as _csv
+        row = next(_csv.DictReader(open(delivered_email)))
+        h = History(self.work / 'lead-history.sqlite3')
+        counts = h.record_outcomes([{'Email': row['Email'], 'Outcome': 'hard bounce'}, {'Email': 'x@harbor.example', 'Outcome': 'weird'}])
+        self.assertEqual(counts, {'bounced': 1, 'ignored': 1})
+        quality_by_source = h.source_quality()
+        self.assertEqual(quality_by_source['website_published']['bounced'], 1)
+        h.close()
+        second = run_daily(self.work, self.store, self.config, target=5, sources=('build',), execute=True, day='2026-01-02')
+        self.assertEqual(second['delivered'], 1, 'ridge.example is blocked as a customer domain; one harbor person left')
+        self.assertTrue(Path(second['backup']['folder'], 'lead-history.sqlite3').exists())
+        self.assertIn('Leads 2026-01-02', Path(second['files']['leads']).with_name('report.md').read_text())
+
+    def test_recurring_refill_resets_once_per_period(self):
+        h = History(self.work / 'lead-history.sqlite3')
+        h.add_refill('reoon', 'credits', '20', 'daily', 'Reoon free plan: 20 credits per day')
+        self.assertEqual(h.apply_refills(self.store, '2026-01-01')['applied'], ['reoon.credits=20'])
+        self.assertEqual(h.apply_refills(self.store, '2026-01-01')['applied'], [])
+        budgets = {(b['provider'], b['pool']): b['remaining'] for b in self.store.budgets()}
+        self.assertEqual(budgets[('reoon', 'credits')], '20')
+        h.close()
 
 
 if __name__ == '__main__':

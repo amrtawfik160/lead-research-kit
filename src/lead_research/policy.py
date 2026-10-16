@@ -16,7 +16,12 @@ LEGACY_OPERATIONS = frozenset({'verify', 'signals', 'find'})
 DISCOVERY_PAYLOAD_KEYS = {
     'discover': frozenset({'filters'}),
     'domain_search': frozenset({'domain', 'limit', 'decision_maker', 'required_field', 'seniority', 'department'}),
-    'search': frozenset({'query', 'num', 'page', 'count', 'offset'}),
+    # include_domains: Tavily / Firecrawl only (see SEARCH_DOMAIN_FILTER_PROVIDERS).
+    'search': frozenset({'query', 'num', 'page', 'count', 'offset', 'include_domains'}),
+    # Serper mini-batch: 1..100 first-page queries in one POST; billed per query.
+    'search_batch': frozenset({'queries'}),
+    # Exa 'company' category search: one query, first 10 company pages.
+    'company_search': frozenset({'query'}),
     'places': frozenset({'area', 'state', 'tags'}),
     # Apollo / Prospeo people search: one provider-validated 'criteria' object.
     'people_search': frozenset({'criteria'}),
@@ -27,6 +32,10 @@ DISCOVERY_PAYLOAD_KEYS = {
     'people_enrich': frozenset({'apollo_id', 'linkedin_url', 'name', 'domain'}),
     'enrich': frozenset({'person_id', 'linkedin_url', 'name', 'domain'}),
     'linkedin_email': frozenset({'linkedin_url'}),
+    # Firecrawl rendered-page scrape: one public https URL (see scrape_url).
+    'scrape': frozenset({'url'}),
+    # People Data Labs Person Enrichment: a LinkedIn profile, or a name plus company domain/name.
+    'person_enrich': frozenset({'linkedin_url', 'name', 'domain', 'company', 'location'}),
 }
 DISCOVERY_OPERATIONS = frozenset(DISCOVERY_PAYLOAD_KEYS)
 COMMON_PAYLOAD_KEYS = frozenset({'lead_id', 'provenance'})
@@ -199,13 +208,25 @@ HUNTER_DEPARTMENTS = ('executive', 'it', 'finance', 'management', 'sales', 'lega
                       'communication', 'education', 'design', 'health', 'operations', 'product', 'research',
                       'consulting', 'administrative', 'procurement')
 HUNTER_REQUIRED_FIELDS = ('full_name', 'position', 'phone_number')
+HUNTER_POSTED_DATES = ('last7d', 'last30d', 'last90d')
+HUNTER_ORGANIZATION_MAX = 100  # names / domains per Discover 'organization' list
+MAX_BATCH_QUERIES = 100  # Serper "Mini-batch (up to 100 queries)"
+_JOB_DEPARTMENT = re.compile(r'[A-Za-z][A-Za-z0-9 &/,.-]{0,59}')
 DOMAIN_SEARCH_DEFAULTS = {'limit': 10, 'decision_maker': True, 'required_field': ['full_name', 'position'],
                           'seniority': [], 'department': []}
 # Documented OpenStreetMap tags for real-estate offices; never raw Overpass QL.
 OSM_TAG_ALLOWLIST = ('office=estate_agent', 'office=property_management', 'shop=estate_agent')
 OSM_DEFAULT_TAGS = ('office=estate_agent',)
 SEARCH_PAGING_DEFAULTS = {'num': 10, 'page': 1, 'count': 20, 'offset': 0}
-SEARCH_PAGING_BY_PROVIDER = {'serper': frozenset({'num', 'page'}), 'brave': frozenset({'count', 'offset'}), 'exa': frozenset()}
+# tavily 'count' is max_results (1..20, one credit regardless); serpapi 'page' maps to start=(page-1)*10.
+SEARCH_PAGING_BY_PROVIDER = {'serper': frozenset({'num', 'page'}), 'brave': frozenset({'count', 'offset'}), 'exa': frozenset(),
+                             'tavily': frozenset({'count'}), 'serpapi': frozenset({'page'}), 'firecrawl': frozenset()}
+# Providers whose search API takes a documented domain allowlist (Tavily include_domains,
+# Firecrawl includeDomains). Anyone else would silently ignore it, so it is rejected.
+SEARCH_DOMAIN_FILTER_PROVIDERS = frozenset({'tavily', 'firecrawl'})
+MAX_SEARCH_DOMAINS = 20
+# Firecrawl routes these hosts to paid third-party data providers (docs: Provider-routed URLs).
+SCRAPE_BLOCKED_HOSTS = ('linkedin.com',)
 
 
 def _controls(value):
@@ -313,19 +334,87 @@ def _location(value):
     return out
 
 
+def _organization(value):
+    """Discover 'organization': {'domain': [...], 'name': [...]} (each 1..100, canonical order)."""
+    if not isinstance(value, dict) or not value or set(value) - {'domain', 'name'}:
+        raise PolicyError('invalid_filters')
+    out = {}
+    if 'domain' in value:
+        items = value['domain']
+        if not isinstance(items, (list, tuple)) or not 1 <= len(items) <= HUNTER_ORGANIZATION_MAX:
+            raise PolicyError('invalid_filters')
+        domains = set()
+        for item in items:
+            try:
+                domain = normalize_domain(item)
+            except PolicyError:
+                raise PolicyError('invalid_filters') from None
+            domains.add(domain[4:] if domain.startswith('www.') else domain)
+        out['domain'] = sorted(domains)
+    if 'name' in value:
+        names = _filter_terms(value['name'], max_items=HUNTER_ORGANIZATION_MAX, max_len=100)
+        folded = {}
+        for name in names:  # case-insensitive dedupe keeps one canonical spelling
+            folded.setdefault(name.casefold(), name)
+        out['name'] = sorted(folded.values(), key=lambda n: (n.casefold(), n))
+    return out
+
+
+def _job_openings(value):
+    """Discover 'job_openings' (free filter): hiring, department, job_title, posted_date."""
+    if not isinstance(value, dict) or not value or set(value) - {'hiring', 'department', 'job_title', 'posted_date'}:
+        raise PolicyError('invalid_filters')
+    out = {}
+    if 'hiring' in value:
+        if type(value['hiring']) is not bool:
+            raise PolicyError('invalid_filters')
+        out['hiring'] = value['hiring']
+    if 'department' in value:
+        items = value['department']
+        if not isinstance(items, (list, tuple)) or not 1 <= len(items) <= 30:
+            raise PolicyError('invalid_filters')
+        departments = []
+        for item in items:
+            # Case-sensitive values copied from Hunter's Discover UI (e.g. 'sales').
+            if not isinstance(item, str) or not _JOB_DEPARTMENT.fullmatch(item) or _controls(item):
+                raise PolicyError('invalid_filters')
+            if item not in departments:
+                departments.append(item)
+        out['department'] = sorted(departments)
+    if 'job_title' in value:
+        titles = value['job_title']
+        if not isinstance(titles, dict) or not titles or set(titles) - {'include', 'exclude'}:
+            raise PolicyError('invalid_filters')
+        out['job_title'] = {k: _filter_terms(titles[k], max_items=100, max_len=100)
+                            for k in ('include', 'exclude') if k in titles}
+    if 'posted_date' in value:
+        if value['posted_date'] not in HUNTER_POSTED_DATES:
+            raise PolicyError('invalid_filters')
+        out['posted_date'] = value['posted_date']
+    if out.get('hiring') is False and set(out) - {'hiring'}:
+        # Department/title/date filters select hiring companies; 'hiring: false' contradicts them.
+        raise PolicyError('invalid_filters')
+    return out
+
+
 def normalize_discover_filters(filters):
     """Validate Hunter Discover filters (free-plan subset, no offset) into a canonical dict.
 
-    Source: https://hunter.io/api-documentation/v2#discover
+    Source: https://hunter.io/api-documentation/v2#discover (organization, headquarters_location
+    with city requiring country, industry, headcount, company_type, keywords, job_openings, limit).
+    Premium-only filters (similar_to, year_founded, technology, funding) and offset are rejected.
     """
     if not isinstance(filters, dict) or not filters:
         raise PolicyError('invalid_filters')
-    allowed = {'query', 'headquarters_location', 'industry', 'headcount', 'company_type', 'keywords', 'limit'}
+    allowed = {'query', 'organization', 'headquarters_location', 'industry', 'headcount', 'company_type', 'keywords',
+               'job_openings', 'limit'}
     if set(filters) - allowed:
         raise PolicyError('invalid_filters')
     out = {}
     if 'query' in filters:
         out['query'] = _bounded_text(filters['query'], 500, min_len=3, error='invalid_filters')
+    if 'organization' in filters:
+        out['organization'] = _organization(filters['organization'])
     if 'headquarters_location' in filters:
         hq = filters['headquarters_location']
         if not isinstance(hq, dict) or not hq or set(hq) - {'include', 'exclude'}:
@@ -350,6 +439,8 @@ def normalize_discover_filters(filters):
         out['company_type'] = _include_exclude(filters['company_type'], allowed=HUNTER_COMPANY_TYPES)
     if 'keywords' in filters:
         out['keywords'] = _include_exclude(filters['keywords'], match=True)
+    if 'job_openings' in filters:
+        out['job_openings'] = _job_openings(filters['job_openings'])
     if 'limit' in filters:
         out['limit'] = _strict_int(filters['limit'], 1, 100, 'invalid_filters')
     if not set(out) - {'limit'}:
@@ -363,6 +454,54 @@ def search_query(value):
     if len(query.split()) > 50:
         raise PolicyError('invalid_query')
     return query
+
+
+def search_domains(value):
+    """1..20 public root hostnames for a search domain allowlist, sorted and de-duplicated."""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= MAX_SEARCH_DOMAINS:
+        raise PolicyError('invalid_include_domains')
+    out = set()
+    for item in value:
+        domain = normalize_domain(item)
+        out.add(domain[4:] if domain.startswith('www.') else domain)
+    return sorted(out)
+
+
+def scrape_url(value):
+    """A public web page URL for a hosted scraper: canonical https, never internal targets.
+
+    Accepts http(s) only, no userinfo, no ports other than 80/443, no IP-literal or numeric
+    hosts, no .local/.internal/.test/.invalid/.localhost names, no fragments and no
+    credential-looking query keys. http:// input is upgraded to https:// because the ledger
+    only persists https evidence URLs (redact() drops anything else). Hosts the scraper
+    routes to paid third-party data providers (LinkedIn) are refused.
+    """
+    if not isinstance(value, str) or len(value) > 2048 or _controls(value) or '\\' in value:
+        raise PolicyError('invalid_scrape_url')
+    try:
+        parts = urlsplit(value.strip())
+        scheme = parts.scheme.lower()
+        port = parts.port
+        if scheme not in ('http', 'https') or parts.username is not None or parts.password is not None \
+                or '@' in parts.netloc or port not in (None, 80, 443) or (scheme, port) in (('https', 80),):
+            raise ValueError
+        host = normalize_domain(parts.hostname or '')
+        if not re.search(r'[a-z]', host.rsplit('.', 1)[-1]) or host.endswith('.localhost') or host == 'localhost':
+            raise ValueError
+    except (ValueError, PolicyError):
+        raise PolicyError('invalid_scrape_url') from None
+    if any(host == h or host.endswith('.' + h) for h in SCRAPE_BLOCKED_HOSTS):
+        raise PolicyError('scrape_host_not_supported')
+    from urllib.parse import quote, unquote, urlunsplit
+    path = quote(unquote(parts.path or '/'), safe="/-._~!$&'()*+,;=:@%")
+    query = quote(unquote(parts.query), safe="=&-._~!$'()*+,;:@/?%")
+    url = urlunsplit(('https', host, path, query, ''))
+    try:
+        return validate_evidence_url(url)
+    except PolicyError:
+        raise PolicyError('invalid_scrape_url') from None
 
 
 def overpass_area(value):
@@ -386,6 +525,18 @@ def _sanitize_discovery_keys(clean):
             clean[key] = _enum_list(clean[key], allowed)
     if 'query' in clean:
         clean['query'] = search_query(clean['query'])
+    if 'queries' in clean:
+        clean['queries'] = batch_queries(clean['queries'])
+    if 'include_domains' in clean:
+        clean['include_domains'] = search_domains(clean['include_domains'])
+    if 'url' in clean:
+        clean['url'] = scrape_url(clean['url'])
+    for key, limit in (('company', 200), ('location', 120)):
+        if key in clean:
+            text = _bounded_text(clean[key], limit, min_len=2)
+            if not _TERM.fullmatch(text):
+                raise PolicyError('invalid_payload')
+            clean[key] = text
     if 'num' in clean:
         # Serper bills 2 credits when num > 10, but ledger charges are fixed per operation.
         if type(clean['num']) is not int or clean['num'] != 10:
@@ -403,6 +554,13 @@ def _sanitize_discovery_keys(clean):
     if 'tags' in clean:
         clean['tags'] = _enum_list(clean['tags'], OSM_TAG_ALLOWLIST, allow_empty=False)
     _sanitize_v3_keys(clean)
+
+
+def batch_queries(value):
+    """1..100 web-search queries, each validated like 'search', duplicates dropped in order."""
+    if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= MAX_BATCH_QUERIES:
+        raise PolicyError('invalid_queries')
+    return list(dict.fromkeys(search_query(q) for q in value))
 
 
 def domain_search_options(payload):
@@ -450,6 +608,8 @@ def _normalize_discovery_job(job, operation):
         paging = {k for k in ('num', 'page', 'count', 'offset') if k in payload}
         if provider in SEARCH_PAGING_BY_PROVIDER and paging - SEARCH_PAGING_BY_PROVIDER[provider]:
             raise PolicyError('paging_not_supported_by_provider')
+        if 'include_domains' in payload and provider not in SEARCH_DOMAIN_FILTER_PROVIDERS:
+            raise PolicyError('domain_filter_not_supported_by_provider')
         for key in paging:
             if payload[key] == SEARCH_PAGING_DEFAULTS[key]:
                 del payload[key]
@@ -457,6 +617,15 @@ def _normalize_discovery_job(job, operation):
         if 'area' not in payload:
             raise PolicyError('places_requires_area')
         payload.setdefault('tags', list(OSM_DEFAULT_TAGS))
+    elif operation == 'search_batch':
+        if 'queries' not in payload:
+            raise PolicyError('search_batch_requires_queries')
+    elif operation == 'company_search':
+        if 'query' not in payload:
+            raise PolicyError('company_search_requires_query')
+    elif operation == 'scrape':
+        if 'url' not in payload:
+            raise PolicyError('scrape_requires_url')
     else:
         payload = _normalize_v3_payload(str(job.get('provider', '')), operation, payload)
     return {'provider': str(job.get('provider', '')), 'operation': operation,
@@ -473,7 +642,18 @@ def discovery_identity(operation, payload):
             domain = domain[4:]
         return {'domain': domain, 'options': domain_search_options(payload)}
     if operation == 'search':
-        return {'query': payload.get('query'), 'paging': search_paging(payload)}
+        identity = {'query': payload.get('query'), 'paging': search_paging(payload)}
+        if payload.get('include_domains'):
+            # Only present when used, so pre-existing cache identities are unchanged.
+            identity['include_domains'] = search_domains(payload['include_domains'])
+        return identity
+    if operation == 'scrape':
+        return {'url': scrape_url(payload.get('url'))}
+    if operation == 'search_batch':
+        # Order-insensitive: the same query set is one cached observation.
+        return {'queries': sorted(batch_queries(payload.get('queries')))}
+    if operation == 'company_search':
+        return {'query': search_query(payload.get('query'))}
     if operation in V3_OPERATIONS:
         return _v3_identity(operation, payload)
     return {'area': (payload.get('area') or '').casefold(), 'state': payload.get('state'),
@@ -487,7 +667,7 @@ def discovery_identity(operation, payload):
 # normalize_job, which knows the provider.
 # ---------------------------------------------------------------------------
 
-V3_OPERATIONS = frozenset({'people_search', 'text_search', 'people_enrich', 'enrich', 'linkedin_email'})
+V3_OPERATIONS = frozenset({'people_search', 'text_search', 'people_enrich', 'enrich', 'linkedin_email', 'person_enrich'})
 
 # https://docs.apollo.io/reference/people-api-search (person_seniorities[] options)
 APOLLO_SENIORITIES = ('owner', 'founder', 'c_suite', 'partner', 'vp', 'head', 'director', 'manager', 'senior',
@@ -697,6 +877,8 @@ def _normalize_v3_payload(provider, operation, payload):
     elif operation == 'linkedin_email':
         if 'linkedin_url' not in payload:
             raise PolicyError('linkedin_email_requires_url')
+    elif operation == 'person_enrich':
+        person_identity(payload)
     else:
         raise PolicyError('unsupported_operation')
     return payload
@@ -711,6 +893,9 @@ def _v3_identity(operation, payload):
     identity = {k: payload[k] for k in ('apollo_id', 'person_id', 'linkedin_url', 'domain') if payload.get(k)}
     if payload.get('name'):
         identity['name'] = ' '.join(str(payload['name']).casefold().split())
+    for key in ('company', 'location'):  # People Data Labs only; absent elsewhere
+        if payload.get(key):
+            identity[key] = ' '.join(str(payload[key]).casefold().split())
     return identity
 
 
@@ -730,3 +915,22 @@ def enrich_identity(operation, payload):
 
 def linkedin_profile_url(value):
     return _linkedin(value)
+
+
+def person_identity(payload):
+    """People Data Labs enrichment input: exactly one of a LinkedIn profile, or a full name plus a
+    company domain and/or company name (optional 'location' narrows a name match).
+
+    Mirrors the documented minimum inputs (profile OR (name AND (company OR location ...))),
+    restricted to a company anchor so a name alone never matches a stranger.
+    """
+    if 'linkedin_url' in payload:
+        if set(payload) & {'name', 'domain', 'company', 'location'}:
+            raise PolicyError('enrich_requires_one_identity')
+        return payload
+    if 'name' not in payload or not (payload.get('domain') or payload.get('company')):
+        raise PolicyError('enrich_requires_name_and_company')
+    payload['name'] = _person_name(payload['name'])
+    if payload.get('domain', '').startswith('www.'):
+        payload['domain'] = normalize_domain(payload['domain'][4:])
+    return payload

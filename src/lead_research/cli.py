@@ -115,6 +115,15 @@ def parser():
     hs=hi.add_subparsers(dest='history_action',required=True)
     hm=hs.add_parser('import',help='Mark leads in earlier files as already delivered');hm.add_argument('files',nargs='+');hm.add_argument('--batch',default='imported')
     hs.add_parser('stats')
+    hb=hs.add_parser('suppress',help='Block people or whole companies forever (customers, do-not-contact, competitors)');hb.add_argument('files',nargs='+');hb.add_argument('--reason',required=True)
+    hf=hs.add_parser('feedback',help='Import outreach results (Outcome column: replied, meeting, bounced, unsubscribed, ...); bounces/unsubscribes get blocked')
+    hf.add_argument('files',nargs='+')
+    hs.add_parser('sources',help='Bounce and reply rates by email source, from imported feedback')
+    rf=hs.add_parser('refill',help='Recurring FREE allowances (e.g. Reoon 20/day) the daily run resets automatically')
+    rfs=rf.add_subparsers(dest='refill_action',required=True)
+    ra=rfs.add_parser('add');ra.add_argument('provider',choices=list(PROVIDERS));ra.add_argument('--pool',required=True);ra.add_argument('--amount',required=True);ra.add_argument('--period',choices=['daily','monthly'],required=True);ra.add_argument('--source',required=True,help='Where this free allowance is documented')
+    rfs.add_parser('list')
+    rr=rfs.add_parser('remove');rr.add_argument('provider');rr.add_argument('--pool',required=True)
     d=s.add_parser('demo',help='Run a synthetic offline demonstration in an empty workspace')
     d.add_argument('--output',required=True)
     return p
@@ -314,8 +323,22 @@ def main(argv=None):
             from .daily import History, import_history
             if args.history_action=='import':result=import_history(work,args.files,args.batch)
             else:
+                from .quality import read_rows
+                from .policy import parse_units
                 h=History(work/'lead-history.sqlite3')
-                try:result=h.stats()
+                try:
+                    if args.history_action=='suppress':result={'blocked_keys':h.suppress([r for f in args.files for r in read_rows(f)],args.reason),**h.stats()}
+                    elif args.history_action=='feedback':result={'outcomes':h.record_outcomes([r for f in args.files for r in read_rows(f)]),'by_source':h.source_quality()}
+                    elif args.history_action=='sources':result=h.source_quality()
+                    elif args.history_action=='refill':
+                        if args.refill_action=='add':
+                            allowed={p for charges in config['providers'][args.provider]['charges'].values() for p in charges}
+                            if args.pool not in allowed:raise PolicyError('unknown_budget_pool')
+                            parse_units(args.amount,positive=True)
+                            h.add_refill(args.provider,args.pool,args.amount,args.period,args.source)
+                        elif args.refill_action=='remove':h.remove_refill(args.provider,args.pool)
+                        result={'refills':h.refills(),'note':'operator-attested free allowances; the daily run resets each pool to this amount once per period, never adds on top'}
+                    else:result=h.stats()
                 finally:h.close()
         elif args.command=='collect':
             from .discovery import collect

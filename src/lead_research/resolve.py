@@ -12,14 +12,16 @@ import html
 import re
 from urllib.parse import urlsplit
 
-from .discovery import xray_jobs
+from .discovery import SEARCH_PROVIDERS, search_jobs, serper_batch_jobs
 from .models import PolicyError
-from .policy import US_STATES, normalize_job, search_query
+from .policy import MAX_BATCH_QUERIES, US_STATES, normalize_job, search_query
 from .quality import (FRANCHISE_PARENTS, _brand_parent_hosts, normalize_host, website_matches_company,
                       website_problem)
 
 __all__ = ['DIRECTORY_DOMAINS', 'firm_core', 'resolution_query', 'resolution_queries', 'resolution_jobs',
-           'pick_domain', 'verify_domain', 'resolve_from_store', 'company_key']
+           'pick_domain', 'verify_domain', 'resolve_from_store', 'company_key', 'resolution_batch_jobs',
+           'exa_resolution_query', 'exa_resolution_jobs', 'resolve_from_hunter', 'firm_name_key',
+           'searched_queries']
 
 DEFAULT_THRESHOLD = 0.5
 
@@ -110,6 +112,33 @@ def resolution_query(company):
         return ''
 
 
+def exa_resolution_query(company):
+    """Natural-language Exa 'company' query (Exa ignores quotes/operators):
+    'Harborlight Homes real estate company in Bexar County, Texas'."""
+    firm = firm_core(company.get('organization') or company.get('company') or '')
+    if not firm or not re.search(r'[A-Za-z]', firm):
+        return ''
+    state = (company.get('state') or '').upper()
+    city = ' '.join(str(company.get('city') or '').split())
+    county = re.sub(r'(?i)\s+county$', '', ' '.join(str(company.get('county') or '').split()))
+    state_name = US_STATES.get(state, state)
+    if city:
+        place = '%s, %s' % (city, state_name) if state_name else city
+    elif county:
+        place = '%s County, %s' % (county, state_name) if state_name else '%s County' % county
+    else:
+        place = state_name
+    query = ' '.join(('%s real estate company%s' % (firm, ' in ' + place if place else '')).split())
+    try:
+        return search_query(query)
+    except PolicyError:
+        return ''
+
+
+def _query_for(provider):
+    return exa_resolution_query if provider == 'exa' else resolution_query
+
+
 def resolution_queries(companies):
     """[(company_key, query)] in input order, one per distinct company with a usable query."""
     out, seen = [], set()
@@ -124,14 +153,56 @@ def resolution_queries(companies):
 
 
 def resolution_jobs(companies, provider='serper'):
-    """Search jobs (first page only) in the same format discovery.xray_jobs builds, validated by policy."""
+    """First-page 'search' jobs (discovery.search_jobs format), validated by policy.
+
+    provider: 'serper', 'brave', 'tavily', 'serpapi' or 'firecrawl' (single searches whose
+    stored results rows carry 'link'), or 'exa' for Exa 'company_search' jobs (see
+    exa_resolution_jobs). resolve_from_store(provider=...) reads the same provider's answers.
+    """
+    if provider == 'exa':
+        return exa_resolution_jobs(companies)
+    if provider not in SEARCH_PROVIDERS:
+        raise PolicyError('unsupported_resolution_provider')
     queries = list(dict.fromkeys(q for _, q in resolution_queries(companies)))
-    jobs = xray_jobs(provider, queries, pages=1)
+    jobs = search_jobs(provider, queries, pages=1)
     if provider == 'brave':
         for job in jobs:
             job['payload']['count'] = 10
     for job in jobs:
         normalize_job(job)  # raises PolicyError on anything the ledger would refuse
+    return jobs
+
+
+def exa_resolution_jobs(companies):
+    """One Exa 'company_search' job per distinct company query (category 'company', 10 results)."""
+    queries = []
+    for company in companies:
+        query = exa_resolution_query(company)
+        if query and query not in queries:
+            queries.append(query)
+    jobs = [{'provider': 'exa', 'operation': 'company_search', 'payload': {'query': q}} for q in queries]
+    for job in jobs:
+        normalize_job(job)
+    return jobs
+
+
+def searched_queries(store, provider='serper'):
+    """Queries that already have a usable completed answer (single search, batch entry, or Exa)."""
+    return set(_answers_by_query(store, provider))
+
+
+def resolution_batch_jobs(companies, size=MAX_BATCH_QUERIES, store=None):
+    """Serper mini-batch jobs for firm resolution: up to ``size`` (<= 100) queries per request.
+
+    The queries are exactly resolution_query() strings, so resolve_from_store matches the batch
+    entries back to firms. With a ``store``, queries already answered (by a single search or an
+    earlier batch entry) are left out so no query is billed twice.
+    """
+    done = searched_queries(store, 'serper') if store is not None else set()
+    queries = [q for q in dict.fromkeys(q for _, q in resolution_queries(companies)) if q not in done]
+    jobs = serper_batch_jobs(queries, size=size) if queries else []
+    for job in jobs:
+        normalize_job(job)
     return jobs
 
 
@@ -225,7 +296,8 @@ def pick_domain(company, results, threshold=DEFAULT_THRESHOLD):
     for rank, row in enumerate(results or []):
         if not isinstance(row, dict):
             continue
-        host = _host(row.get('link'))
+        link = row.get('link') or row.get('url')  # Serper/Brave 'link', Exa company rows 'url'
+        host = _host(link)
         domain = normalize_host(host) if host else ''
         if not domain or domain in seen:
             continue
@@ -236,7 +308,7 @@ def pick_domain(company, results, threshold=DEFAULT_THRESHOLD):
         score = round(max(0.0, score - 0.01 * rank), 3)  # earlier organic positions break ties
         if best is None or score > best['confidence']:
             best = {'domain': domain, 'confidence': score, 'reason': ';'.join(reasons) or 'weak',
-                    'link': row.get('link')}
+                    'link': link}
     if best is None or best['confidence'] < threshold:
         return None
     return best
@@ -304,30 +376,51 @@ def verify_domain(company, domain, fetcher):
     return False, evidence
 
 
-def resolve_from_store(store, companies, provider='serper', *, threshold=DEFAULT_THRESHOLD, fetcher=None):
-    """Attach company_website + resolution evidence from completed search attempts in the Store.
+_RESOLUTION_OPERATIONS = {'exa': ('company_search',), 'serper': ('search', 'search_batch')}
 
-    An attempt matches a company when its payload query equals the company's resolution query (the
-    same string ``resolution_jobs`` submits, so policy's cache identity matches too). Companies with
-    no completed search or no confident domain are returned with company_website ''. When a
-    ``fetcher`` is given, picked domains must also pass ``verify_domain``.
-    """
+
+def _answers_by_query(store, provider):
+    """{query: [(attempt, results)]} from completed single, batch and Exa company searches."""
     by_query = {}
+    operations = _RESOLUTION_OPERATIONS.get(provider, ('search',))
     for attempt in store.attempts():
-        if attempt.get('provider') != provider or attempt.get('operation') != 'search' \
+        if attempt.get('provider') != provider or attempt.get('operation') not in operations \
                 or attempt.get('state') not in ('completed', 'reviewed'):
             continue
         outcome = attempt.get('outcome') or {}
         if outcome.get('error') or outcome.get('assessment') not in ('results', 'not_found'):
             continue
+        fields = outcome.get('fields') or {}
+        if attempt['operation'] == 'search_batch':
+            sent = (attempt.get('payload') or {}).get('queries') or []
+            for entry in fields.get('batches') or []:
+                # Only entries keyed to a query that was actually sent in this attempt.
+                if not isinstance(entry, dict) or entry.get('error') or entry.get('query') not in sent:
+                    continue
+                by_query.setdefault(entry['query'], []).append((attempt, entry.get('results') or []))
+            continue
         query = (attempt.get('payload') or {}).get('query')
         if isinstance(query, str):
-            results = (outcome.get('fields') or {}).get('results') or []
-            by_query.setdefault(query, []).append((attempt, results))
+            by_query.setdefault(query, []).append((attempt, fields.get('results') or []))
+    return by_query
+
+
+def resolve_from_store(store, companies, provider='serper', *, threshold=DEFAULT_THRESHOLD, fetcher=None):
+    """Attach company_website + resolution evidence from completed search attempts in the Store.
+
+    An attempt matches a company when its payload query equals the company's resolution query (the
+    same string ``resolution_jobs`` submits, so policy's cache identity matches too). For Serper,
+    mini-batch ('search_batch') entries count too, matched by their query string. provider 'exa'
+    reads 'company_search' attempts keyed by exa_resolution_query. Companies with no completed
+    search or no confident domain are returned with company_website ''. When a ``fetcher`` is
+    given, picked domains must also pass ``verify_domain``.
+    """
+    by_query = _answers_by_query(store, provider)
+    query_for = _query_for(provider)
     out = []
     for company in companies:
         row = dict(company)
-        query = resolution_query(company)
+        query = query_for(company)
         row.update(company_website='', resolution={'query': query, 'status': 'not_searched'})
         matches = by_query.get(query) if query else None
         if matches:
@@ -350,5 +443,119 @@ def resolve_from_store(store, companies, provider='serper', *, threshold=DEFAULT
                 if resolution['status'] == 'resolved':
                     row['company_website'] = pick['domain']
                 row['resolution'] = resolution
+        out.append(row)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Free resolution from Hunter Discover (organization.name batches).
+# ---------------------------------------------------------------------------
+
+_NAME_FILLER = frozenset({'the', 'and'})
+
+
+def firm_name_key(name):
+    """Near-exact firm-name key: firm_core, case/punctuation folded, '&'/'and'/'the' ignored.
+
+    'Corraway Realty Group, LLC' == 'The Corraway Realty Group' == 'corraway realty group'.
+    """
+    core = firm_core(name)
+    tokens = [t for t in _fold(core.replace('&', ' and ')) if t not in _NAME_FILLER]
+    return ''.join(tokens)
+
+
+def _attempt_state(filters):
+    """The single US state a Discover attempt was filtered to, else None."""
+    hq = (filters or {}).get('headquarters_location') or {}
+    states = {loc.get('state') for loc in hq.get('include') or [] if isinstance(loc, dict)}
+    if len(states) == 1 and None not in states:
+        return next(iter(states))
+    return None
+
+
+def resolve_from_hunter(store, companies):
+    """Attach company_website from free Hunter Discover results matched by firm name.
+
+    Every completed Hunter 'discover' attempt contributes its (organization, domain) pairs; an
+    attempt filtered to exactly one US state labels its companies with that state. A company
+    matches when firm_name_key(organization) is equal on both sides and, when both states are
+    known, the states agree. Nothing is guessed: a key shared by two input firms, or one key
+    mapping to two different domains, is skipped as ambiguous; directory, franchise-parent and
+    other non-own domains are skipped too. Rows that already carry a company_website are
+    returned unchanged. Resolved rows get resolution {'method': 'hunter_discover_name',
+    'status': 'resolved', 'domain', 'attempt_id', 'matched_organization', 'state_checked'}.
+    """
+    observed = {}
+    for attempt in store.attempts():
+        if attempt.get('provider') != 'hunter' or attempt.get('operation') != 'discover' \
+                or attempt.get('state') not in ('completed', 'reviewed'):
+            continue
+        outcome = attempt.get('outcome') or {}
+        if outcome.get('error') or outcome.get('assessment') != 'results':
+            continue
+        state = _attempt_state((attempt.get('payload') or {}).get('filters'))
+        for row in (outcome.get('fields') or {}).get('companies') or []:
+            if not isinstance(row, dict) or not row.get('domain') or not row.get('organization'):
+                continue
+            key = firm_name_key(row['organization'])
+            domain = normalize_host(str(row['domain']))
+            if key and domain:
+                observed.setdefault(key, []).append({'domain': domain, 'state': state, 'attempt_id': attempt['id'],
+                                                     'organization': row['organization']})
+    by_key = {}
+    for company in companies:
+        if company.get('company_website'):
+            continue
+        key = firm_name_key(company.get('organization') or company.get('company') or '')
+        if key:
+            firms = by_key.setdefault(key, {})
+            firms.setdefault(company_key(company), (company.get('state') or '').upper() or None)
+    out = []
+    for company in companies:
+        row = dict(company)
+        if company.get('company_website'):
+            out.append(row)
+            continue
+        key = firm_name_key(company.get('organization') or company.get('company') or '')
+        state = (company.get('state') or '').upper() or None
+        resolution = {'method': 'hunter_discover_name', 'status': 'no_match'}
+        row['company_website'] = ''
+        # Other input firms with the same name key; distinct known states can still be told apart.
+        others = [s for k, s in (by_key.get(key) or {}).items() if k != company_key(company)]
+        if not key:
+            resolution['status'] = 'no_firm_name'
+        elif any(not state or not other or other == state for other in others):
+            resolution['status'] = 'ambiguous_firm_name'
+        elif key in observed:
+            seen = observed[key]
+            confirmed = [h for h in seen if state and h['state'] == state]
+            elsewhere = [h for h in seen if state and h['state'] and h['state'] != state]
+            unlabelled = [h for h in seen if not h['state']]
+            if confirmed:
+                hits = confirmed
+            elif others:  # the same name exists in another state: only a state-labelled result counts
+                hits = []
+            elif elsewhere and unlabelled:  # an unlabelled result might be the other-state firm
+                hits = elsewhere + unlabelled
+            else:
+                hits = unlabelled if state else seen
+            domains = sorted({h['domain'] for h in hits})
+            if len(domains) > 1:
+                resolution.update(status='ambiguous_domain', candidates=domains)
+            elif domains:
+                hit = next(h for h in hits if h['domain'] == domains[0])
+                organization = company.get('organization') or company.get('company') or ''
+                # Franchise parents (kw.com, remax.com, ...) are never a franchisee's own website here.
+                if hit['domain'] in FRANCHISE_PARENTS or _blocked(hit['domain'], hit['domain'], organization):
+                    resolution.update(status='blocked_domain', domain=hit['domain'])
+                else:
+                    row['company_website'] = hit['domain']
+                    resolution.update(status='resolved', domain=hit['domain'], attempt_id=hit['attempt_id'],
+                                      attempt_ids=sorted({h['attempt_id'] for h in hits}),
+                                      matched_organization=hit['organization'],
+                                      state_checked=bool(state and any(h['state'] == state for h in hits)))
+            else:
+                resolution['status'] = 'state_mismatch'
+        row['resolution'] = resolution
         out.append(row)
     return out

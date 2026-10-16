@@ -2,7 +2,7 @@
 
 An evidence-first Python toolkit for finding business contacts and researching their work emails without mixing guesses, public sources, and provider claims
 
-**Status: v0.3.0 alpha, local CLI, Python 3.11+, no runtime dependencies**
+**Status: v0.4.0 alpha, local CLI, Python 3.11+, no runtime dependencies**
 
 This is a clean source-code project. It contains synthetic examples, not the contact database, account state, API credentials, or captures from the research that inspired it. Source repository: https://github.com/amrtawfik160/lead-research-kit. No package has been published to PyPI.
 
@@ -42,6 +42,35 @@ One `daily --execute` run:
 9. **Writes** `leads.csv` (6 columns), `leads-details.csv` (tier, score, email source, evidence URL) and `report.json` (per-step counts, shortfall and what to enable next)
 
 Steps without an enabled, funded provider are skipped and reported, never forced. Tune with `--sources`, `--record-sources`, `--cap resolve=800`, `--max-domains`, `--min-tier A`.
+
+### Free-tier stack (what a $0 setup can use)
+
+| Job | Providers (free allowance as of Oct 2026, check before relying on it) |
+|---|---|
+| Company discovery | Hunter Discover (free calls; rotate cities, states, niches, hiring), OpenStreetMap, public license records (TX, NY, CO, SEC Form D) |
+| Firm website lookup | Hunter Discover by firm name (free, 50 names per call), then Serper batches of 100 (2,500 one-time), Tavily (1,000/month), Exa ($10/month) |
+| People + emails | Your crawler (free), Firecrawl rendering for JavaScript-only team pages (~1,000 credits/month), Deepline promo credits (LeadMagic finder ~0.34 credits per found email; set `DEEPLINE_FIND_ROUTE=waterfall` for the multi-provider play) |
+| Email verification | Reoon (20/day), Abstract (100/month), Bouncer (100 one-time), MyEmailVerifier (100), Verifalia, Clearout, MillionVerifier, Emailable, Kickbox |
+| LinkedIn URLs | Serper/Tavily search, People Data Labs (100/month, identity fields only on free) |
+
+`verify` uses the first enabled, funded verifier in configuration order, so free pools are used one after another as each runs out.
+
+### Long-term operations
+
+```bash
+lead-research --workspace WS history refill add reoon --pool credits --amount 20 --period daily --source "Reoon free plan"
+lead-research --workspace WS history suppress customers.csv --reason customer      # people or whole domains, forever
+lead-research --workspace WS history feedback outreach-results.csv                 # Outcome: replied, meeting, bounced, unsubscribed...
+lead-research --workspace WS history sources                                       # bounce / reply rate per email source
+lead-research --workspace WS --env-file WS/keys.env daily --target 500 --execute
+```
+
+- **Recurring free allowances** are operator-attested: each pool is reset to its documented free amount once per day or month, never added on top
+- **Feedback**: bounces, unsubscribes, wrong-person and do-not-contact rows are blocked automatically. Sources with a bounce rate above 5% are deprioritized
+- **Recrawl**: company sites are revisited every 90 days to catch new people; crawl data older than 100 days is not delivered
+- **Backups**: every executed run makes consistent copies of the ledger and history in `WS/backups/<date>/` (newest 14 kept)
+- **Morning summary**: `daily/<date>/report.md` (delivered vs target, sources, low budgets, next steps)
+- **Keys**: `--env-file` reads a private 0600 `KEY=VALUE` file; existing environment variables win
 
 ### What it takes to reach 500 a day
 

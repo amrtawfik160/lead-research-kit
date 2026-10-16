@@ -17,25 +17,38 @@ Sources for request/response shapes:
 - Prospeo Search / Enrich Person: https://prospeo.io/api-docs/search-person, /api-docs/enrich-person
 - Google Places Text Search (New):
   https://developers.google.com/maps/documentation/places/web-service/text-search
-- Exa search (category 'people'): https://docs.exa.ai/reference/search
+- Exa search (category 'people' / 'company'): https://docs.exa.ai/reference/search
+- Serper mini-batch: POST /search with a JSON array of up to 100 {q, ...} objects -> array of
+  responses in request order, one credit each (serper.dev Playground 'Mini-batch (up to 100 queries)')
 - Tomba LinkedIn Finder: https://docs.tomba.io/api/finder
+- Tavily Search: https://docs.tavily.com/documentation/api-reference/endpoint/search -> results[]
+  {title, url, content}; SerpApi: https://serpapi.com/search-api -> organic_results[] {title, link,
+  snippet}; Firecrawl search/scrape: https://docs.firecrawl.dev/api-reference/endpoint/search and
+  /endpoint/scrape (data.web[] {url, title, description}; data.html)
+- People Data Labs Person Enrichment: https://docs.peopledatalabs.com/docs/reference-person-enrichment-api
 """
 from __future__ import annotations
 
+import base64
 import html
 import re
+import zlib
 from urllib.parse import quote, unquote, urlsplit
 
 from .models import PolicyError
-from .policy import (HUNTER_HEADCOUNTS, OSM_DEFAULT_TAGS, US_STATES, normalize_domain, normalize_email,
-                     us_state_code, validate_evidence_url)
+from .policy import (HUNTER_HEADCOUNTS, HUNTER_POSTED_DATES, MAX_BATCH_QUERIES, OSM_DEFAULT_TAGS, US_STATES,
+                     SEARCH_DOMAIN_FILTER_PROVIDERS, normalize_discover_filters, normalize_domain, normalize_email,
+                     scrape_url, search_domains, search_query, us_state_code, validate_evidence_url)
 
 __all__ = ['US_STATES', 'DEFAULT_DM_TITLES', 'HUNTER_REAL_ESTATE_INDUSTRIES', 'DISCOVERY_OPERATIONS',
            'canonical_linkedin', 'parse_linkedin_result', 'build_xray_queries', 'xray_jobs',
            'hunter_discover_jobs', 'hunter_domain_jobs', 'osm_jobs', 'collect', 'clean_text', 'safe_link',
            'apollo_jobs', 'apollo_enrich_jobs', 'prospeo_jobs', 'prospeo_enrich_jobs', 'tomba_linkedin_jobs',
            'places_queries', 'places_jobs', 'exa_people_queries', 'exa_jobs', 'PLACES_QUERY_TEMPLATES',
-           'FINDER_OPERATIONS']
+           'FINDER_OPERATIONS', 'hunter_discover_city_jobs', 'hunter_discover_keyword_jobs',
+           'hunter_name_resolution_jobs', 'serper_batch_jobs', 'HUNTER_NAME_BATCH', 'SEARCH_PROVIDERS',
+           'search_jobs', 'firecrawl_scrape_jobs', 'pdl_enrich_jobs', 'scraped_html', 'scraped_pages',
+           'encode_html', 'decode_html', 'FIRECRAWL_MAX_HTML']
 
 DEFAULT_DM_TITLES = ('CEO', 'Founder', 'Owner', 'President', 'Principal', 'Managing Partner',
                      'Managing Broker', 'Broker/Owner', 'Designated Broker', 'Managing Director')
@@ -45,9 +58,16 @@ DEFAULT_DM_TITLES = ('CEO', 'Founder', 'Owner', 'President', 'Principal', 'Manag
 HUNTER_REAL_ESTATE_INDUSTRIES = ('Real Estate', 'Real Estate Agents and Brokers', 'Commercial Real Estate',
                                  'Leasing Residential Real Estate', 'Leasing Non-residential Real Estate')
 
-DISCOVERY_OPERATIONS = ('discover', 'domain_search', 'search', 'places', 'people_search', 'text_search')
+DISCOVERY_OPERATIONS = ('discover', 'domain_search', 'search', 'search_batch', 'places', 'people_search',
+                        'text_search')
+# Firm names per Hunter Discover organization.name job: one free response holds at most 100
+# companies, so 50 names leave room for a couple of same-name matches per firm.
+HUNTER_NAME_BATCH = 50
 # Single-person operations whose 'candidate' email (and enriched identity) become prospects.
-FINDER_OPERATIONS = ('find', 'people_enrich', 'enrich', 'linkedin_email')
+FINDER_OPERATIONS = ('find', 'people_enrich', 'enrich', 'linkedin_email', 'person_enrich')
+# Providers whose single-query 'search' operation returns {results, prospects} rows (Exa: 'people').
+SEARCH_PROVIDERS = ('serper', 'brave', 'tavily', 'serpapi', 'exa', 'firecrawl')
+FIRECRAWL_MAX_HTML = 500_000  # bytes of UTF-8 HTML kept per scraped page
 PLACES_QUERY_TEMPLATES = ('real estate brokerage in {city}, {state}', 'commercial real estate firm in {city}, {state}',
                           'property management company in {city}, {state}')
 MAX_XRAY_QUERY = 300
@@ -345,6 +365,135 @@ def hunter_discover_jobs(states, industries=HUNTER_REAL_ESTATE_INDUSTRIES, headc
     return jobs
 
 
+def _discover_job(filters):
+    normalize_discover_filters(filters)  # fail fast on anything the ledger would refuse
+    return {'provider': 'hunter', 'operation': 'discover', 'payload': {'filters': filters}}
+
+
+def _hiring_filter(hiring):
+    """None -> no job filter; True -> currently hiring; dict -> validated job_openings filter."""
+    if hiring is None or hiring is False:
+        return None
+    if hiring is True:
+        return {'hiring': True}
+    if isinstance(hiring, dict):
+        if 'posted_date' in hiring and hiring['posted_date'] not in HUNTER_POSTED_DATES:
+            raise PolicyError('invalid_filters')
+        return dict(hiring)
+    raise PolicyError('invalid_filters')
+
+
+def hunter_discover_city_jobs(metros, headcounts=('1-10', '11-50', '51-200'),
+                              industries=HUNTER_REAL_ESTATE_INDUSTRIES, keywords=None, hiring=None, limit=100):
+    """One free Hunter Discover job per (city, state) x headcount.
+
+    City-level headquarters filters split a state's companies into many more distinct
+    100-company pages than state-level jobs (free plans cannot page). Each metro is a
+    (city, state) tuple or {'city', 'state'} dict; Hunter requires country with a city, so
+    every location is {'city', 'country': 'US', 'state'}. ``hiring`` is None, True (currently
+    hiring) or a job_openings dict such as {'hiring': True, 'posted_date': 'last30d'}.
+    """
+    jobs, seen = [], set()
+    job_filter = _hiring_filter(hiring)
+    for item in metros:
+        city, state = _metro(item)
+        if not city or not state:
+            raise PolicyError('invalid_metro')
+        code = us_state_code(state)
+        if (city.casefold(), code) in seen:
+            continue
+        seen.add((city.casefold(), code))
+        for headcount in headcounts:
+            if headcount not in HUNTER_HEADCOUNTS:
+                raise PolicyError('invalid_filters')
+            filters = {'headquarters_location': {'include': [{'city': city, 'country': 'US', 'state': code}]},
+                       'headcount': [headcount], 'limit': limit}
+            if industries:
+                filters['industry'] = {'include': list(industries)}
+            if keywords:
+                filters['keywords'] = {'include': list(keywords), 'match': 'any'}
+            if job_filter:
+                filters['job_openings'] = dict(job_filter)
+            jobs.append(_discover_job(filters))
+    return jobs
+
+
+def hunter_discover_keyword_jobs(states, keyword_sets, headcounts=None, industries=None, limit=100):
+    """One free Hunter Discover job per state x keyword set (keywords match 'any').
+
+    Keyword sets (e.g. ('property management',), ('commercial brokerage', 'investment sales'))
+    surface companies that industry filters misfile. Optional headcount / industry narrowing.
+    """
+    jobs = []
+    sets = []
+    for keywords in keyword_sets:
+        group = [keywords] if isinstance(keywords, str) else list(keywords)
+        if not group:
+            raise PolicyError('invalid_filters')
+        if group not in sets:
+            sets.append(group)
+    for state in dict.fromkeys(us_state_code(s) for s in states):
+        for group in sets:
+            filters = {'headquarters_location': {'include': [{'country': 'US', 'state': state}]},
+                       'keywords': {'include': group, 'match': 'any'}, 'limit': limit}
+            if headcounts:
+                filters['headcount'] = list(headcounts)
+            if industries:
+                filters['industry'] = {'include': list(industries)}
+            jobs.append(_discover_job(filters))
+    return jobs
+
+
+_HUNTER_NAME = re.compile(r"[\w .,&'()/+-]+")
+
+
+def hunter_name_resolution_jobs(companies, batch_size=HUNTER_NAME_BATCH):
+    """Free Hunter Discover jobs that look up firm domains by organization.name.
+
+    Companies are grouped by state (records give one) and each group is cut into batches of at
+    most ``batch_size`` (<= 50) distinct firm names (resolve.firm_core). When every name in a
+    batch shares a state, the batch also filters headquarters to that state; companies without
+    a state go in unfiltered batches. Names Hunter's filter syntax cannot carry are skipped.
+    Map the results back with resolve.resolve_from_hunter.
+    """
+    from .resolve import firm_core  # resolve imports this module at load time
+    if type(batch_size) is not int or not 1 <= batch_size <= HUNTER_NAME_BATCH:
+        raise PolicyError('invalid_batch_size')
+    groups = {}
+    for company in companies:
+        name = ' '.join(firm_core(company.get('organization') or company.get('company') or '').split())
+        if not 2 <= len(name) <= 100 or not _HUNTER_NAME.fullmatch(name) or not re.search(r'[A-Za-z]', name):
+            continue
+        state = company.get('state')
+        try:
+            code = us_state_code(state) if state else None
+        except PolicyError:
+            code = None
+        bucket = groups.setdefault(code, {})
+        bucket.setdefault(name.casefold(), name)
+    jobs = []
+    for code in sorted(groups, key=lambda c: (c is None, c or '')):
+        names = sorted(groups[code].values(), key=str.casefold)
+        for chunk in _chunks(names, batch_size):
+            filters = {'organization': {'name': chunk}, 'limit': 100}
+            if code:
+                filters['headquarters_location'] = {'include': [{'country': 'US', 'state': code}]}
+            jobs.append(_discover_job(filters))
+    return jobs
+
+
+def serper_batch_jobs(queries, size=MAX_BATCH_QUERIES):
+    """Serper mini-batch jobs: distinct queries in input order, ``size`` (<= 100) per request.
+
+    Each job is billed len(queries) query units but is a single HTTP request.
+    """
+    if type(size) is not int or not 1 <= size <= MAX_BATCH_QUERIES:
+        raise PolicyError('invalid_batch_size')
+    clean = list(dict.fromkeys(search_query(q) for q in queries))
+    return [{'provider': 'serper', 'operation': 'search_batch', 'payload': {'queries': chunk}}
+            for chunk in _chunks(clean, size)]
+
+
 def hunter_domain_jobs(domains, limit=10, decision_maker=True, required_field=('full_name', 'position'),
                        seniority=(), department=()):
     """One Hunter Domain Search job per distinct domain (free plan: limit + offset <= 10)."""
@@ -549,6 +698,172 @@ def exa_jobs(queries):
     return [{'provider': 'exa', 'operation': 'search', 'payload': {'query': q}} for q in dict.fromkeys(queries)]
 
 
+def search_jobs(provider, queries, pages=1, include_domains=None):
+    """Generic single-query 'search' jobs for any SEARCH_PROVIDERS entry, distinct queries in order.
+
+    Paging: serper / serpapi use 'page' (1..10), brave 'offset' (0..9); tavily, exa and firecrawl
+    are first-page only (pages must be 1). include_domains (<= 20 hosts) is accepted only by
+    tavily and firecrawl, whose APIs document a domain allowlist.
+    """
+    if provider not in SEARCH_PROVIDERS or type(pages) is not int or not 1 <= pages <= 10:
+        raise PolicyError('invalid_search_jobs')
+    if pages != 1 and provider not in ('serper', 'brave', 'serpapi'):
+        raise PolicyError('paging_not_supported_by_provider')
+    domains = None
+    if include_domains:
+        if provider not in SEARCH_DOMAIN_FILTER_PROVIDERS:
+            raise PolicyError('domain_filter_not_supported_by_provider')
+        domains = search_domains(include_domains)
+    jobs = []
+    for query in dict.fromkeys(search_query(q) for q in queries):
+        for index in range(pages):
+            payload = {'query': query}
+            if index and provider == 'brave':
+                payload['offset'] = index
+            elif index:
+                payload['page'] = index + 1
+            if domains:
+                payload['include_domains'] = list(domains)
+            jobs.append({'provider': provider, 'operation': 'search', 'payload': payload})
+    return jobs
+
+
+def firecrawl_scrape_jobs(urls):
+    """One Firecrawl 'scrape' job per distinct public page URL (canonical https; see policy.scrape_url).
+
+    Invalid, private, non-http(s) or LinkedIn URLs raise PolicyError before any job is built.
+    """
+    jobs, seen = [], set()
+    for url in urls:
+        clean = scrape_url(url)
+        if clean in seen:
+            continue
+        seen.add(clean)
+        jobs.append({'provider': 'firecrawl', 'operation': 'scrape', 'payload': {'url': clean}})
+    return jobs
+
+
+def deepline_find_jobs(records, skip_with_email=True):
+    """One Deepline 'find' job per record with a two-part name and a company domain.
+
+    Accepts name/full_name (or first_name + last_name) and domain/company_website/website.
+    The domain evidence URL is the company's own homepage, https://{domain}/. Records that
+    already carry an email are skipped by default; duplicates (name + domain) are dropped.
+    """
+    from .policy import normalize_domain
+    jobs, seen = [], set()
+    for row in records:
+        if not isinstance(row, dict) or (skip_with_email and row.get('email')):
+            continue
+        name = row.get('name') or row.get('full_name')
+        if not isinstance(name, str) and isinstance(row.get('first_name'), str) and isinstance(row.get('last_name'), str):
+            name = row['first_name'] + ' ' + row['last_name']
+        name = ' '.join(name.split()) if isinstance(name, str) else ''
+        raw = next((row[k] for k in ('domain', 'company_website', 'website') if isinstance(row.get(k), str) and row[k].strip()), '')
+        host = urlsplit(raw.strip() if '://' in raw else 'https://' + raw.strip()).hostname or ''
+        try:
+            domain = normalize_domain(host)
+        except PolicyError:
+            continue
+        domain = domain[4:] if domain.startswith('www.') else domain
+        if len(name.split()) < 2 or len(name) > 120 or any(ord(c) < 32 for c in name):
+            continue
+        key = (name.lower(), domain)
+        if key in seen:
+            continue
+        seen.add(key)
+        payload = {'name': name, 'domain': domain, 'domain_evidence_url': f'https://{domain}/'}
+        if row.get('lead_id'):
+            payload['lead_id'] = str(row['lead_id'])
+        jobs.append({'provider': 'deepline', 'operation': 'find', 'payload': payload})
+    return jobs
+
+
+def pdl_enrich_jobs(prospects):
+    """One People Data Labs person_enrich job per prospect: LinkedIn profile, else name + company.
+
+    Prospects that already have a LinkedIn URL and title are still eligible (PDL returns the
+    current employer), but rows lacking both a LinkedIn URL and a name + company are skipped.
+    """
+    jobs, seen = [], set()
+    for row in prospects:
+        if not isinstance(row, dict):
+            continue
+        if row.get('linkedin_url'):
+            payload = {'linkedin_url': row['linkedin_url']}
+        elif row.get('full_name') and (row.get('company_website') or row.get('company')):
+            payload = {'name': row['full_name']}
+            if row.get('company_website'):
+                payload['domain'] = row['company_website']
+            else:
+                payload['company'] = row['company']
+        else:
+            continue
+        key = tuple(sorted((k, str(v).casefold()) for k, v in payload.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        if row.get('lead_id'):
+            payload['lead_id'] = str(row['lead_id'])
+        jobs.append({'provider': 'pdl', 'operation': 'person_enrich', 'payload': payload})
+    return jobs
+
+
+def encode_html(text):
+    """Compact, redact-safe storage for scraped HTML: zlib + unpadded urlsafe base64.
+
+    The ledger's redact() replaces any string containing '://' that is not an evidence URL,
+    which would erase raw HTML; this alphabet has no ':', '=' or whitespace, so it survives.
+    """
+    return base64.urlsafe_b64encode(zlib.compress(text.encode('utf-8'), 6)).decode('ascii').rstrip('=')
+
+
+def decode_html(value, limit=FIRECRAWL_MAX_HTML):
+    """Inverse of encode_html; None for anything malformed or larger than ``limit`` bytes."""
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]*', value):
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(value + '=' * (-len(value) % 4))
+        inflater = zlib.decompressobj()
+        data = inflater.decompress(raw, limit + 1)
+        if len(data) > limit or inflater.unconsumed_tail:
+            return None
+        return data.decode('utf-8', 'replace')
+    except (ValueError, zlib.error):
+        return None
+
+
+def scraped_html(outcome):
+    """The HTML of a Firecrawl 'scrape' outcome (Outcome or stored dict), or None."""
+    fields = getattr(outcome, 'fields', None)
+    if fields is None and isinstance(outcome, dict):
+        fields = outcome.get('fields')
+    if not isinstance(fields, dict):
+        return None
+    return decode_html(fields.get('html_zb64'))
+
+
+def scraped_pages(store):
+    """[{url, requested_url, html, page_status, truncated, attempt_id, observed_at}] from completed
+    Firecrawl scrapes, ready for extract.extract_people(html, url). Missing pages are omitted."""
+    pages = []
+    for attempt in store.attempts():
+        outcome = attempt.get('outcome') or {}
+        if attempt.get('provider') != 'firecrawl' or attempt.get('operation') != 'scrape' \
+                or attempt.get('state') not in ('completed', 'reviewed') or outcome.get('error') \
+                or outcome.get('assessment') != 'results':
+            continue
+        html_text = scraped_html(outcome)
+        if html_text is None:
+            continue
+        fields = outcome.get('fields') or {}
+        requested = fields.get('requested_url') or (attempt.get('payload') or {}).get('url')
+        pages.append({'url': fields.get('url') or requested, 'requested_url': requested, 'html': html_text,
+                      'page_status': fields.get('page_status'), 'truncated': fields.get('truncated') is True,
+                      'attempt_id': attempt['id'], 'observed_at': attempt.get('finished_at') or attempt.get('sent_at')})
+    return pages
+
+
 def _merge(target, row):
     if row.get('name_complete') is True and target.get('name_complete') is False:
         # A full name from enrichment replaces a partial (obfuscated) search name.
@@ -620,7 +935,7 @@ def _finder_prospect(attempt, outcome):
     fields = outcome.get('fields') or {}
     base = fields.get('prospect') if isinstance(fields.get('prospect'), dict) else {}
     assessment = outcome.get('assessment')
-    if assessment != 'candidate' and not (assessment == 'not_found' and base and attempt['operation'] != 'find'):
+    if assessment != 'candidate' and not (assessment in ('not_found', 'enriched') and base and attempt['operation'] != 'find'):
         return None
     payload = attempt.get('payload') or {}
     row = {k: v for k, v in base.items() if v not in (None, '', [])}
@@ -672,6 +987,12 @@ def collect(store):
         for row in fields.get('prospects') or []:
             if isinstance(row, dict):
                 prospects.append({**row, **meta, 'sources': [source]})
+        for batch in fields.get('batches') or []:  # Serper mini-batch: prospects per query
+            if not isinstance(batch, dict) or batch.get('error'):
+                continue
+            for row in batch.get('prospects') or []:
+                if isinstance(row, dict):
+                    prospects.append({**row, **meta, 'sources': [{**source, 'query': batch.get('query')}]})
         for row in fields.get('companies') or []:
             if isinstance(row, dict):
                 companies.append({**row, **meta, 'sources': [source]})

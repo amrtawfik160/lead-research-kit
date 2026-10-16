@@ -28,11 +28,15 @@ from pathlib import Path
 from . import quality
 from .pipeline import _name_key, build
 
-DEFAULT_SOURCES = ('records', 'resolve', 'hunter-discover', 'google-places', 'osm', 'crawl', 'find-emails', 'verify', 'build')
-OPTIONAL_SOURCES = ('hunter-domains', 'apollo', 'xray-linkedin')
+DEFAULT_SOURCES = ('records', 'resolve', 'hunter-discover', 'google-places', 'osm', 'crawl', 'render-js', 'find-emails', 'verify', 'build')
+OPTIONAL_SOURCES = ('hunter-domains', 'apollo', 'xray-linkedin', 'pdl')
 DEFAULT_RECORD_SOURCES = ('tx-trec', 'ny-dos', 'co-dora', 'sec-form-d')
-DEFAULT_CAPS = {'records': 3000, 'resolve': 400, 'hunter-discover': 60, 'google-places': 30, 'osm': 6, 'apollo': 20,
-                'apollo-enrich': 100, 'hunter-domains': 25, 'find-emails': 150, 'verify': 300, 'xray-linkedin': 200}
+DEFAULT_CAPS = {'records': 3000, 'resolve': 600, 'resolve-hunter': 1500, 'hunter-discover': 90, 'google-places': 30, 'osm': 6,
+                'apollo': 20, 'apollo-enrich': 50, 'hunter-domains': 25, 'find-emails': 60, 'verify': 300, 'xray-linkedin': 300,
+                'render-js': 25, 'pdl': 3}
+KEYWORD_SETS = (['property management'], ['commercial real estate'], ['multifamily'], ['real estate investment'],
+                ['real estate development'], ['brokerage'], ['luxury real estate'], ['land'])
+SEARCH_FALLBACK = ('serper', 'tavily', 'exa')
 EXPECTED_LEADS_PER_DOMAIN = 0.3  # measured: ~0.3 fresh decision makers with work email per crawled brokerage site
 
 # Large US metros as (place, state) for OpenStreetMap rotation. Official place names
@@ -66,6 +70,12 @@ METROS = (
 )
 
 HEADCOUNTS = ('1-10', '11-50', '51-200')
+OUTCOMES = {'replied', 'interested', 'meeting', 'not_interested', 'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer'}
+OUTCOME_ALIASES = {'reply': 'replied', 'positive': 'interested', 'booked': 'meeting', 'bounce': 'bounced', 'hard_bounce': 'bounced',
+                   'invalid': 'bounced', 'unsubscribe': 'unsubscribed', 'opt_out': 'unsubscribed', 'optout': 'unsubscribed',
+                   'dnc': 'do_not_contact', 'negative': 'not_interested', 'wrong_contact': 'wrong_person'}
+AUTO_SUPPRESS = {'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer'}
+BACKUPS_KEPT = 14
 
 
 def today_iso(clock=time.time):
@@ -90,7 +100,14 @@ class History:
           CREATE TABLE IF NOT EXISTS markets(kind TEXT, market TEXT, last_run TEXT, runs INTEGER DEFAULT 0, yield INTEGER DEFAULT 0, PRIMARY KEY(kind, market));
           CREATE TABLE IF NOT EXISTS prospects(key TEXT PRIMARY KEY, added_at REAL NOT NULL, data TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS firms(key TEXT PRIMARY KEY, added_at REAL NOT NULL, status TEXT NOT NULL, domain TEXT, data TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS suppressed(key TEXT PRIMARY KEY, reason TEXT NOT NULL, added_at REAL NOT NULL);
+          CREATE TABLE IF NOT EXISTS outcomes(key TEXT, outcome TEXT NOT NULL, source TEXT, email_source TEXT, batch TEXT, added_at REAL NOT NULL, PRIMARY KEY(key, outcome));
+          CREATE TABLE IF NOT EXISTS refills(provider TEXT, pool TEXT, amount TEXT NOT NULL, period TEXT NOT NULL, source TEXT NOT NULL, last_applied TEXT, PRIMARY KEY(provider, pool));
         ''')
+        cols = {r[1] for r in self.db.execute('PRAGMA table_info(delivered)')}
+        for col in ('email_source', 'source'):
+            if col not in cols:
+                self.db.execute(f'ALTER TABLE delivered ADD COLUMN {col} TEXT')
 
     def close(self):
         self.db.close()
@@ -111,19 +128,118 @@ class History:
         return keys
 
     def is_fresh(self, record):
+        """Never delivered, and not on the block list (person, email or whole company domain)."""
         keys = self.keys_for(record)
         if not keys:
             return False
         marks = ','.join('?' * len(keys))
-        return self.db.execute(f'SELECT 1 FROM delivered WHERE key IN ({marks}) LIMIT 1', keys).fetchone() is None
+        if self.db.execute(f'SELECT 1 FROM delivered WHERE key IN ({marks}) LIMIT 1', keys).fetchone():
+            return False
+        blocked = keys + (['dm:' + record['company_website']] if record.get('company_website') else [])
+        marks = ','.join('?' * len(blocked))
+        return self.db.execute(f'SELECT 1 FROM suppressed WHERE key IN ({marks}) LIMIT 1', blocked).fetchone() is None
+
+    # Block list and outcome feedback -------------------------------------
+    def suppress(self, rows, reason, clock=time.time):
+        """Block people (by LinkedIn/email/name+domain) or whole domains (rows with only a website/domain)."""
+        added = 0
+        with self.db:
+            for row in rows:
+                record = row if 'company_website' in row else quality.normalize_record(row)
+                keys = self.keys_for(record)
+                domain_only = not keys and record.get('company_website')
+                if domain_only:
+                    keys = ['dm:' + record['company_website']]
+                raw_domain = quality.normalize_host(row.get('domain') or row.get('Domain') or '')
+                if raw_domain and not keys:
+                    keys = ['dm:' + raw_domain]
+                for key in keys:
+                    added += self.db.execute('INSERT OR IGNORE INTO suppressed VALUES(?,?,?)', (key, reason, clock())).rowcount
+        return added
+
+    def record_outcomes(self, rows, clock=time.time):
+        """Store replies/bounces/unsubscribes; bounces, unsubscribes and do-not-contact are auto-blocked."""
+        counts = {}
+        with self.db:
+            for row in rows:
+                keyed = {quality._key(k): v for k, v in row.items() if k}
+                outcome = quality.fold(str(keyed.get('outcome') or keyed.get('status') or keyed.get('result') or '')).strip().replace(' ', '_')
+                outcome = OUTCOME_ALIASES.get(outcome, outcome)
+                if outcome not in OUTCOMES:
+                    counts['ignored'] = counts.get('ignored', 0) + 1
+                    continue
+                record = quality.normalize_record(row)
+                keys = self.keys_for(record)
+                if not keys:
+                    continue
+                marks = ','.join('?' * len(keys))
+                origin = self.db.execute(f'SELECT batch, email_source, source FROM delivered WHERE key IN ({marks}) LIMIT 1', keys).fetchone()
+                for key in keys:
+                    self.db.execute('INSERT OR REPLACE INTO outcomes VALUES(?,?,?,?,?,?)',
+                                    (key, outcome, origin['source'] if origin else None, origin['email_source'] if origin else None,
+                                     origin['batch'] if origin else None, clock()))
+                    if outcome in AUTO_SUPPRESS:
+                        self.db.execute('INSERT OR IGNORE INTO suppressed VALUES(?,?,?)', (key, outcome, clock()))
+                counts[outcome] = counts.get(outcome, 0) + 1
+        return counts
+
+    def source_quality(self):
+        """Per email source: delivered people, bounces, replies, and bounce/reply rates (one row per person)."""
+        delivered = {}
+        for r in self.db.execute("SELECT COALESCE(email_source,'unknown') AS src, COUNT(DISTINCT batch || full_name || IFNULL(company_website,'')) AS n FROM delivered GROUP BY src"):
+            delivered[r['src']] = r['n']
+        stats = {src: {'delivered': n, 'bounced': 0, 'replied': 0} for src, n in delivered.items()}
+        for r in self.db.execute("SELECT COALESCE(email_source,'unknown') AS src, outcome, COUNT(DISTINCT batch || key) AS n FROM outcomes WHERE key LIKE 'em:%' GROUP BY src, outcome"):
+            entry = stats.setdefault(r['src'], {'delivered': 0, 'bounced': 0, 'replied': 0})
+            if r['outcome'] == 'bounced':
+                entry['bounced'] += r['n']
+            elif r['outcome'] in ('replied', 'meeting', 'interested'):
+                entry['replied'] += r['n']
+        for entry in stats.values():
+            base = max(entry['delivered'], 1)
+            entry['bounce_rate'] = round(entry['bounced'] / base, 3)
+            entry['reply_rate'] = round(entry['replied'] / base, 3)
+        return stats
+
+    # Recurring free allowances (operator-attested) -------------------------
+    def add_refill(self, provider, pool, amount, period, source):
+        if period not in ('daily', 'monthly'):
+            raise ValueError('period must be daily or monthly')
+        with self.db:
+            self.db.execute('INSERT OR REPLACE INTO refills VALUES(?,?,?,?,?,NULL)', (provider, pool, str(amount), period, source))
+
+    def refills(self):
+        return [dict(r) for r in self.db.execute('SELECT * FROM refills ORDER BY provider, pool')]
+
+    def remove_refill(self, provider, pool):
+        with self.db:
+            return self.db.execute('DELETE FROM refills WHERE provider=? AND pool=?', (provider, pool)).rowcount
+
+    def apply_refills(self, store, day):
+        """Reset each recurring free pool to its attested amount once per day/month. Never adds on top."""
+        applied, skipped = [], []
+        for r in self.refills():
+            period_key = day[:10] if r['period'] == 'daily' else day[:7]
+            if (r['last_applied'] or '') == period_key:
+                continue
+            try:
+                store.confirm_budget(r['provider'], r['pool'], r['amount'], f"recurring {r['period']} free allowance: {r['source']}", attested_free=True)
+            except Exception as error:
+                skipped.append({'provider': r['provider'], 'pool': r['pool'], 'reason': str(error)})
+                continue
+            with self.db:
+                self.db.execute('UPDATE refills SET last_applied=? WHERE provider=? AND pool=?', (period_key, r['provider'], r['pool']))
+            applied.append(f"{r['provider']}.{r['pool']}={r['amount']}")
+        return {'applied': applied, 'skipped': skipped}
 
     def mark_delivered(self, records, batch):
         with self.db:
             for record in records:
                 for key in self.keys_for(record):
-                    self.db.execute('INSERT OR IGNORE INTO delivered VALUES(?,?,?,?,?,?)',
-                                    (key, batch, record.get('full_name'), record.get('company_website'),
-                                     record.get('email'), record.get('linkedin_url')))
+                    self.db.execute('INSERT OR IGNORE INTO delivered(key, batch, full_name, company_website, email, linkedin_url, email_source, source) '
+                                    'VALUES(?,?,?,?,?,?,?,?)',
+                                    (key, batch, record.get('full_name'), record.get('company_website'), record.get('email'),
+                                     record.get('linkedin_url'), record.get('email_source'), record.get('source')))
 
     def delivered_count(self):
         return self.db.execute("SELECT COUNT(DISTINCT batch || full_name || IFNULL(company_website,'')) FROM delivered").fetchone()[0]
@@ -144,13 +260,13 @@ class History:
                 added += cur.rowcount
         return added
 
-    def domains_to_crawl(self, limit, recrawl_days=120, clock=time.time):
+    def domains_to_crawl(self, limit, recrawl_days=90, clock=time.time):
         cutoff = clock() - recrawl_days * 86400
         rows = self.db.execute('SELECT domain FROM domains WHERE last_crawled IS NULL OR last_crawled < ? '
                                'ORDER BY last_crawled IS NOT NULL, first_seen LIMIT ?', (cutoff, limit)).fetchall()
         return [r['domain'] for r in rows]
 
-    def backlog(self, recrawl_days=120, clock=time.time):
+    def backlog(self, recrawl_days=90, clock=time.time):
         cutoff = clock() - recrawl_days * 86400
         return self.db.execute('SELECT COUNT(*) FROM domains WHERE last_crawled IS NULL OR last_crawled < ?', (cutoff,)).fetchone()[0]
 
@@ -167,7 +283,7 @@ class History:
                 self.db.execute('UPDATE domains SET last_crawled=?, status=?, people=?, emails=? WHERE domain=?',
                                 (now, site.get('status'), len(people), sum(1 for p in people if p.get('email')), domain))
 
-    def recent_sites(self, days=60, clock=time.time):
+    def recent_sites(self, days=100, clock=time.time):
         cutoff = clock() - days * 86400
         return [json.loads(r['data']) for r in self.db.execute('SELECT data FROM sites WHERE crawled_at >= ?', (cutoff,))]
 
@@ -247,6 +363,7 @@ class History:
         return {'delivered_keys': q('SELECT COUNT(*) FROM delivered'), 'batches': q('SELECT COUNT(DISTINCT batch) FROM delivered'),
                 'domains_known': q('SELECT COUNT(*) FROM domains'), 'domains_uncrawled': q('SELECT COUNT(*) FROM domains WHERE last_crawled IS NULL'),
                 'sites_stored': q('SELECT COUNT(*) FROM sites'), 'prospects_stored': q('SELECT COUNT(*) FROM prospects'),
+                'suppressed': q('SELECT COUNT(*) FROM suppressed'), 'outcomes': q('SELECT COUNT(*) FROM outcomes'),
                 'firms_pending_website': q("SELECT COUNT(*) FROM firms WHERE status='pending'"),
                 'firms_resolved': q("SELECT COUNT(*) FROM firms WHERE status='resolved'")}
 
@@ -270,8 +387,11 @@ def _run_jobs(store, config, jobs, execute, env, transport, cap):
     return report
 
 
-def _selection_key(record):
-    return (quality.TIER_ORDER[record['tier']], 0 if record.get('email') else 1, 0 if record.get('linkedin_url') else 1, -record['score'])
+def _selection_key(record, source_quality=None):
+    """Best first: tier, has email, sources that bounce less (once feedback exists), LinkedIn, score."""
+    bounce = ((source_quality or {}).get(record.get('email_source') or 'unknown') or {}).get('bounce_rate', 0)
+    return (quality.TIER_ORDER[record['tier']], 0 if record.get('email') else 1, 1 if bounce > 0.05 else 0,
+            0 if record.get('linkedin_url') else 1, -record['score'])
 
 
 def run_daily(work, store, config, *, target=500, execute=False, day=None, sources=DEFAULT_SOURCES,
@@ -300,6 +420,7 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
             return step
 
         if execute:
+            report['steps']['refills'] = history.apply_refills(store, day)
             report['steps']['resume-pending'] = _resume_pending(store, config, env, transport)
 
         if 'records' in sources:
@@ -330,17 +451,32 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
             report['steps']['records'] = step
 
         if 'resolve' in sources:
-            report['steps']['resolve'] = _resolve_firms(history, store, config, execute, env, transport, caps['resolve'], search_provider)
+            report['steps']['resolve'] = _resolve_firms(history, store, config, execute, env, transport, caps, search_provider)
 
         backlog = history.backlog()
         report['backlog_before'] = backlog
         if backlog < max_domains and 'hunter-discover' in sources:
-            states = history.next_markets('hunter_state', list(US_STATES), max(1, caps['hunter-discover'] // len(HEADCOUNTS)))
-            step = run('hunter-discover', discovery.hunter_discover_jobs(states, headcounts=HEADCOUNTS), caps['hunter-discover'])
-            step['markets'] = states
+            # Free calls; rotate cities (most distinct results), states x sizes, and keyword niches
+            cap = caps['hunter-discover']
+            per_city = len(HEADCOUNTS)
+            cities = history.next_markets('hunter_city', list(METROS), max(1, int(cap * 0.6) // per_city))
+            states = history.next_markets('hunter_state', list(US_STATES), max(1, int(cap * 0.2) // per_city))
+            kw_states = history.next_markets('hunter_keyword_state', list(US_STATES), 1)
+            kw_sets = history.next_markets('hunter_keyword', [k[0] for k in KEYWORD_SETS], max(1, int(cap * 0.2) // per_city))
+            jobs = (discovery.hunter_discover_city_jobs(cities, headcounts=HEADCOUNTS)
+                    + discovery.hunter_discover_jobs(states, headcounts=HEADCOUNTS)
+                    + discovery.hunter_discover_keyword_jobs(kw_states, [[k] for k in kw_sets], headcounts=HEADCOUNTS))
+            step = run('hunter-discover', jobs, cap)
+            step['markets'] = {'cities': [':'.join(c) for c in cities], 'states': states, 'keywords': kw_sets, 'keyword_state': kw_states}
             if execute and step['sent']:
+                for city in cities:
+                    history.mark_market('hunter_city', city, day)
                 for state in states:
                     history.mark_market('hunter_state', state, day)
+                for state in kw_states:
+                    history.mark_market('hunter_keyword_state', state, day)
+                for kw in kw_sets:
+                    history.mark_market('hunter_keyword', kw, day)
         if history.backlog() < max_domains and 'google-places' in sources:
             metros = history.next_markets('places_metro', list(METROS), max(1, caps['google-places'] // 3))
             step = run('google-places', discovery.places_jobs(metros), caps['google-places'])
@@ -381,6 +517,8 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                             people=sum(len(s['people']) for s in sites),
                             people_with_email=sum(1 for s in sites for p in s['people'] if p.get('email')))
             report['steps']['crawl'] = step
+        if 'render-js' in sources:
+            report['steps']['render-js'] = _render_js_sites(history, store, config, execute, env, transport, caps['render-js'])
         if 'hunter-domains' in sources:
             rows = history.db.execute("SELECT domain FROM domains WHERE last_crawled IS NOT NULL AND emails=0 "
                                       "ORDER BY last_crawled DESC LIMIT ?", (caps['hunter-domains'],)).fetchall()
@@ -407,7 +545,8 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
             result = build(prospects=history.prospects(), site_results=history.recent_sites(), store=store, target=target_cfg)
 
         pool = [r for r in result['clean'] if (r.get('email') or not require_email) and history.is_fresh(r)]
-        pool.sort(key=_selection_key)
+        source_quality = history.source_quality()
+        pool.sort(key=lambda r: _selection_key(r, source_quality))
         picked, seen = [], set()
         for record in pool:
             keys = set(History.keys_for(record))
@@ -420,7 +559,15 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
 
         if 'xray-linkedin' in sources:
             missing = [r for r in picked if not r.get('linkedin_url')][:caps['xray-linkedin']]
-            step = run('xray-linkedin', linkedin_match_jobs(missing, search_provider), caps['xray-linkedin'])
+            engine = next((e for e in [search_provider, *SEARCH_FALLBACK] if e != 'exa' and _funded(store, config, e, SEARCH_POOLS[e]) >= len(missing)), search_provider)
+            step = run('xray-linkedin', linkedin_match_jobs(missing, engine), caps['xray-linkedin'])
+            step['engine'] = engine
+            if execute and step['sent']:
+                step['linkedin_filled'] = attach_linkedin(picked, discovery.collect(store)['prospects'])
+        if 'pdl' in sources:
+            still = [r for r in picked if not r.get('linkedin_url')][:caps['pdl']]
+            prospects = [{'full_name': r['full_name'], 'company': r.get('company'), 'company_website': r.get('company_website')} for r in still]
+            step = run('pdl', discovery.pdl_enrich_jobs(prospects), caps['pdl'])
             if execute and step['sent']:
                 step['linkedin_filled'] = attach_linkedin(picked, discovery.collect(store)['prospects'])
 
@@ -435,8 +582,14 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
         if execute:
             history.mark_delivered(picked, day)
         report['history'] = history.stats()
+        report['source_quality'] = source_quality
+        report['budgets_left'] = {f"{b['provider']}.{b['pool']}": b['remaining'] for b in store.budgets()}
+        if execute:
+            report['backup'] = backup_workspace(work, day)
         (out_dir / 'report.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
         os.chmod(out_dir / 'report.json', 0o600)
+        (out_dir / 'report.md').write_text(render_report(report), encoding='utf-8')
+        os.chmod(out_dir / 'report.md', 0o600)
         return report
     finally:
         history.close()
@@ -466,34 +619,180 @@ def _resume_pending(store, config, env, transport):
     return done
 
 
-def _resolve_firms(history, store, config, execute, env, transport, cap, provider):
-    """Find websites for public-record firms: reuse saved searches, search the rest within the cap."""
-    from .resolve import resolution_jobs, resolve_from_store
-    firms = history.pending_firms(cap)
-    step = {'pending_checked': len(firms), 'resolved': 0, 'no_website': 0}
-    if not firms:
-        return step
+def _funded(store, config, provider, pool):
+    entry = config.get('providers', {}).get(provider, {})
+    if not entry.get('enabled') or store.provider_state(provider).get('paused'):
+        return 0
+    return next((b['remaining_units'] // 1_000_000 for b in store.budgets() if b['provider'] == provider and b['pool'] == pool), 0)
 
-    def apply(rows):
+
+SEARCH_POOLS = {'serper': 'queries', 'tavily': 'credits', 'exa': 'queries', 'brave': 'queries'}
+
+
+def _resolve_firms(history, store, config, execute, env, transport, caps, provider='serper'):
+    """Find websites for public-record firms.
+
+    1. Hunter Discover by firm name (free, 50 names per call) - exact name/state matches only
+    2. Search engines for the rest, cheapest first: Serper batches of 100, then Tavily, then Exa
+    Saved results are always reused before anything is spent.
+    """
+    from .resolve import (exa_resolution_jobs, resolution_batch_jobs, resolution_jobs, resolve_from_hunter,
+                          resolve_from_store, searched_queries)
+    from .discovery import hunter_name_resolution_jobs
+    step = {'pending_checked': 0, 'resolved': 0, 'no_website': 0, 'by_method': {}}
+
+    def apply(rows, method, final):
+        left = []
         for row in rows:
-            status = row['resolution']['status']
-            if status == 'resolved':
+            status = (row.get('resolution') or {}).get('status')
+            if status == 'resolved' and row.get('company_website'):
                 domain = row['company_website']
                 history.set_firm(row, 'resolved', domain)
                 history.add_domains([{'domain': domain, 'company': row.get('organization')}], row.get('source', 'records'))
                 history.add_prospects([{**p, 'company_website': domain} for p in row.get('people', [])])
                 step['resolved'] += 1
-            elif status in ('no_confident_domain', 'verification_failed'):
+                step['by_method'][method] = step['by_method'].get(method, 0) + 1
+            elif final and status in ('no_confident_domain', 'verification_failed'):
                 history.set_firm(row, 'no_website')
                 step['no_website'] += 1
-        return [r for r in rows if r['resolution']['status'] == 'not_searched']
+            else:
+                left.append({k: v for k, v in row.items() if k not in ('resolution',)} | {'company_website': ''})
+        return left
 
-    unsearched = apply(resolve_from_store(store, firms, provider))
-    if unsearched:
-        step['search'] = _run_jobs(store, config, resolution_jobs(unsearched, provider), execute, env, transport, cap)
-        if execute and step['search']['sent']:
-            apply(resolve_from_store(store, unsearched, provider))
+    firms = history.pending_firms(max(caps['resolve-hunter'], caps['resolve']))
+    step['pending_checked'] = len(firms)
+    if not firms:
+        return step
+    # 1. Hunter by name (free)
+    if _funded(store, config, 'hunter', 'discover_requests'):
+        names = firms[:caps['resolve-hunter']]
+        jobs = hunter_name_resolution_jobs(names)
+        step['hunter'] = _run_jobs(store, config, jobs, execute, env, transport, len(jobs))
+    left = apply(resolve_from_hunter(store, firms), 'hunter_name', final=False)
+    # 2. Search engines for what is left, within the daily cap
+    left = left[:caps['resolve']]
+    order = [provider] + [p for p in SEARCH_FALLBACK if p != provider]
+    for engine in order:
+        if not left:
+            break
+        left = apply(resolve_from_store(store, left, engine), engine, final=True)
+        budget = _funded(store, config, engine, SEARCH_POOLS.get(engine, 'queries'))
+        if not left or not budget:
+            continue
+        batch = left[:budget]
+        if engine == 'serper':
+            jobs = resolution_batch_jobs(batch, store=store)
+        elif engine == 'exa':
+            jobs = exa_resolution_jobs(batch)
+        else:
+            jobs = resolution_jobs(batch, engine)
+        step.setdefault('search', {})[engine] = _run_jobs(store, config, jobs, execute, env, transport, len(jobs))
+        if execute:
+            left = apply(resolve_from_store(store, left, engine), engine, final=True)
     return step
+
+
+def _render_js_sites(history, store, config, execute, env, transport, cap):
+    """Firecrawl renders JavaScript-only sites the crawler saw as empty: homepage first, then its best team page."""
+    from .discovery import collect, firecrawl_scrape_jobs, scraped_pages
+    from .extract import discover_pages, extract_company, extract_people, merge_people
+    rows = history.db.execute("SELECT domain FROM domains WHERE status='no_people' ORDER BY last_crawled DESC LIMIT ?", (cap,)).fetchall()
+    sites = {r['domain']: json.loads(d['data']) for r in rows for d in history.db.execute('SELECT data FROM sites WHERE domain=?', (r['domain'],))}
+    step = {'sites': len(sites)}
+    if not sites or not _funded(store, config, 'firecrawl', 'scrape_credits'):
+        return step
+    homes = [s.get('homepage_url') or f"https://{d}/" for d, s in sites.items()]
+    step['homepages'] = _run_jobs(store, config, firecrawl_scrape_jobs(homes), execute, env, transport, cap)
+    if not execute:
+        return step
+    pages = {p['requested_url']: p for p in scraped_pages(store)}
+    followups = []
+    for domain, site in sites.items():
+        page = pages.get(site.get('homepage_url') or f"https://{domain}/")
+        if page and page.get('html'):
+            best = discover_pages(page['url'], page['html'], limit=1)
+            if best:
+                followups.append(best[0])
+    step['team_pages'] = _run_jobs(store, config, firecrawl_scrape_jobs(followups), execute, env, transport, cap)
+    pages = {p['requested_url']: p for p in scraped_pages(store)}
+    updated = []
+    for domain, site in sites.items():
+        found = []
+        for url, page in pages.items():
+            if page.get('html') and (url.split('/')[2].removeprefix('www.') == domain):
+                found += extract_people(page['html'], page['url'])
+                if not site.get('company', {}).get('name'):
+                    site['company'] = extract_company(page['html'], page['url'])
+        if found:
+            site['people'] = merge_people((site.get('people') or []) + found)
+            site['status'] = 'ok'
+            site.setdefault('errors', []).append('rendered_by_firecrawl')
+            updated.append(site)
+    history.save_sites(updated)
+    step['sites_with_people'] = len(updated)
+    step['people'] = sum(len(s['people']) for s in updated)
+    return step
+
+
+def backup_workspace(work, day):
+    """Consistent SQLite copies of the ledger and history; keeps the newest BACKUPS_KEPT days."""
+    work = Path(work)
+    root = work / 'backups'
+    target = root / re.sub(r'[^0-9A-Za-z_-]', '_', day)
+    target.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(root, 0o700)
+    os.chmod(target, 0o700)
+    saved = []
+    for name in ('lead-history.sqlite3', 'research.sqlite3'):
+        source = work / name
+        if not source.exists():
+            continue
+        destination = target / name
+        with sqlite3.connect(str(source)) as src, sqlite3.connect(str(destination)) as dst:
+            src.backup(dst)
+        os.chmod(destination, 0o600)
+        saved.append(name)
+    for old in sorted((d for d in root.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime)[:-BACKUPS_KEPT]:
+        for file in old.iterdir():
+            file.unlink()
+        old.rmdir()
+    return {'folder': str(target), 'files': saved}
+
+
+def render_report(report):
+    """Short human summary for the morning message."""
+    lines = [f"Leads {report['date']}: {report['delivered']} of {report['target']} delivered" + (" (preview)" if not report['execute'] else ''), '']
+    by = report.get('delivered_by_source') or {}
+    if by:
+        lines.append('Email sources: ' + ', '.join(f'{k} {v}' for k, v in sorted(by.items(), key=lambda kv: -kv[1])))
+    steps = report.get('steps', {})
+    crawl = steps.get('crawl', {})
+    if crawl.get('sites_ok') is not None:
+        lines.append(f"Crawled {crawl.get('domains_planned', 0)} sites, {crawl.get('sites_ok', 0)} reachable, {crawl.get('people_with_email', 0)} people with emails")
+    for name in ('hunter-discover', 'resolve', 'verify', 'xray-linkedin', 'find-emails'):
+        step = steps.get(name) or {}
+        if step:
+            bits = [f"{k}={step[k]}" for k in ('sent', 'domains_added', 'resolved', 'linkedin_filled') if step.get(k)]
+            if step.get('stopped'):
+                bits.append('STOPPED (provider problem, check status)')
+            if step.get('skipped_reasons'):
+                bits.append('skipped: ' + ', '.join(f'{k} {v}' for k, v in step['skipped_reasons'].items()))
+            lines.append(f"{name}: " + (', '.join(bits) or 'nothing to do'))
+    lines.append(f"Fresh leads waiting for tomorrow: {max(0, report.get('fresh_available', 0) - report.get('delivered', 0))}")
+    budgets = report.get('budgets_left') or {}
+    low = [f'{k} {v}' for k, v in budgets.items() if _as_float(v) < 50]
+    if low:
+        lines.append('Low free budgets: ' + ', '.join(low))
+    for tip in report.get('advice') or []:
+        lines.append('Next: ' + tip)
+    return '\n'.join(lines) + '\n'
+
+
+def _as_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def shortfall_advice(shortfall, history):
@@ -517,7 +816,15 @@ def linkedin_match_jobs(records, provider='serper'):
         company = re.sub(r'["\\]', '', record.get('company') or '')
         if name and company:
             queries.append(f'site:linkedin.com/in "{name}" "{company}"')
-    return xray_jobs(provider, queries) if queries else []
+    if not queries:
+        return []
+    if provider == 'serper':
+        from .discovery import serper_batch_jobs
+        return serper_batch_jobs(queries)
+    if provider in ('serper', 'brave'):
+        return xray_jobs(provider, queries)
+    from .discovery import search_jobs
+    return search_jobs(provider, queries)
 
 
 def attach_linkedin(records, prospects):

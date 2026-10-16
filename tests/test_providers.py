@@ -11,14 +11,22 @@ ENV = {'HUNTER_API_KEY': 'fixture-secret', 'VERIFALIA_TOKEN': 'fixture-secret',
        'SERPER_API_KEY': 'fixture-secret', 'BRAVE_API_KEY': 'fixture-secret',
        'APOLLO_API_KEY': 'fixture-secret', 'PROSPEO_API_KEY': 'fixture-secret', 'GOOGLE_MAPS_API_KEY': 'fixture-secret',
        'EXA_API_KEY': 'fixture-secret', 'TOMBA_API_KEY': 'fixture-secret', 'TOMBA_SECRET': 'fixture-secret',
-       'ICYPEAS_API_KEY': 'fixture-secret', 'REOON_API_KEY': 'fixture-secret', 'MILLIONVERIFIER_API_KEY': 'fixture-secret'}
+       'ICYPEAS_API_KEY': 'fixture-secret', 'REOON_API_KEY': 'fixture-secret', 'MILLIONVERIFIER_API_KEY': 'fixture-secret',
+       'TAVILY_API_KEY': 'fixture-secret', 'FIRECRAWL_API_KEY': 'fixture-secret', 'ABSTRACT_EMAIL_API_KEY': 'fixture-secret',
+       'EMAILABLE_API_KEY': 'fixture-secret', 'KICKBOX_API_KEY': 'fixture-secret', 'BOUNCER_API_KEY': 'fixture-secret',
+       'MYEMAILVERIFIER_API_KEY': 'fixture-secret', 'PDL_API_KEY': 'fixture-secret', 'SERPAPI_API_KEY': 'fixture-secret',
+       'DEEPLINE_API_KEY': 'fixture-secret'}
 # Lead-source operations take their own payload shapes (see tests/test_discovery.py).
 OPERATION_PAYLOADS = {'discover': {'filters': {'query': 'real estate companies in Texas'}},
                       'domain_search': {'domain': 'example.org'}, 'search': {'query': 'site:linkedin.com/in "CEO"'},
                       'places': {'area': 'Austin', 'state': 'TX'},
                       'text_search': {'text_query': 'real estate brokerage in Austin, TX'},
                       'people_enrich': {'apollo_id': 'a1b2c3d4e5f6a7b8'}, 'enrich': {'person_id': 'a1b2c3d4e5f6a7b8'},
-                      'linkedin_email': {'linkedin_url': 'https://www.linkedin.com/in/alex-example'}}
+                      'linkedin_email': {'linkedin_url': 'https://www.linkedin.com/in/alex-example'},
+                      'search_batch': {'queries': ['"Harborlight Homes" Austin TX real estate']},
+                      'company_search': {'query': 'Harborlight Homes real estate company in Austin, TX'},
+                      'scrape': {'url': 'https://example.org/team'},
+                      'person_enrich': {'linkedin_url': 'https://www.linkedin.com/in/alex-example'}}
 # people_search criteria are provider-specific (Apollo vs Prospeo enums).
 PEOPLE_SEARCH = {'apollo': {'criteria': {'titles': ['CEO']}}, 'prospeo': {'criteria': {'websites': ['example.org']}}}
 PAYLOAD = {'email': 'alex@example.org', 'domain': 'example.org', 'full_name': 'Alex Example',
@@ -32,7 +40,9 @@ class ProviderTests(unittest.TestCase):
     def test_contract_all_six(self):
         self.assertEqual(set(PROVIDERS), {'hunter', 'verifalia', 'clearout', 'zerobounce', 'hunter-insight', 'disify',
                                           'serper', 'brave', 'overpass', 'apollo', 'prospeo', 'google_places', 'exa',
-                                          'tomba', 'icypeas', 'reoon', 'millionverifier'})
+                                          'tomba', 'icypeas', 'reoon', 'millionverifier', 'abstract', 'emailable',
+                                          'kickbox', 'bouncer', 'myemailverifier', 'tavily', 'firecrawl', 'pdl', 'serpapi',
+                                          'deepline'})
         for p in PROVIDERS.values():
             for operation in p.operations:
                 payload = PEOPLE_SEARCH[p.id] if operation == 'people_search' else OPERATION_PAYLOADS.get(operation, PAYLOAD)

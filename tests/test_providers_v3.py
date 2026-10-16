@@ -438,7 +438,9 @@ class RunnerTests(unittest.TestCase):
     def test_verify_routing_includes_new_verifiers_in_config_order(self):
         quotes = route_run(self.store, self.config, [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': EMAIL}}], env=ENV)
         options = [q['provider'] for q in quotes['results'][0]['options']]
-        self.assertEqual(options[-2:], ['reoon', 'millionverifier'])
+        verifiers = [p for p in options if 'verify' in get_provider(p).operations]
+        self.assertEqual(verifiers[-7:], ['reoon', 'abstract', 'emailable', 'kickbox', 'bouncer', 'myemailverifier',
+                                          'millionverifier'])
         self.assertLess(options.index('zerobounce'), options.index('reoon'))
         self.store.confirm_budget('millionverifier', 'credits', '1', 'synthetic free')
         plan = route_run(self.store, self.config, [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': EMAIL}}], env=ENV)
