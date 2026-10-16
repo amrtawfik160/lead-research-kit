@@ -57,4 +57,16 @@ class CliTests(unittest.TestCase):
         s=Store(self.work/'research.sqlite3');s.db.execute("UPDATE audit SET event='{}'");s.db.commit();s.close()
         code,r=self.call('audit');self.assertEqual(code,2);self.assertFalse(r['audit_ok'])
 
+    def test_env_file_requires_private_permissions_and_does_not_override(self):
+        import os
+        from lead_research.cli import load_env_file
+        f=self.root/'keys.env';f.write_text('SYNTH_TEST_KEY_A=fromfile\nSYNTH_TEST_KEY_B=fromfile\n# comment\n')
+        f.chmod(0o644)
+        with self.assertRaises(PolicyError):load_env_file(f)
+        f.chmod(0o600)
+        with patch.dict('os.environ',{'SYNTH_TEST_KEY_B':'preset'},clear=False):
+            load_env_file(f)
+            self.assertEqual((os.environ['SYNTH_TEST_KEY_A'],os.environ['SYNTH_TEST_KEY_B']),('fromfile','preset'))
+            os.environ.pop('SYNTH_TEST_KEY_A',None)
+
 if __name__=='__main__':unittest.main()

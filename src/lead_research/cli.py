@@ -15,6 +15,18 @@ from .runner import Runner
 from .workflow import route_run, verification_jobs
 
 
+def load_env_file(path):
+    """Load KEY=VALUE lines into os.environ without overriding variables already set."""
+    file=Path(path).expanduser()
+    if file.stat().st_mode & 0o077:raise PolicyError('env_file_must_be_private_0600')
+    for line in file.read_text(encoding='utf-8').splitlines():
+        line=line.strip()
+        if not line or line.startswith('#') or '=' not in line:continue
+        key,value=line.split('=',1)
+        key=key.strip()
+        if key.isidentifier() and key.upper()==key and value:os.environ.setdefault(key,value.strip())
+
+
 def emit(value, output=None):
     text=json.dumps(value,indent=2,ensure_ascii=False)+'\n'
     if output:
@@ -25,6 +37,7 @@ def emit(value, output=None):
 def parser():
     p=argparse.ArgumentParser(prog='lead-research',description='Evidence-first lead research with explicit budgets and dry-first API requests')
     p.add_argument('--workspace',default='workspace',help='Private workspace directory, never commit it')
+    p.add_argument('--env-file',help='KEY=VALUE file with API keys (kept private, 0600); existing environment variables win')
     s=p.add_subparsers(dest='command',required=True)
     s.add_parser('init',help='Create an empty private workspace; all providers disabled, all budgets zero')
     i=s.add_parser('import',help='Import user-supplied CSV, JSON or JSONL')
@@ -220,6 +233,7 @@ def _demo(store,output):
 
 def main(argv=None):
     args=parser().parse_args(argv)
+    if args.env_file:load_env_file(args.env_file)
     work=Path(args.workspace).expanduser().resolve()
     if args.command=='records':
         from .records import SOURCES, EXCLUDED_SOURCES, fetch_source, load_local_file
