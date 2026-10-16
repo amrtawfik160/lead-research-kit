@@ -483,5 +483,20 @@ class TitleRegressionTests(unittest.TestCase):
         self.assertEqual(clean_title('FOUNDING PARTNER')[0], 'Founding Partner')
         self.assertEqual(clean_title('CEO & FOUNDER')[0], 'CEO & Founder')
 
+
+class LinkedinMismatchTests(unittest.TestCase):
+    def test_wrong_person_slug_dropped(self):
+        from lead_research.quality import assess, normalize_record
+        row = assess(normalize_record({'Full Name': 'Casey Morgan', 'Title': 'Owner', 'Company': 'Harbor Realty Group',
+                                       'Company Website': 'harborrealty.example', 'Email': 'casey@harborrealty.example',
+                                       'LinkedIn URL': 'https://www.linkedin.com/in/casey-hill-12ab/'}))
+        self.assertEqual(row['linkedin_url'], '')
+        self.assertIn('linkedin_name_mismatch', row['issues'])
+
+    def test_matching_and_opaque_slugs_kept(self):
+        from lead_research.quality import linkedin_name_mismatch as mismatch
+        self.assertFalse(mismatch('https://www.linkedin.com/in/casey-morgan-12ab/', 'Casey Morgan'))
+        self.assertFalse(mismatch('https://www.linkedin.com/in/harborrealtyteam/', 'Casey Morgan'))
+
 if __name__ == '__main__':
     unittest.main()

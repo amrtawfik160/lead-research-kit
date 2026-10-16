@@ -1067,6 +1067,23 @@ def _domains_related(a, b, company=''):
     return bool(company) and website_matches_company(a, company) and website_matches_company(b, company)
 
 
+def linkedin_name_mismatch(url, full_name, aliases=()):
+    """True when a multi-word vanity slug lacks the person's surname ('andrew-mahr' for Andrew Jaffe).
+
+    Single-word, numeric or brand slugs ('overlandparker', 'virtuousrealestate') get the benefit
+    of the doubt. Surname changes (marriage) are dropped too: a missing link beats a wrong one.
+    """
+    words = [w for w in re.split(r'[^a-z]+', fold(linkedin_slug(url))) if len(w) >= 2]
+    parts = [w for w in re.findall(r'[a-z]+', fold(full_name)) if len(w) >= 2]
+    if len(words) < 2 or len(parts) < 2 or len(parts[-1]) < 3:
+        return False
+    joined = ''.join(words)
+    surnames = {parts[-1]} | {t for alias in aliases for t in re.findall(r'[a-z]{3,}', fold(alias)) if t != parts[0]}
+    if len(parts) > 2:
+        surnames.add(parts[-2])  # compound surnames: "Kemp Aguiar Abud"
+    return not any(name in joined for name in surnames)
+
+
 def email_matches_name(email, full_name, aliases=()):
     """Is the local part plausibly built from the person's name?"""
     if not email or not full_name:
@@ -1267,6 +1284,10 @@ def assess(record, target=None):
         _add(issues, 'email_unverified_risky')
 
     # linkedin -----------------------------------------------------------
+    if r.get('linkedin_url') and linkedin_name_mismatch(r['linkedin_url'], r.get('full_name', ''), r.get('name_aliases', ())):
+        r['rejected_linkedin'] = r['linkedin_url']
+        r['linkedin_url'] = ''
+        _add(issues, 'linkedin_name_mismatch')
     if r.get('linkedin_url'):
         score += 10
     else:

@@ -55,7 +55,7 @@ Measured: a crawled brokerage site yields about 0.3 fresh decision makers with a
 
 ### Keys
 
-Put keys in your environment (see `.env.example`), never in the repo: `SERPER_API_KEY`, `BRAVE_API_KEY`, `HUNTER_API_KEY`, `GOOGLE_MAPS_API_KEY`, `APOLLO_API_KEY`, `PROSPEO_API_KEY`, `ICYPEAS_API_KEY`, `TOMBA_API_KEY`/`TOMBA_SECRET`, `REOON_API_KEY`, `MILLIONVERIFIER_API_KEY`, `EXA_API_KEY`, plus `SEC_USER_AGENT="Your Name you@company.com"` for SEC and optional `SOCRATA_APP_TOKEN`. Then `provider enable <name>` and `budget confirm <name> --pools ... --free` with the allowance you actually want spent.
+Put keys in your environment (see `.env.example`), never in the repo: `SERPER_API_KEY`, `BRAVE_API_KEY`, `HUNTER_API_KEY`, `GOOGLE_MAPS_API_KEY`, `APOLLO_API_KEY`, `PROSPEO_API_KEY`, `ICYPEAS_API_KEY`, `TOMBA_API_KEY`/`TOMBA_SECRET`, `REOON_API_KEY`, `MILLIONVERIFIER_API_KEY`, `EXA_API_KEY`, plus `SEC_USER_AGENT="Your Name you@example.com"` for SEC and optional `SOCRATA_APP_TOKEN`. Then `provider enable <name>` and `budget confirm <name> --pools ... --free` with the allowance you actually want spent.
 
 ### Public-record terms
 

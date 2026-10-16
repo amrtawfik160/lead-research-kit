@@ -314,7 +314,7 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                 from .records import fetch_source, RecordsError
                 for name in record_source_names:
                     if name == 'sec-form-d' and '@' not in (env.get('SEC_USER_AGENT') or ''):
-                        step['sources'][name] = 'skipped: set SEC_USER_AGENT="Your Name you@company.com"'
+                        step['sources'][name] = 'skipped: set SEC_USER_AGENT="Your Name you@example.com"'
                         continue
                     cursor = history.db.execute("SELECT last_run FROM markets WHERE kind='records_cursor' AND market=?", (name,)).fetchone()
                     try:
