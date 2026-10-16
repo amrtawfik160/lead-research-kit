@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lead-research-kit"
+version = "0.1.0"
+description = "Evidence-first lead research with resumable, budget-controlled email lookup"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Lead Research Kit contributors"}]
+classifiers = ["Development Status :: 3 - Alpha", "Programming Language :: Python :: 3", "Operating System :: OS Independent"]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/amrtawfik160/lead-research-kit"
+Issues = "https://github.com/amrtawfik160/lead-research-kit/issues"
+
+[project.scripts]
+lead-research = "lead_research.cli:entrypoint"
+
+[tool.setuptools.packages.find]
+where = ["src"]

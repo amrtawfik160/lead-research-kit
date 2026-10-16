@@ -1,0 +1,4 @@
+[
+  {"id":"example-alex","name":"Alex Morgan","company":"Example Company","title":"Founder","profile_url":"https://www.linkedin.com/in/example-synthetic-alex","source_channel":"linkedin","source_url":"https://example.org/captured-search","filter_evidence":{"accepted":true,"country":"US","industry":"Real Estate"},"synthetic":true},
+  {"id":"example-robin","name":"Robin Taylor","company":"Example Holdings","title":"CEO","source_channel":"public_web","source_url":"https://example.net/team","qualified":true,"synthetic":true}
+]

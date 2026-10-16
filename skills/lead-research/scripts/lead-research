@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -n "${LEAD_RESEARCH_HOME:-}" ]; then
+  ROOT=$LEAD_RESEARCH_HOME
+elif [ -d "$HERE/../../../src/lead_research" ]; then
+  ROOT=$(CDPATH= cd -- "$HERE/../../.." && pwd)
+elif [ -d "$HERE/../../../../tools/lead-research-kit/src/lead_research" ]; then
+  ROOT=$(CDPATH= cd -- "$HERE/../../../../tools/lead-research-kit" && pwd)
+else
+  echo 'Install Lead Research Kit or set LEAD_RESEARCH_HOME to its source directory' >&2
+  exit 2
+fi
+if [ "${1:-}" = '--print-project-root' ]; then
+  printf '%s\n' "$ROOT"
+  exit 0
+fi
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+exec "${PYTHON:-python3}" -m lead_research "$@"
