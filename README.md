@@ -48,7 +48,7 @@ Steps without an enabled, funded provider are skipped and reported, never forced
 | Job | Providers (free allowance as of Oct 2026, check before relying on it) |
 |---|---|
 | Company discovery | Hunter Discover (free calls; rotate cities, states, niches, hiring), OpenStreetMap, public license records (TX, NY, CO, CT, SEC Form D) |
-| Firm website lookup | Hunter Discover by firm name (free, 50 names per call), then Serper batches of 100 (2,500 one-time), Tavily (1,000/month), Exa ($10/month), Zenserp (50/month), Linkup (~EUR 5/month credit, unverified), You.com (signup credit, ~$0.005/search) |
+| Firm website lookup | Hunter Discover by firm name (free, 50 names per call), then free domain guessing from the firm name (DNS check + homepage must show the firm name and its city/county/state; cap `resolve-guess`, 1,500 firms/day, each firm guessed once), then Serper batches of 100 (2,500 one-time), Tavily (1,000/month), Exa ($10/month), Zenserp (50/month), Linkup (~EUR 5/month credit, unverified), You.com (signup credit, ~$0.005/search) |
 | People + emails | Your crawler (free), Firecrawl rendering for JavaScript-only team pages (~1,000 credits/month), Deepline promo credits (LeadMagic finder ~0.34 credits per found email; set `DEEPLINE_FIND_ROUTE=waterfall` for the multi-provider play), Enrow (50 one-time, billed only when found), Lusha (paid plans only: the Free plan has no API) |
 | Email verification | Reoon (20/day), QuickEmailVerification (100/day), Abstract (100/month), emailvalidation.io (100/month, 10/min), Bouncer (100 one-time), MyEmailVerifier (100), EmailListVerify (100 one-time), Verifalia, Clearout, MillionVerifier, Emailable, Kickbox |
 | LinkedIn URLs | Serper/Tavily search, People Data Labs (100/month, identity fields only on free) |

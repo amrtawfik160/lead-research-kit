@@ -31,7 +31,7 @@ from .pipeline import _name_key, build
 DEFAULT_SOURCES = ('records', 'resolve', 'hunter-discover', 'google-places', 'osm', 'crawl', 'render-js', 'find-emails', 'verify', 'build')
 OPTIONAL_SOURCES = ('hunter-domains', 'apollo', 'xray-linkedin', 'pdl')
 DEFAULT_RECORD_SOURCES = ('tx-trec', 'ny-dos', 'co-dora', 'ct-dls', 'sec-form-d')
-DEFAULT_CAPS = {'records': 3000, 'resolve': 600, 'resolve-hunter': 1500, 'hunter-discover': 90, 'google-places': 30, 'osm': 6,
+DEFAULT_CAPS = {'records': 3000, 'resolve': 600, 'resolve-hunter': 1500, 'resolve-guess': 1500, 'hunter-discover': 90, 'google-places': 30, 'osm': 6,
                 'apollo': 20, 'apollo-enrich': 50, 'hunter-domains': 25, 'find-emails': 60, 'verify': 300, 'xray-linkedin': 300,
                 'render-js': 25, 'pdl': 3}
 KEYWORD_SETS = (['property management'], ['commercial real estate'], ['multifamily'], ['real estate investment'],
@@ -351,6 +351,18 @@ class History:
         with self.db:
             self.db.execute('UPDATE firms SET status=?, domain=? WHERE key=?', (status, domain, company_key(company)))
 
+    def note_firm(self, company, **fields):
+        """Merge ``fields`` into a stored firm's data (e.g. guess_tried) without changing its status."""
+        from .resolve import company_key
+        key = company_key(company)
+        with self.db:
+            row = self.db.execute('SELECT data FROM firms WHERE key=?', (key,)).fetchone()
+            if row is None:
+                return False
+            data = {**json.loads(row['data']), **fields}
+            self.db.execute('UPDATE firms SET data=? WHERE key=?', (json.dumps(data, ensure_ascii=False), key))
+        return True
+
     def prospects(self, days=90, clock=time.time):
         cutoff = clock() - days * 86400
         return [json.loads(r['data']) for r in self.db.execute('SELECT data FROM prospects WHERE added_at >= ?', (cutoff,))]
@@ -510,7 +522,7 @@ def _selection_key(record, source_quality=None):
 def run_daily(work, store, config, *, target=500, execute=False, day=None, sources=DEFAULT_SOURCES,
               output_root=None, max_domains=None, workers=48, require_email=True, min_tier='B',
               caps=None, env=None, transport=None, fetcher=None, record_sources=(), record_source_names=DEFAULT_RECORD_SOURCES,
-              search_provider='serper', records_getter=None, clock=time.time):
+              search_provider='serper', records_getter=None, resolver=None, clock=time.time):
     """One daily cycle. Returns a report; writes files under ``output_root/day``."""
     work = Path(work)
     env = os.environ if env is None else env
@@ -564,7 +576,8 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
             report['steps']['records'] = step
 
         if 'resolve' in sources:
-            report['steps']['resolve'] = _resolve_firms(history, store, config, execute, env, transport, caps, search_provider)
+            report['steps']['resolve'] = _resolve_firms(history, store, config, execute, env, transport, caps, search_provider,
+                                                        fetcher=fetcher, dns=resolver, work=work, day=day)
 
         backlog = history.backlog()
         report['backlog_before'] = backlog
@@ -754,15 +767,23 @@ def _funded(store, config, provider, pool):
 SEARCH_POOLS = {'serper': 'queries', 'tavily': 'credits', 'exa': 'queries', 'brave': 'queries'}
 
 
-def _resolve_firms(history, store, config, execute, env, transport, caps, provider='serper'):
+def _resolve_firms(history, store, config, execute, env, transport, caps, provider='serper', *, fetcher=None,
+                   dns=None, work=None, day=None):
     """Find websites for public-record firms.
 
     1. Hunter Discover by firm name (free, 50 names per call) - exact name/state matches only
-    2. Search engines for the rest, cheapest first: Serper batches of 100, then Tavily, then Exa
+    2. Domain guessing from the firm name (free): DNS check, then the homepage must show the firm's
+       name in its title/heading/© line and its city/county/state. Each firm is guessed once.
+    3. Search engines for the rest, cheapest first: Serper batches of 100, then Tavily, then Exa
     Saved results are always reused before anything is spent.
+
+    ``fetcher`` is a SafeFetcher-compatible object; without one a workspace SafeFetcher is opened
+    (cache work/web-cache.sqlite3) only when there are firms to guess. ``dns`` is getaddrinfo-
+    compatible; by default the SafeFetcher's resolver (or socket.getaddrinfo for an own fetcher),
+    and no DNS precheck for an injected fetcher without one.
     """
-    from .resolve import (exa_resolution_jobs, resolution_batch_jobs, resolution_jobs, resolve_from_hunter,
-                          resolve_from_store, searched_queries)
+    from .resolve import (exa_resolution_jobs, resolution_batch_jobs, resolution_jobs, resolve_by_guess,
+                          resolve_from_hunter, resolve_from_store, searched_queries)
     from .discovery import hunter_name_resolution_jobs
     step = {'pending_checked': 0, 'resolved': 0, 'no_website': 0, 'by_method': {}}
 
@@ -784,7 +805,7 @@ def _resolve_firms(history, store, config, execute, env, transport, caps, provid
                 left.append({k: v for k, v in row.items() if k not in ('resolution',)} | {'company_website': ''})
         return left
 
-    firms = history.pending_firms(max(caps['resolve-hunter'], caps['resolve']))
+    firms = history.pending_firms(max(caps['resolve-hunter'], caps['resolve'], caps.get('resolve-guess', 0)))
     step['pending_checked'] = len(firms)
     if not firms:
         return step
@@ -794,7 +815,33 @@ def _resolve_firms(history, store, config, execute, env, transport, caps, provid
         jobs = hunter_name_resolution_jobs(names)
         step['hunter'] = _run_jobs(store, config, jobs, execute, env, transport, len(jobs))
     left = apply(resolve_from_hunter(store, firms), 'hunter_name', final=False)
-    # 2. Search engines for what is left, within the daily cap
+    # 2. Guess the domain from the firm name (free; each firm once)
+    guessable = [f for f in left if not f.get('guess_tried')][:caps.get('resolve-guess', 0)]
+    step['guess_tried'], step['guess_matched'] = 0, 0
+    if guessable and not execute:
+        step['guess_planned'] = len(guessable)
+    elif guessable:
+        active, own = fetcher, False
+        if active is None:
+            from .webfetch import SafeFetcher
+            active, own = SafeFetcher(cache_path=(Path(work) / 'web-cache.sqlite3') if work else None, per_host_delay=1.0), True
+        resolver = dns if dns is not None else getattr(active, '_resolver', None)
+        try:
+            guessed = resolve_by_guess(guessable, active, dns=resolver)
+        finally:
+            if own:
+                active.close()
+        step['guess_tried'] = len(guessable)
+        stamp = day or today_iso()
+        resolved_rows = [r for r in guessed if (r.get('resolution') or {}).get('status') == 'resolved']
+        for row in guessed:
+            if (row.get('resolution') or {}).get('status') != 'resolved':
+                history.note_firm(row, guess_tried=stamp)
+        step['guess_matched'] = len(resolved_rows)
+        apply(resolved_rows, 'guess', final=False)
+        done = {_firm_identity(r) for r in resolved_rows}
+        left = [f for f in left if _firm_identity(f) not in done]
+    # 3. Search engines for what is left, within the daily cap
     left = left[:caps['resolve']]
     order = [provider] + [p for p in SEARCH_FALLBACK if p != provider]
     for engine in order:
@@ -815,6 +862,11 @@ def _resolve_firms(history, store, config, execute, env, transport, caps, provid
         if execute:
             left = apply(resolve_from_store(store, left, engine), engine, final=True)
     return step
+
+
+def _firm_identity(company):
+    from .resolve import company_key
+    return company_key(company)
 
 
 def _render_js_sites(history, store, config, execute, env, transport, cap):

@@ -16,7 +16,7 @@ from typing import Any
 
 # Sources whose domains are licensed real-estate firms (never filtered).
 LICENSED_SOURCES = frozenset({
-    'records', 'tx-trec', 'ny-dos', 'co-dora', 'sec-form-d', 'fl-dbpr-file', 'ct-dcp', 'de-dpr',
+    'records', 'tx-trec', 'ny-dos', 'co-dora', 'sec-form-d', 'fl-dbpr-file', 'ct-dls', 'de-dpr',
     'history',  # previously delivered/imported leads were already accepted
 })
 
