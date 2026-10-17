@@ -37,9 +37,25 @@ One `daily --execute` run:
 4. **Discover** more companies when the backlog is short: Hunter Discover (free calls), Google Places (1,000 free requests a month), OpenStreetMap. Markets rotate so each day covers new states and metros
 5. **Crawl** the oldest uncrawled company sites in parallel for published names, titles, emails and email patterns
 6. **Find** emails for fresh decision makers whose site hides them (Hunter, ZeroBounce, Tomba, Icypeas, whichever is funded first)
-7. **Verify** pattern guesses and finder results (Reoon, MillionVerifier, Clearout, Verifalia, ...), promoting only valid ones
-8. **Select** the best fresh A/B leads with a work email, never anyone delivered before (matched by LinkedIn, email or name + company)
-9. **Writes** `leads.csv` (6 columns), `leads-details.csv` (tier, score, email source, evidence URL) and `report.json` (per-step counts, shortfall and what to enable next)
+7. **Verify** risk-first, promoting only valid results: pattern guesses for fresh decision makers, then published emails that do not look like the person's name, then finder results, then other guesses, then (up to `--cap verify-published=25`) other published emails never checked. Emails on domains already known to accept any address, or with no mail server, are skipped because a check cannot help (Reoon, Abstract, Bouncer, MyEmailVerifier, ...)
+8. **Email safety** (free DNS): every email domain gets an MX lookup (cached 30 days in `lead-history.sqlite3`; a domain with only an A record still counts, per RFC 5321; resolvers come from `/etc/resolv.conf`, override with `LEAD_RESEARCH_DNS_SERVERS=9.9.9.9,1.1.1.1`). Each lead gets an email risk:
+   - **high**, never delivered: role inboxes (info@, office@, sales@, ...), personal mailboxes, no mail server or null MX, a verifier said invalid, or an unverified guess
+   - **medium**: accept-all (catch-all) domains, verifier unsure, unverified finder results, published emails not built from the person's name
+   - **low**: verifier valid, or published on the company's own site with a name-based address
+9. **Select** the best fresh A/B leads with a work email, low risk before medium, never anyone delivered before (matched by LinkedIn, email or name + company)
+10. **Writes** `leads.csv`, `leads-details.csv` and `report.json` (per-step counts, dropped unsafe emails, shortfall and what to enable next)
+
+Daily `leads.csv` columns (the 6 clean columns first, so tools that read the clean format keep working):
+
+| Column | Meaning |
+|---|---|
+| Full Name, Title, Company, Company Website, LinkedIn URL, Email | Same as the `clean` output |
+| City, State | From public records or the company site's address (state as a 2-letter code) |
+| Company Type | `brokerage`, `developer`, `property_manager`, `investor` or `other`, from the company name (its last keyword wins: "Capital Realty" is a brokerage), then the record source, the site description, broker titles and the domain |
+| Source | Where the lead came from: `website`, `public_record`, `linkedin`, `finder` or `search` |
+| Confidence | `high`, `medium` or `low`, from email risk, tier and evidence (source page or LinkedIn) |
+
+`leads-details.csv` adds Tier, Score, Email Source, Source URL, Issues, Email Risk, Email Risk Reason, MX Provider (google, microsoft365 or other) and Email Verification. The `clean` and `build` commands still write exactly the 6 columns.
 
 Steps without an enabled, funded provider are skipped and reported, never forced. Tune with `--sources`, `--record-sources`, `--cap resolve=800`, `--max-domains`, `--min-tier A`.
 

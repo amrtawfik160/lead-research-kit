@@ -33,7 +33,7 @@ OPTIONAL_SOURCES = ('hunter-domains', 'apollo', 'xray-linkedin', 'pdl')
 DEFAULT_RECORD_SOURCES = ('tx-trec', 'ny-dos', 'co-dora', 'sec-form-d')
 DEFAULT_CAPS = {'records': 3000, 'resolve': 600, 'resolve-hunter': 1500, 'hunter-discover': 90, 'google-places': 30, 'osm': 6,
                 'apollo': 20, 'apollo-enrich': 50, 'hunter-domains': 25, 'find-emails': 60, 'verify': 300, 'xray-linkedin': 300,
-                'render-js': 25, 'pdl': 3}
+                'render-js': 25, 'pdl': 3, 'verify-published': 25}
 KEYWORD_SETS = (['property management'], ['commercial real estate'], ['multifamily'], ['real estate investment'],
                 ['real estate development'], ['brokerage'], ['luxury real estate'], ['land'])
 SEARCH_FALLBACK = ('serper', 'tavily', 'exa')
@@ -388,17 +388,95 @@ def _run_jobs(store, config, jobs, execute, env, transport, cap):
 
 
 def _selection_key(record, source_quality=None):
-    """Best first: tier, has email, sources that bounce less (once feedback exists), LinkedIn, score."""
+    """Best first: email risk (low before medium), tier, has email, sources that bounce less
+    (once feedback exists), LinkedIn, score."""
     bounce = ((source_quality or {}).get(record.get('email_source') or 'unknown') or {}).get('bounce_rate', 0)
-    return (quality.TIER_ORDER[record['tier']], 0 if record.get('email') else 1, 1 if bounce > 0.05 else 0,
+    risk = quality.RISK_ORDER.get(record.get('email_risk') or ('medium' if record.get('email') else ''), 3)
+    return (risk, quality.TIER_ORDER[record['tier']], 0 if record.get('email') else 1, 1 if bounce > 0.05 else 0,
             0 if record.get('linkedin_url') else 1, -record['score'])
+
+
+def _email_domain(email):
+    return email.rsplit('@', 1)[1].lower() if email and '@' in email else ''
+
+
+def _risk_context(store, prospects):
+    """Emails/domains a verifier or finder already called catch-all, and domains with any verify result."""
+    from .pipeline import _verification_index
+    verified = _verification_index(store)
+    catch_all_emails = {e for e, v in verified.items() if v.get('status') == 'catch_all'}
+    for prospect in prospects:
+        email = (prospect.get('email') or '').lower()
+        flags = set(prospect.get('email_risk_flags') or ())
+        if email and (prospect.get('email_verification') == 'accept_all' or 'catch_all' in flags):
+            catch_all_emails.add(email)
+    return {'catch_all_emails': catch_all_emails,
+            'catch_all_domains': {_email_domain(e) for e in catch_all_emails},
+            'checked_domains': {_email_domain(e) for e in verified}}
+
+
+def discover_locations(store):
+    """{domain: (city, state)} from Hunter Discover jobs filtered to one headquarters location.
+
+    The filter is Hunter's own headquarters match, so a company returned for
+    "Austin, TX" is headquartered there (state-only jobs give just the state).
+    """
+    places = {}
+    for attempt in store.attempts():
+        if attempt.get('provider') != 'hunter' or attempt.get('operation') != 'discover' or attempt.get('state') != 'completed':
+            continue
+        filters = (attempt.get('payload') or {}).get('filters') or {}
+        include = ((filters.get('headquarters_location') or {}).get('include')) or []
+        if len(include) != 1 or not isinstance(include[0], dict):
+            continue
+        city, state = include[0].get('city') or '', quality.us_state_code(include[0].get('state') or '')
+        if not state:
+            continue
+        for company in ((attempt.get('outcome') or {}).get('fields') or {}).get('companies') or []:
+            domain = quality.normalize_host((company or {}).get('domain') or '')
+            if domain and (city or domain not in places):
+                places[domain] = (city, state)
+    return places
+
+
+def fill_locations(records, places):
+    """Give records without a state the discovery location of their company domain (in place)."""
+    filled = 0
+    for record in records:
+        city, state = quality.lead_city_state(record)
+        place = places.get(record.get('company_website') or '')
+        if place and not state:
+            record['city'], record['state'] = city or place[0], place[1]
+            filled += 1
+        elif place and not city and place[0] and place[1] == state:
+            record['city'] = place[0]
+            filled += 1
+    return filled
+
+
+def annotate_email_risk(records, mx_facts, context):
+    """Set email_risk / email_risk_reason / mx_provider / company_type on each record (in place)."""
+    for record in records:
+        domain = _email_domain(record.get('email'))
+        if record.get('email') and (record['email'].lower() in context['catch_all_emails']
+                                    or domain in context['catch_all_domains']):
+            record['email_catch_all'] = True
+        mx = mx_facts.get(domain)
+        record['email_risk'], record['email_risk_reason'] = quality.email_risk(record, mx)
+        record['mx_provider'] = (mx or {}).get('provider', '')
+        record['company_type'] = quality.company_type(record)
+    return records
 
 
 def run_daily(work, store, config, *, target=500, execute=False, day=None, sources=DEFAULT_SOURCES,
               output_root=None, max_domains=None, workers=24, require_email=True, min_tier='B',
               caps=None, env=None, transport=None, fetcher=None, record_sources=(), record_source_names=DEFAULT_RECORD_SOURCES,
-              search_provider='serper', records_getter=None, clock=time.time):
-    """One daily cycle. Returns a report; writes files under ``output_root/day``."""
+              search_provider='serper', records_getter=None, clock=time.time, mx_check=None, mx_resolver=None):
+    """One daily cycle. Returns a report; writes files under ``output_root/day``.
+
+    ``mx_check`` (free DNS lookups of email domains) defaults to on for live runs
+    (``execute`` with the real network transport) or when ``mx_resolver`` is given.
+    """
     work = Path(work)
     env = os.environ if env is None else env
     day = day or today_iso(clock)
@@ -526,6 +604,20 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
 
         target_cfg = quality.Target(min_tier=min_tier)
         result = build(prospects=history.prospects(), site_results=history.recent_sites(), store=store, target=target_cfg)
+        from . import emailcheck
+        mx_on = mx_check if mx_check is not None else (mx_resolver is not None or (execute and transport is None))
+        mx_facts = {}
+
+        def check_mx(emails):
+            if not mx_on:
+                return
+            domains = {_email_domain(e) for e in emails} - set(mx_facts)
+            # Reserved test domains only resolve through an injected resolver
+            domains = [d for d in domains if d and (mx_resolver is not None or not quality.is_reserved_domain(d))]
+            if domains:
+                mx_facts.update(emailcheck.check_domains(history.db, domains, resolver=mx_resolver, clock=clock))
+
+        check_mx([r.get('email') for r in result['clean'] + result['review']] + [c['Candidate Email'] for c in result['candidates']])
         if 'find-emails' in sources:
             # Fresh decision makers with a known company site but no published email
             need = [r for r in result['clean'] + result['review'] if not r.get('email') and r.get('company_website')
@@ -536,18 +628,55 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                     for r in need[:caps['find-emails']]]
             run('find-emails', jobs, caps['find-emails'])
         if 'verify' in sources:
-            emails = [c['Candidate Email'] for c in result['candidates']]
-            emails += [p['email'] for p in history.prospects() if p.get('email') and str(p.get('email_source', '')).endswith('_finder')
-                       and p.get('email_verification') not in ('valid', 'provider_valid')]
-            checked = {(a.get('payload') or {}).get('email') for a in store.attempts() if a.get('operation') == 'verify'}
-            fresh = [e for e in dict.fromkeys(e.lower() for e in emails) if e not in checked]
-            jobs = [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': e}} for e in fresh]
+            # Risk-first: guesses for fresh decision makers, weak published emails, finder results, the rest
+            records = result['clean'] + result['review']
+            by_person = {(r.get('company_website'), _name_key(r.get('full_name'))): r for r in records}
+            by_email = {r['email'].lower(): r for r in records if r.get('email')}
+            candidates = []
+            for c in result['candidates']:
+                r = by_person.get((c['Company Website'], _name_key(c['Full Name']))) or {}
+                candidates.append({'email': c['Candidate Email'], 'kind': 'pattern', 'decision_maker': r.get('decision_maker', True),
+                                   'fresh': history.is_fresh(r) if r else True, 'tier': c.get('Tier'), 'score': r.get('score')})
+            prospects_now = history.prospects()
+            for p in prospects_now:
+                if p.get('email') and str(p.get('email_source', '')).endswith('_finder') and p.get('email_verification') not in ('valid', 'provider_valid'):
+                    r = by_email.get(p['email'].lower()) or {}
+                    candidates.append({'email': p['email'], 'kind': 'finder', 'tier': r.get('tier'), 'score': r.get('score'),
+                                       'fresh': history.is_fresh(r) if r else True})
+            for r in result['clean']:
+                if r.get('email') and r.get('email_source') == 'website_published' and r.get('decision_maker') \
+                        and not r.get('email_verification') and quality.email_kind(r['email']) == 'work':
+                    candidates.append({'email': r['email'], 'kind': 'published', 'name_match': r.get('email_name_match'),
+                                       'fresh': history.is_fresh(r), 'tier': r['tier'], 'score': r['score']})
+            context = _risk_context(store, prospects_now)
+            checked = {((a.get('payload') or {}).get('email') or '').lower() for a in store.attempts() if a.get('operation') == 'verify'}
+            no_mail = [d for d, m in mx_facts.items() if m.get('has_mx') is False]
+            order = emailcheck.prioritize_verify(candidates, {'checked': checked, 'catch_all_domains': context['catch_all_domains'],
+                                                              'checked_domains': context['checked_domains'], 'no_mail_domains': no_mail},
+                                                 published_cap=caps['verify-published'])
+            jobs = [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': e}} for e in order['emails']]
             step = run('verify', jobs, caps['verify'])
-            step['already_checked'] = len(set(e.lower() for e in emails)) - len(fresh)
+            step['already_checked'] = order['skipped'].get('already_checked', 0)
+            step['priority'] = order['groups']
+            step['not_worth_checking'] = {k: v for k, v in order['skipped'].items() if k != 'already_checked'}
         if execute and ({'find-emails', 'verify'} & set(sources)):
             result = build(prospects=history.prospects(), site_results=history.recent_sites(), store=store, target=target_cfg)
 
-        pool = [r for r in result['clean'] if (r.get('email') or not require_email) and history.is_fresh(r)]
+        check_mx([r.get('email') for r in result['clean']])
+        annotate_email_risk(result['clean'], mx_facts, _risk_context(store, history.prospects()))
+        safety = {'mx_check': mx_on, 'mx': emailcheck.summarize(mx_facts), 'dropped': {},
+                  'locations_filled': fill_locations(result['clean'], discover_locations(store))}
+        pool = []
+        for r in result['clean']:
+            if not ((r.get('email') or not require_email) and history.is_fresh(r)):
+                continue
+            if r.get('email_risk') == 'high':
+                safety['dropped'][r['email_risk_reason']] = safety['dropped'].get(r['email_risk_reason'], 0) + 1
+                if require_email:
+                    continue
+                r['rejected_email'], r['email'], r['email_risk'] = r['email'], '', ''
+            pool.append(r)
+        report['steps']['email-safety'] = safety
         source_quality = history.source_quality()
         pool.sort(key=lambda r: _selection_key(r, source_quality))
         picked, seen = [], set()
@@ -578,6 +707,8 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
         report['delivered'] = len(picked)
         report['shortfall'] = max(0, target - len(picked))
         report['delivered_by_source'] = _count_by(picked, 'email_source')
+        report['delivered_by_risk'] = _count_by(picked, 'email_risk')
+        report['delivered_by_company_type'] = _count_by(picked, 'company_type')
         if report['shortfall']:
             report['advice'] = shortfall_advice(report['shortfall'], history)
         out_dir = Path(output_root or work / 'daily') / (day if execute else day + '-preview')
@@ -768,7 +899,16 @@ def render_report(report):
     by = report.get('delivered_by_source') or {}
     if by:
         lines.append('Email sources: ' + ', '.join(f'{k} {v}' for k, v in sorted(by.items(), key=lambda kv: -kv[1])))
+    risk = report.get('delivered_by_risk') or {}
+    if risk:
+        lines.append('Email risk: ' + ', '.join(f'{k or "none"} {risk[k]}' for k in ('low', 'medium', '') if risk.get(k)))
+    types = report.get('delivered_by_company_type') or {}
+    if types:
+        lines.append('Company types: ' + ', '.join(f'{k} {v}' for k, v in sorted(types.items(), key=lambda kv: -kv[1])))
     steps = report.get('steps', {})
+    safety = steps.get('email-safety') or {}
+    if safety.get('dropped'):
+        lines.append('Dropped unsafe emails: ' + ', '.join(f'{k} {v}' for k, v in sorted(safety['dropped'].items(), key=lambda kv: -kv[1])))
     crawl = steps.get('crawl', {})
     if crawl.get('sites_ok') is not None:
         lines.append(f"Crawled {crawl.get('domains_planned', 0)} sites, {crawl.get('sites_ok', 0)} reachable, {crawl.get('people_with_email', 0)} people with emails")
@@ -852,16 +992,22 @@ def attach_linkedin(records, prospects):
     return filled
 
 
+DETAIL_EXTRA_HEADERS = ['Tier', 'Score', 'Email Source', 'Source URL', 'Issues', 'Email Risk', 'Email Risk Reason',
+                        'MX Provider', 'Email Verification']
+
+
 def write_daily(records, out_dir):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(out_dir, 0o700)
     leads = out_dir / 'leads.csv'
     details = out_dir / 'leads-details.csv'
-    quality._write_csv(str(leads), quality.HEADERS, [quality.output_row(r) for r in records])
-    quality._write_csv(str(details), quality.HEADERS + ['Tier', 'Score', 'Email Source', 'Source URL', 'Issues'],
-                       [quality.output_row(r) + [r['tier'], r['score'], r.get('email_source', ''),
-                                                 r.get('email_evidence_url') or r.get('source_url', ''), '; '.join(r['issues'])]
+    quality._write_csv(str(leads), quality.DAILY_HEADERS, [quality.daily_row(r) for r in records])
+    quality._write_csv(str(details), quality.DAILY_HEADERS + DETAIL_EXTRA_HEADERS,
+                       [quality.daily_row(r) + [r['tier'], r['score'], r.get('email_source', ''),
+                                                r.get('email_evidence_url') or r.get('source_url', ''), '; '.join(r['issues']),
+                                                r.get('email_risk') or quality.email_risk(r)[0], r.get('email_risk_reason', ''),
+                                                r.get('mx_provider', ''), r.get('email_verification', '')]
                         for r in records])
     return {'leads': str(leads), 'details': str(details)}
 
