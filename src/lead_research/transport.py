@@ -1,6 +1,7 @@
 """Bounded stdlib HTTP transport. Never retries, follows redirects, or logs secrets."""
 import json
 import math
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -50,6 +51,8 @@ class UrllibTransport:
     codes; neither remote text nor request URLs, credentials, or headers escape.
     The optional opener exists for offline unit tests, never automatic retries.
     """
+    deadline_pad = 10.0
+
     def __init__(self, max_response_bytes=1_048_576, opener=None):
         if type(max_response_bytes) is not int or max_response_bytes < 1:
             raise ValueError('invalid_response_limit')
@@ -57,6 +60,34 @@ class UrllibTransport:
         self._opener = opener or urllib.request.build_opener(_NoRedirect())
 
     def send(self, request: Request) -> Response:
+        """Run the request with a hard overall deadline (2x timeout + 10s).
+
+        Socket timeouts only bound each read; a stalled DNS lookup or a server that
+        trickles bytes could otherwise hold the single active ledger attempt forever.
+        On deadline the worker thread is abandoned (daemon) and a timeout error is raised,
+        which the Runner records as uncertain without retrying.
+        """
+        outcome = {}
+
+        def work():
+            try:
+                outcome['response'] = self._send_once(request)
+            except BaseException as exc:  # re-raised in the caller thread
+                outcome['error'] = exc
+
+        timeout = request.timeout
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+            return self._send_once(request)  # invalid timeouts are rejected there with a stable code
+        worker = threading.Thread(target=work, daemon=True)
+        worker.start()
+        worker.join(min(float(timeout) * 2 + self.deadline_pad, 250))
+        if worker.is_alive():
+            raise ProviderError('request_deadline_exceeded')
+        if 'error' in outcome:
+            raise outcome['error']
+        return outcome['response']
+
+    def _send_once(self, request: Request) -> Response:
         validate_url(request.url)
         if request.method not in ('GET', 'POST'):
             raise PolicyError('unsupported_http_method')

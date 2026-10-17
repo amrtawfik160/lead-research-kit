@@ -539,8 +539,11 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
             emails = [c['Candidate Email'] for c in result['candidates']]
             emails += [p['email'] for p in history.prospects() if p.get('email') and str(p.get('email_source', '')).endswith('_finder')
                        and p.get('email_verification') not in ('valid', 'provider_valid')]
-            jobs = [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': e}} for e in dict.fromkeys(e.lower() for e in emails)]
-            run('verify', jobs, caps['verify'])
+            checked = {(a.get('payload') or {}).get('email') for a in store.attempts() if a.get('operation') == 'verify'}
+            fresh = [e for e in dict.fromkeys(e.lower() for e in emails) if e not in checked]
+            jobs = [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': e}} for e in fresh]
+            step = run('verify', jobs, caps['verify'])
+            step['already_checked'] = len(set(e.lower() for e in emails)) - len(fresh)
         if execute and ({'find-emails', 'verify'} & set(sources)):
             result = build(prospects=history.prospects(), site_results=history.recent_sites(), store=store, target=target_cfg)
 

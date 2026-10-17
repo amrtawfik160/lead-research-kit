@@ -98,5 +98,27 @@ class TransportTests(unittest.TestCase):
             UrllibTransport(opener=FakeOpener()).send(Request('DELETE', 'https://api.hunter.io/v2/account'))
 
 
+
+
+class DeadlineTests(unittest.TestCase):
+    def test_hung_request_raises_deadline(self):
+        import threading, time
+        from lead_research.transport import UrllibTransport
+        from lead_research.models import Request, ProviderError
+        release = threading.Event()
+
+        class Hang:
+            def open(self, req, timeout=None):
+                release.wait(10)
+                raise OSError('late')
+        transport = UrllibTransport(opener=Hang())
+        transport.deadline_pad = 0.1
+        start = time.monotonic()
+        with self.assertRaises(ProviderError) as ctx:
+            transport.send(Request('GET', 'https://api.hunter.io/v2/account', {}, None, timeout=0.2))
+        release.set()
+        self.assertEqual(str(ctx.exception), 'request_deadline_exceeded')
+        self.assertLess(time.monotonic() - start, 15)
+
 if __name__ == '__main__':
     unittest.main()

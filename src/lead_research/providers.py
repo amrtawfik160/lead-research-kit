@@ -1845,6 +1845,10 @@ class Deepline(Provider):
         j = response.data
         if 'workflowId' in j or j.get('kind') == 'play_run' or isinstance(j.get('run'), dict):
             return self._parse_run(j)
+        # Live Oct 2026: a miss is HTTP 200 {"status":"no_result","result":{"data":{"email":null,"status":null,...}}}
+        result_data = (j.get('result') or {}).get('data') if isinstance(j.get('result'), dict) else None
+        if j.get('status') == 'no_result' and isinstance(result_data, dict) and not result_data.get('email'):
+            return Outcome('not_found', fields={'status': 'no_result', 'route': self.FINDER_TOOL, 'verification_is_fresh': False})
         data = _deepline_finder_data(j)
         if data is None:
             return _error('invalid_response')

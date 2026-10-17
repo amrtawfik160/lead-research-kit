@@ -23,8 +23,9 @@ def load_env_file(path):
         line=line.strip()
         if not line or line.startswith('#') or '=' not in line:continue
         key,value=line.split('=',1)
-        key=key.strip()
-        if key.isidentifier() and key.upper()==key and value:os.environ.setdefault(key,value.strip())
+        key,value=key.strip(),value.strip()
+        if len(value)>=2 and value[0]==value[-1] and value[0] in '\'"':value=value[1:-1]
+        if key.isidentifier() and key.upper()==key and value:os.environ.setdefault(key,value)
 
 
 def emit(value, output=None):

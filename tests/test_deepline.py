@@ -284,5 +284,17 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(len(deepline_find_jobs(records, skip_with_email=False)), 3)
 
 
+
+
+class DeeplineLiveShapeTests(unittest.TestCase):
+    def test_no_result_is_not_found(self):
+        from lead_research.providers import get_provider
+        from lead_research.models import Response
+        body = {'job_id': 'x', 'status': 'no_result', 'result': {'data': {'email': None, 'status': None, 'message': 'none',
+                                                                         'first_name': 'Casey', 'last_name': 'Morgan', 'domain': 'harbor.example'}}}
+        out = get_provider('deepline').parse('find', Response(200, body))
+        self.assertEqual(out.assessment, 'not_found')
+        self.assertIsNone(out.error)
+
 if __name__ == '__main__':
     unittest.main()
