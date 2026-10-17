@@ -36,7 +36,7 @@ DEFAULT_CAPS = {'records': 3000, 'resolve': 600, 'resolve-hunter': 1500, 'resolv
                 'render-js': 25, 'pdl': 3}
 KEYWORD_SETS = (['property management'], ['commercial real estate'], ['multifamily'], ['real estate investment'],
                 ['real estate development'], ['brokerage'], ['luxury real estate'], ['land'])
-SEARCH_FALLBACK = ('serper', 'tavily', 'exa')
+SEARCH_FALLBACK = ('serper', 'linkup', 'youcom', 'zenserp', 'tavily', 'exa')
 EXPECTED_LEADS_PER_DOMAIN = 0.3  # measured: ~0.3 fresh decision makers with work email per crawled brokerage site
 
 # Large US metros as (place, state) for OpenStreetMap rotation. Official place names
@@ -451,7 +451,7 @@ def _run_jobs(store, config, jobs, execute, env, transport, cap):
 
 # Verifiers in the order their free allowance should be spent (recurring daily/monthly first).
 VERIFY_LANE_ORDER = ('reoon', 'quickemailverification', 'abstract', 'bouncer', 'myemailverifier',
-                     'emailable', 'kickbox', 'millionverifier')
+                     'emailvalidation', 'emaillistverify', 'emailable', 'kickbox', 'millionverifier')
 
 
 def plan_verify_lanes(store, config, emails, env, order=VERIFY_LANE_ORDER):
@@ -801,7 +801,8 @@ def _funded(store, config, provider, pool):
     return next((b['remaining_units'] // 1_000_000 for b in store.budgets() if b['provider'] == provider and b['pool'] == pool), 0)
 
 
-SEARCH_POOLS = {'serper': 'queries', 'tavily': 'credits', 'exa': 'queries', 'brave': 'queries'}
+SEARCH_POOLS = {'serper': 'queries', 'tavily': 'credits', 'exa': 'queries', 'brave': 'queries',
+                'zenserp': 'searches', 'linkup': 'queries', 'youcom': 'queries'}
 
 
 def _resolve_firms(history, store, config, execute, env, transport, caps, provider='serper', *, fetcher=None,
