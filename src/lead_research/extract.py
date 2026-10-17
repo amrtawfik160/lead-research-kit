@@ -13,6 +13,7 @@ link, or plain/obfuscated text).
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 import unicodedata
@@ -231,8 +232,17 @@ def _parse(html_text: str) -> _Node:
     return builder.root
 
 
+def _unescape(value: str) -> str:
+    # HTMLParser already decodes markup; this catches double-encoded text and JSON-LD/meta strings ("&amp;amp;")
+    for _ in range(2):
+        if '&' not in value:
+            break
+        value = html.unescape(value)
+    return value
+
+
 def _clean_text(value: str) -> str:
-    value = (value or '').translate(_ZERO_WIDTH).replace('\xa0', ' ')
+    value = _unescape(value or '').translate(_ZERO_WIDTH).replace('\xa0', ' ')
     return re.sub(r'\s+', ' ', value).strip()
 
 

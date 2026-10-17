@@ -254,5 +254,22 @@ class AuditTests(unittest.TestCase):
                 main(['--workspace', tmp, 'daily', 'audit', '--date', '2026-01-01'])
 
 
+
+class AuditReadsDailyFiles(unittest.TestCase):
+    def test_audit_reads_write_daily_output_with_new_columns(self):
+        from lead_research.daily import write_daily
+        record = {'full_name': 'Casey Morgan', 'title': 'Designated Broker', 'company': 'Harbor', 'company_website': 'harbor.example',
+                  'linkedin_url': '', 'email': 'casey@harbor.example', 'tier': 'A', 'score': 90, 'email_source': 'website_published',
+                  'email_evidence_url': 'https://harbor.example/team', 'issues': [], 'email_risk': 'low', 'city': 'Hartford', 'state': 'CT'}
+        with tempfile.TemporaryDirectory() as tmp:
+            day = Path(tmp) / '2026-10-17'
+            files = write_daily([record], day)
+            header = Path(files['details']).read_text().splitlines()[0]
+            self.assertIn('Email Risk', header)
+            fetcher = FakeFetcher({'https://harbor.example/': '<h1>Harbor</h1>', 'https://harbor.example/team':
+                                   '<div>Casey Morgan<br>Designated Broker <a href="mailto:casey@harbor.example">email</a></div>'})
+            report = run_audit(day, fetcher, sample=5, seed=1)
+            self.assertEqual([l['result'] for l in report['leads']], ['confirmed'])
+
 if __name__ == '__main__':
     unittest.main()

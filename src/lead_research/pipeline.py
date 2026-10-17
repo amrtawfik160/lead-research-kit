@@ -121,12 +121,15 @@ def site_records(site_results):
         if not isinstance(site, dict) or not site.get('domain'):
             continue
         domain = site['domain']
-        company = (site.get('company') or {}).get('name') or ''
+        facts = site.get('company') or {}
+        company = facts.get('name') or ''
         pattern = site.get('pattern') if _usable_pattern(site.get('pattern')) else None
+        place = {k: v for k, v in (('city', facts.get('address_locality')), ('state', facts.get('address_region')),
+                                   ('company_description', facts.get('description'))) if isinstance(v, str) and v.strip()}
         for person in site.get('people') or []:
             row = {'full_name': person.get('full_name'), 'title': person.get('title') or '', 'company': company,
                    'company_website': domain, 'linkedin_url': person.get('linkedin_url') or '',
-                   'source': 'website', 'source_url': person.get('evidence_url') or ''}
+                   'source': 'website', 'source_url': person.get('evidence_url') or '', **place}
             email = (person.get('email') or '').lower()
             if email and classify_email(email, domain) == 'person':
                 row.update(email=email, email_source='website_published', email_evidence_url=person.get('evidence_url') or '')
@@ -195,6 +198,9 @@ def merge_sources(*, imports=(), prospects=(), site_results=(), companies=(), st
                 _set(merged, linkedin_url=site['linkedin_url'])
             if not record['title'] and site.get('title'):
                 _set(merged, title=site['title'])
+            for key in ('city', 'state', 'company_description'):
+                if site.get(key) and not merged.get(key):
+                    merged[key] = site[key]
         domain = record['company_website']
         if domain in patterns and not merged.get('email') and not record['email']:
             guess = apply_pattern(patterns[domain]['pattern'], record['full_name'], domain)

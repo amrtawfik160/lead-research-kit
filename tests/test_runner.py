@@ -81,3 +81,36 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(r.run([second],execute=True)['results'][0]['reason'],'cached_mailbox_requires_explicit_crosscheck')
             r.run([{**second,'crosscheck':True}],execute=True)
         self.assertEqual(len(self.t.requests),2)
+
+
+class PlanSpeedTests(unittest.TestCase):
+    def test_planning_many_verify_jobs_against_big_ledger_is_fast(self):
+        import json, time
+        from lead_research.policy import input_key
+        with tempfile.TemporaryDirectory() as tmp:
+            s = Store(tmp + '/ledger.db')
+            s.confirm_budget('one', 'credits', '500', 'synthetic free')
+            rows = []
+            for i in range(2000):
+                payload = {'email': f'old{i}@example.org'}
+                data = {'id': f'a{i}', 'provider': 'one', 'operation': 'verify', 'input_key': input_key('verify', payload),
+                        'payload': payload, 'independence': 'one', 'state': 'completed', 'outcome': {'assessment': 'provider_valid'}}
+                rows.append((data['id'], 'one', 'verify', data['input_key'], payload['email'], 'one', 'completed', json.dumps(data)))
+            s.db.executemany('INSERT INTO attempts(id,provider,operation,input_key,email,independence,state,data) VALUES (?,?,?,?,?,?,?,?)', rows)
+            config = {'providers': {'one': {'enabled': True, 'charges': {'verify': {'credits': '1'}}}}}
+            with patch('lead_research.runner.get_provider', return_value=Adapter()):
+                runner = Runner(s, config, env={'KEY': 'synthetic'})
+                jobs = [{'provider': 'one', 'email': f'new{i}@example.org'} for i in range(300)]
+                jobs += [{'provider': 'one', 'email': 'old5@example.org'}]
+                start = time.monotonic()
+                plan = runner.plan(jobs)
+                elapsed = time.monotonic() - start
+            self.assertLess(elapsed, 2.0)
+            self.assertEqual(sum(p['status'] == 'ready' for p in plan), 300)
+            # a mailbox already checked is still recognised through the cached index
+            self.assertEqual(plan[-1]['status'], 'cached')
+            # a write from this connection invalidates the snapshot
+            s.confirm_budget('one', 'credits', '0', 'synthetic free')
+            with patch('lead_research.runner.get_provider', return_value=Adapter()):
+                self.assertEqual(runner.plan([{'provider': 'one', 'email': 'x@example.org'}])[0]['reason'], 'insufficient_confirmed_free_budget')
+            s.close()

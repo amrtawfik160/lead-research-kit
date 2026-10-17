@@ -5,6 +5,13 @@ from .policy import parse_units, normalize_job
 from .runner import Runner
 
 
+def _attempt_count(store, provider):
+    db=getattr(store,'db',None)
+    if db is not None:
+        return db.execute('SELECT COUNT(*) FROM attempts WHERE provider=?',(provider,)).fetchone()[0]
+    return sum(1 for a in store.attempts() if a['provider']==provider)
+
+
 def route_run(store, config, jobs, *, execute=False, limit=10, env=None, transport=None, **runner_options):
     if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 100:
         raise PolicyError('limit_must_be_0_to_100')
@@ -34,7 +41,7 @@ def route_run(store, config, jobs, *, execute=False, limit=10, env=None, transpo
                 calls+=1
             results.append(selected);continue
         # Count only this provider's attempts: parallel verify lanes write other providers' rows meanwhile
-        mine=lambda:sum(1 for a in store.attempts() if a['provider']==selected['provider'])
+        mine=lambda:_attempt_count(store,selected['provider'])
         before=mine()
         report=engine.run([selected],execute=True,limit=1)
         calls+=mine()-before
