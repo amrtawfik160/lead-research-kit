@@ -260,6 +260,19 @@ class History:
                 added += cur.rowcount
         return added
 
+    def licensed_domains(self, domains):
+        """Subset of ``domains`` whose source is a public license record (never relevance-filtered)."""
+        from .relevance import is_licensed_source
+        found = set()
+        rows = list(dict.fromkeys(d for d in domains if isinstance(d, str)))
+        for start in range(0, len(rows), 500):
+            chunk = rows[start:start + 500]
+            marks = ','.join('?' * len(chunk))
+            for r in self.db.execute(f'SELECT domain, source FROM domains WHERE domain IN ({marks})', chunk):
+                if is_licensed_source(r['source']):
+                    found.add(r['domain'])
+        return found
+
     def domains_to_crawl(self, limit, recrawl_days=90, clock=time.time):
         cutoff = clock() - recrawl_days * 86400
         rows = self.db.execute('SELECT domain FROM domains WHERE last_crawled IS NULL OR last_crawled < ? '
@@ -387,6 +400,106 @@ def _run_jobs(store, config, jobs, execute, env, transport, cap):
     return report
 
 
+# Verifiers in the order their free allowance should be spent (recurring daily/monthly first).
+VERIFY_LANE_ORDER = ('reoon', 'quickemailverification', 'abstract', 'bouncer', 'myemailverifier',
+                     'emailable', 'kickbox', 'millionverifier')
+
+
+def plan_verify_lanes(store, config, emails, env, order=VERIFY_LANE_ORDER):
+    """Pre-assign emails to funded verifiers so each provider can run in its own lane.
+
+    Providers are taken in ``order`` (then any other enabled verifier). A provider is skipped if it
+    is unknown to this version, disabled, paused, missing its key, or has no verify charge. Each
+    gets at most as many emails as its confirmed free budget covers. Returns (lanes, unassigned)
+    where lanes is an ordered dict provider -> [email].
+    """
+    from .providers import PROVIDERS, get_provider
+    from .runner import Runner
+    from .policy import parse_units
+    probe = Runner(store, config, env=env)
+    budgets = {(b['provider'], b['pool']): b['remaining_units'] for b in store.budgets()}
+    configured = config.get('providers', {})
+    candidates = [p for p in order if p in configured] + [p for p in configured if p not in order]
+    lanes, rest = {}, list(dict.fromkeys(emails))
+    for pid in candidates:
+        if not rest:
+            break
+        entry = configured.get(pid) or {}
+        if pid not in PROVIDERS or not entry.get('enabled'):
+            continue
+        try:
+            provider = get_provider(pid)
+        except Exception:
+            continue
+        if 'verify' not in provider.operations or store.provider_state(pid).get('paused') or not probe._auth(provider):
+            continue
+        charges = (entry.get('charges') or {}).get('verify') or {}
+        try:
+            per = {pool: parse_units(v, positive=True) for pool, v in charges.items()}
+        except Exception:
+            continue
+        if not per:
+            continue
+        capacity = min(budgets.get((pid, pool), 0) // units for pool, units in per.items())
+        if capacity <= 0:
+            continue
+        lanes[pid], rest = rest[:capacity], rest[capacity:]
+    return lanes, rest
+
+
+def _run_verify_lanes(store, config, lanes, execute, env, transport):
+    """Run each provider's lane in its own thread and Store connection.
+
+    Ledger guarantees are unchanged per provider: reserve (debit) before send, one active attempt
+    per provider, finish/uncertain after, and a provider problem pauses and stops only its lane.
+    The hash-chained audit stays consistent because every write is a BEGIN IMMEDIATE transaction.
+    """
+    import threading
+    report = {'planned': sum(len(v) for v in lanes.values()), 'sent': 0, 'stopped': False,
+              'skipped_reasons': {}, 'lanes': {}}
+
+    def jobs_for(pid):
+        return [{'provider': pid, 'operation': 'verify', 'payload': {'email': e}} for e in lanes[pid]]
+
+    def merge(pid, step):
+        report['lanes'][pid] = {k: step[k] for k in ('planned', 'sent', 'stopped')}
+        report['sent'] += step['sent']
+        report['stopped'] = report['stopped'] or step['stopped']
+        for reason, n in step['skipped_reasons'].items():
+            report['skipped_reasons'][reason] = report['skipped_reasons'].get(reason, 0) + n
+
+    parallel = execute and len(lanes) > 1 and getattr(store, 'path', ':memory:') != ':memory:'
+    if not parallel:
+        for pid in lanes:
+            merge(pid, _run_jobs(store, config, jobs_for(pid), execute, env, transport, len(lanes[pid])))
+        return report
+    results, errors = {}, {}
+
+    from .store import Store
+
+    def lane(pid):
+        lane_store = Store(store.path, parallel_providers=True)
+        try:
+            results[pid] = _run_jobs(lane_store, config, jobs_for(pid), True, env, transport, len(lanes[pid]))
+        except Exception as exc:  # recorded, never silently dropped
+            errors[pid] = type(exc).__name__
+        finally:
+            lane_store.close()
+
+    threads = [threading.Thread(target=lane, args=(pid,), name=f'verify-{pid}') for pid in lanes]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for pid in lanes:
+        if pid in results:
+            merge(pid, results[pid])
+        else:
+            report['lanes'][pid] = {'planned': len(lanes[pid]), 'sent': 0, 'stopped': True, 'error': errors.get(pid)}
+            report['stopped'] = True
+    return report
+
+
 def _selection_key(record, source_quality=None):
     """Best first: tier, has email, sources that bounce less (once feedback exists), LinkedIn, score."""
     bounce = ((source_quality or {}).get(record.get('email_source') or 'unknown') or {}).get('bounce_rate', 0)
@@ -395,7 +508,7 @@ def _selection_key(record, source_quality=None):
 
 
 def run_daily(work, store, config, *, target=500, execute=False, day=None, sources=DEFAULT_SOURCES,
-              output_root=None, max_domains=None, workers=24, require_email=True, min_tier='B',
+              output_root=None, max_domains=None, workers=48, require_email=True, min_tier='B',
               caps=None, env=None, transport=None, fetcher=None, record_sources=(), record_source_names=DEFAULT_RECORD_SOURCES,
               search_provider='serper', records_getter=None, clock=time.time):
     """One daily cycle. Returns a report; writes files under ``output_root/day``."""
@@ -508,12 +621,14 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                 own = fetcher is None
                 active = fetcher or SafeFetcher(cache_path=work / 'web-cache.sqlite3', per_host_delay=1.0)
                 try:
-                    sites = crawl_domains(domains, active, max_pages=6, workers=workers)
+                    sites = crawl_domains(domains, active, max_pages=6, workers=workers,
+                                          trusted=history.licensed_domains(domains))
                 finally:
                     if own:
                         active.close()
                 history.save_sites(sites)
                 step.update(sites_ok=sum(s['status'] == 'ok' for s in sites),
+                            off_topic=sum(s['status'] == 'off_topic' for s in sites),
                             people=sum(len(s['people']) for s in sites),
                             people_with_email=sum(1 for s in sites for p in s['people'] if p.get('email')))
             report['steps']['crawl'] = step
@@ -541,8 +656,15 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                        and p.get('email_verification') not in ('valid', 'provider_valid')]
             checked = {(a.get('payload') or {}).get('email') for a in store.attempts() if a.get('operation') == 'verify'}
             fresh = [e for e in dict.fromkeys(e.lower() for e in emails) if e not in checked]
-            jobs = [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': e}} for e in fresh]
-            step = run('verify', jobs, caps['verify'])
+            lanes, unassigned = plan_verify_lanes(store, config, fresh[:caps['verify']], env)
+            step = _run_verify_lanes(store, config, lanes, execute, env, transport)
+            step['planned'] = len(fresh)
+            step['unassigned_no_budget'] = len(unassigned)
+            report['steps']['verify'] = step
+            if execute and step['sent']:
+                gathered = discovery.collect(store)
+                step['domains_added'] = history.add_domains(gathered['companies'], 'verify')
+                step['prospects_added'] = history.add_prospects(gathered['prospects'])
             step['already_checked'] = len(set(e.lower() for e in emails)) - len(fresh)
         if execute and ({'find-emails', 'verify'} & set(sources)):
             result = build(prospects=history.prospects(), site_results=history.recent_sites(), store=store, target=target_cfg)
