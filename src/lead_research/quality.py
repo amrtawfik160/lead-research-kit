@@ -1801,7 +1801,7 @@ SEARCH_SOURCES = frozenset({'exa', 'tavily', 'serper', 'brave', 'serpapi', 'goog
 
 
 def lead_source(record):
-    """Human-readable origin: website | public_record | linkedin | finder | search."""
+    """Human-readable origin of the email: website | verified_guess | public_record | linkedin | finder | search."""
     email_source = (record.get('email_source') or '').lower()
     sources = _sources_of(record)
     if email_source == 'website_published':
@@ -1811,6 +1811,8 @@ def lead_source(record):
     for source in sources:
         if source in PUBLIC_RECORD_SOURCES:
             return 'public_record'
+    if email_source == 'pattern_verified':
+        return 'verified_guess'
     for source in sources:
         if source == 'website':
             return 'website'

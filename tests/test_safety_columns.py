@@ -88,7 +88,7 @@ class LocationSourceConfidenceTests(unittest.TestCase):
         self.assertEqual(quality.lead_source({'email_source': 'website_published', 'source': 'tx-trec'}), 'website')
         self.assertEqual(quality.lead_source({'email_source': 'deepline_finder'}), 'finder')
         self.assertEqual(quality.lead_source({'email_source': 'pattern_verified', 'source': 'tx-trec'}), 'public_record')
-        self.assertEqual(quality.lead_source({'email_source': 'pattern_verified', 'source': 'website'}), 'website')
+        self.assertEqual(quality.lead_source({'email_source': 'pattern_verified', 'source': 'website'}), 'verified_guess')
         self.assertEqual(quality.lead_source({'source': 'xray'}), 'linkedin')
         self.assertEqual(quality.lead_source({'source': 'apollo'}), 'finder')
         self.assertEqual(quality.lead_source({'source': 'exa'}), 'search')
