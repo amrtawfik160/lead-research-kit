@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import html
 import re
+import socket
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 from .discovery import SEARCH_PROVIDERS, search_jobs, serper_batch_jobs
@@ -21,7 +23,7 @@ from .quality import (FRANCHISE_PARENTS, _brand_parent_hosts, normalize_host, we
 __all__ = ['DIRECTORY_DOMAINS', 'firm_core', 'resolution_query', 'resolution_queries', 'resolution_jobs',
            'pick_domain', 'verify_domain', 'resolve_from_store', 'company_key', 'resolution_batch_jobs',
            'exa_resolution_query', 'exa_resolution_jobs', 'resolve_from_hunter', 'firm_name_key',
-           'searched_queries']
+           'searched_queries', 'guess_domains', 'verify_guess', 'resolve_by_guess']
 
 DEFAULT_THRESHOLD = 0.5
 
@@ -559,3 +561,254 @@ def resolve_from_hunter(store, companies):
         row['resolution'] = resolution
         out.append(row)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Free resolution by guessing the domain from the firm name (no search spend).
+# ---------------------------------------------------------------------------
+
+# Trailing words a firm often leaves out of its domain ('Harbor Realty Group' -> harborrealty.com).
+_DROPPABLE_TAIL = frozenset({'group', 'realty', 'properties', 'property', 'homes', 'company', 'team', 'partners',
+                             'associates', 'services', 'brokerage', 'brokers', 'realtors', 'agency', 'management',
+                             'investments', 'holdings', 'advisors', 'solutions', 'international', 'residential',
+                             'commercial', 'development'})
+# Words that already make a name read as real estate, so no extra 'realty' try is needed.
+_RE_WORDS = frozenset({'realty', 'properties', 'property', 'homes', 'home', 'realtors', 'brokerage', 'brokers', 'broker'})
+_GUESS_TLDS = ('net', 'us', 'co')
+MAX_GUESSES = 8
+_MIN_LABEL = 5  # shorter labels ('abc.com') are almost always somebody else's brand
+# 'kellerwilliamsrealty.net' is never a franchisee's own site; leave those firms to search.
+_FRANCHISE_LABELS = tuple(sorted({d.split('.')[0] for d in FRANCHISE_PARENTS if len(d.split('.')[0]) >= 6}
+                                  - {'onereal', 'joinreal'} | {'remax'}))
+
+# Parked, for-sale, placeholder and default-server pages: never a firm's website.
+_PARKED = re.compile(
+    r'(?i)domain (?:name )?(?:is |may be )?for sale|this domain may be for sale|buy this domain|'
+    r'make an offer on this domain|(?:this )?(?:web ?page|domain) is parked|parked (?:free|domain|by)|'
+    r'domain parking|parkingcrew|sedoparking|\bsedo\.com|hugedomains|\bdan\.com|afternic|\bbodis\.com|'
+    r'undeveloped\.com|courtesy of godaddy|godaddy\.com/domains|this domain is registered|'
+    r'domain has expired|domain (?:name )?has been registered|account (?:has been )?suspended|'
+    r'welcome to nginx|apache2? (?:ubuntu )?default page|default web site page')
+_COMING_SOON = re.compile(r'(?i)coming soon|under construction|launching soon')
+_H1 = re.compile(r'<h1[^>]*>(.*?)</h1>', re.I | re.S)
+_COPYRIGHT = re.compile(r'(?:©|&copy;|&#169;|\(c\)|copyright)\s*(?:\d{4}(?:\s*[-–]\s*\d{4})?)?[^<\n]{0,120}', re.I)
+
+
+def _guess_tokens(name):
+    text = firm_core(name).lower().replace('&', ' and ').replace('+', ' and ')
+    return [t for t in _fold(text) if t not in ('the',) and t not in _LEGAL_WORDS]
+
+
+def _labels_for(name):
+    tokens = _guess_tokens(name)
+    distinctive = [t for t in tokens if t not in _GENERIC and len(t) >= 2]
+    if not distinctive:
+        return []
+    labels = []
+
+    def add(parts):
+        label = ''.join(parts)
+        if len(label) >= _MIN_LABEL and len(label) <= 63 and label not in labels:
+            labels.append(label)
+
+    add(tokens)
+    plain = [t for t in tokens if t != 'and']
+    add(plain)
+    tail = list(plain)
+    while len(tail) > 1:
+        if tail[-2:] == ['real', 'estate']:
+            add(tail[:-2] + ['re'])
+            tail = tail[:-2]
+        elif tail[-1] in _DROPPABLE_TAIL:
+            tail = tail[:-1]
+        else:
+            break
+        if tail and tail != plain:
+            if len(tail) == 1 and len(tail[0]) < 7:
+                break  # a bare short word ('harbor.com') is rarely the firm
+            add(tail)
+    if not (set(plain) & _RE_WORDS) and 'estate' not in plain:
+        add(tail + ['realty'])  # the single extra try for names without a real-estate word
+    if len(plain) > 1 and len(plain) <= 3:
+        add(['-'.join(plain)])
+    return labels
+
+
+def guess_domains(company, limit=MAX_GUESSES):
+    """Ranked candidate domains (<= ``limit``) for a records firm, built from its name and DBA.
+
+    .com variants come first; .net/.us/.co only for the top two labels. Generic labels (no
+    distinctive word), portals, franchise parents and other non-own domains are left out.
+    """
+    names = [company.get('organization') or company.get('company') or '']
+    if company.get('dba') and not str(company['dba']).upper().startswith('SEE '):
+        names.insert(0, company['dba'])
+    labels = []
+    for name in names:
+        for label in _labels_for(name):
+            if label not in labels:
+                labels.append(label)
+    organization = company.get('organization') or company.get('company') or ''
+    out = []
+
+    def push(domain):
+        host = normalize_host(domain)
+        if host and host not in out and not _blocked(host, host, organization) and host not in FRANCHISE_PARENTS \
+                and not host.replace('-', '').startswith(_FRANCHISE_LABELS):
+            out.append(host)
+
+    for label in labels:
+        push(label + '.com')
+    for label in labels[:2]:
+        for tld in _GUESS_TLDS:
+            push('%s.%s' % (label, tld))
+    return out[:limit]
+
+
+def _dns_exists(domain, dns):
+    for host in (domain, 'www.' + domain):
+        try:
+            if dns(host, 443, type=socket.SOCK_STREAM):
+                return True
+        except (OSError, UnicodeError, ValueError):
+            continue
+    return False
+
+
+def _brand_zones(text):
+    """(zone name, folded text) for title, og/site-name meta, <h1> headings and © lines."""
+    title, site_name, body = _page_parts(text)
+    zones = [('title', title), ('site_name', site_name)]
+    for match in _H1.findall((text or '')[:300000])[:5]:
+        zones.append(('h1', html.unescape(re.sub(r'<[^>]+>', ' ', match))))
+    for match in _COPYRIGHT.findall(body)[:5]:
+        zones.append(('copyright', match))
+    return [(name, ' '.join(value.split())) for name, value in zones if value and value.strip()], title, body
+
+
+def _location_hit(company, body):
+    """Which of city / county / state the homepage mentions ('' when none; None when company has no place)."""
+    words = ' ' + ' '.join(_fold(body)) + ' '
+    city = ' '.join(_fold(company.get('city')))
+    county = ' '.join(_fold(re.sub(r'(?i)\s+county$', '', company.get('county') or '')))
+    state = (company.get('state') or '').upper()
+    if not (city or county or state):
+        return None
+    if city and ' %s ' % city in words:
+        return 'city'
+    if county and ' %s ' % county in words:
+        return 'county'
+    state_name = ' '.join(_fold(US_STATES.get(state, '')))
+    if state_name and ' %s ' % state_name in words:
+        return 'state'
+    if state and re.search(r'(?:,|\s)\s*%s(?:\s+\d{5}|\b)' % re.escape(state), body):
+        return 'state'
+    return ''
+
+
+def verify_guess(company, domain, fetcher):
+    """Strict check that a guessed domain is the firm's own live website.
+
+    Every distinctive firm-name word must appear in a brand zone (title, og:site_name, <h1> or
+    the © line), the page must stay on ``domain``, must not be parked / for sale / a placeholder,
+    and must mention the firm's city, county or state when the firm has one. Returns ``(ok, evidence)``.
+    """
+    url = 'https://%s/' % domain
+    evidence = {'method': 'guess', 'url': url, 'final_url': None, 'matched': [], 'where': [], 'matched_text': None,
+                'location': None, 'reason': None}
+    try:
+        result = fetcher.get(url)
+    except Exception:  # noqa: BLE001 - fetchers report errors in the result
+        evidence['reason'] = 'fetch_error'
+        return False, evidence
+    if not getattr(result, 'ok', False):
+        evidence['reason'] = getattr(result, 'error', None) or 'fetch_failed'
+        return False, evidence
+    final = getattr(result, 'final_url', None) or url
+    evidence['final_url'] = final
+    if normalize_host(_host(final)) != domain:
+        evidence['reason'] = 'redirected_off_domain'
+        return False, evidence
+    text = getattr(result, 'text', '') or ''
+    zones, title, body = _brand_zones(text)
+    if _PARKED.search(title + ' ' + body[:20000]) or title.lower().startswith('index of /'):
+        evidence['reason'] = 'parked_or_for_sale'
+        return False, evidence
+    if len(body.split()) < 60 and _COMING_SOON.search(title + ' ' + body):
+        evidence['reason'] = 'placeholder_page'
+        return False, evidence
+    names = [company.get('dba'), company.get('organization') or company.get('company')]
+    best = None
+    for name in names:
+        if not name or str(name).upper().startswith('SEE '):
+            continue
+        distinctive = [t for t, w in _token_weights(firm_core(name)).items() if w == 1.0]
+        if not distinctive:
+            continue
+        hits, where, sample = set(), [], None
+        for zone, value in zones:
+            words = set(_fold(value.replace('&', ' and ')))
+            found = [t for t in distinctive if t in words]
+            if found:
+                hits.update(found)
+                where.append(zone)
+                if sample is None or len(found) == len(distinctive):
+                    sample = value[:160]
+        if len(hits) == len(distinctive):
+            best = (distinctive, sorted(set(where)), sample)
+            break
+        if best is None and hits:
+            evidence.update(matched=sorted(hits), where=sorted(set(where)))
+    if best is None:
+        evidence['reason'] = 'name_not_in_brand_zones'
+        return False, evidence
+    location = _location_hit(company, body)
+    evidence.update(matched=best[0], where=best[1], matched_text=best[2], location=location)
+    if location == '':
+        evidence['reason'] = 'location_not_on_homepage'
+        return False, evidence
+    return True, evidence
+
+
+def resolve_by_guess(companies, fetcher, *, dns=socket.getaddrinfo, max_candidates=6, workers=16):
+    """Attach company_website by guessing the domain from the firm name and confirming the homepage.
+
+    For each company (rows that already have a company_website are returned unchanged): build
+    ``guess_domains``; skip candidates with no DNS record (``dns`` is getaddrinfo-compatible, pass
+    None to skip the DNS precheck); fetch at most ``max_candidates`` homepages and stop at the first
+    that passes ``verify_guess``. Resolved rows get resolution {'method': 'guess', 'status':
+    'resolved', 'domain', 'evidence', 'tried'}; others {'method': 'guess', 'status': 'no_guess_match'
+    | 'no_candidates', 'tried'}. Results keep input order.
+    """
+    def one(company):
+        row = dict(company)
+        if company.get('company_website'):
+            return row
+        row['company_website'] = ''
+        candidates = guess_domains(company)
+        if not candidates:
+            row['resolution'] = {'method': 'guess', 'status': 'no_candidates', 'tried': []}
+            return row
+        tried, rejected = [], []
+        for domain in candidates:
+            if len(tried) >= max_candidates:
+                break
+            if dns is not None and not _dns_exists(domain, dns):
+                continue
+            tried.append(domain)
+            ok, evidence = verify_guess(company, domain, fetcher)
+            if ok:
+                row['company_website'] = domain
+                row['resolution'] = {'method': 'guess', 'status': 'resolved', 'domain': domain,
+                                     'evidence': evidence, 'tried': tried}
+                return row
+            rejected.append({'domain': domain, 'reason': evidence.get('reason')})
+        row['resolution'] = {'method': 'guess', 'status': 'no_guess_match', 'tried': tried, 'rejected': rejected}
+        return row
+
+    companies = list(companies)
+    if not companies:
+        return []
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(companies)))) as pool:
+        return list(pool.map(one, companies))
+

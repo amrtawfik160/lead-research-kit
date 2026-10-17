@@ -46,6 +46,35 @@ class Runner:
         self.env = os.environ if env is None else env
         self.transport = transport
         self.sleep, self.clock = sleep, clock
+        self._snapshot_key, self._snapshot = None, None
+
+    def _store_version(self):
+        """A key that changes whenever any connection writes the workspace (None: no caching)."""
+        db = getattr(self.store, 'db', None)
+        if db is None:
+            return None
+        try:
+            return (db.execute('PRAGMA data_version').fetchone()[0], db.total_changes)
+        except Exception:
+            return None
+
+    def _ledger(self):
+        """Verify attempts by email and confirmed budgets, rebuilt only when the store changed.
+
+        Planning many jobs (x every provider option) used to reload every attempt per quote.
+        """
+        key = self._store_version()
+        if key is not None and key == self._snapshot_key:
+            return self._snapshot
+        by_email = {}
+        for a in self.store.attempts():
+            if a['operation'] == 'verify' and a['state'] != 'cancelled':
+                by_email.setdefault(a['payload'].get('email'), []).append(a)
+        budgets = {(b['provider'], b['pool']): b['remaining_units'] for b in self.store.budgets()}
+        snapshot = {'verify_by_email': by_email, 'budgets': budgets}
+        if key is not None:
+            self._snapshot_key, self._snapshot = key, snapshot
+        return snapshot
 
     def _auth(self, provider):
         if provider.id == 'verifalia':
@@ -77,7 +106,7 @@ class Runner:
             job.update(status='cached', attempt_id=cached['id'], outcome=cached.get('outcome'), state=cached['state'])
             return job
         if job['operation'] == 'verify':
-            previous = [a for a in self.store.attempts() if a['operation'] == 'verify' and a['payload'].get('email') == job['payload']['email'] and a['state'] != 'cancelled']
+            previous = list(self._ledger()['verify_by_email'].get(job['payload']['email'], ()))
             if previous:
                 if any(a['state'] in {'sent', 'pending', 'uncertain', 'reserved'} or (a.get('outcome') or {}).get('error') for a in previous):
                     reason = 'unresolved_provider_error_or_active_attempt'
@@ -97,7 +126,7 @@ class Runner:
                 units = {p: v * items for p, v in units.items()}
                 job['charges'] = {p: format_units(v) for p, v in units.items()}
                 job['charge_items'] = items
-            budgets = {(b['provider'], b['pool']): b['remaining_units'] for b in self.store.budgets()}
+            budgets = self._ledger()['budgets']
             if any(budgets.get((provider.id, p), 0) < value for p, value in units.items()):
                 reason = reason or 'insufficient_confirmed_free_budget'
         except PolicyError as exc:

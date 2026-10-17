@@ -177,6 +177,85 @@ class DailyTests(unittest.TestCase):
                           sources=('records', 'resolve', 'build'), env={'SERPER_API_KEY': 'SYNTHETIC_TEST'}, transport=Serper(), record_source_names=())
         self.assertEqual((again['delivered'], Serper.calls), (0, 1))
 
+    def test_guess_runs_before_serper_and_only_unmatched_are_searched(self):
+        import json as _json
+        from lead_research.models import Response
+        from lead_research.webfetch import FetchResult
+        self.config['providers']['serper']['enabled'] = True
+        self.store.confirm_budget('serper', 'queries', '5', 'synthetic', attested_free=True)
+        searched = []
+
+        class Serper:
+            def send(self, request):
+                body = _json.loads(request.body)
+                items = body if isinstance(body, list) else [body]
+                searched.extend(item['q'] for item in items)
+                return Response(200, [{'searchParameters': {'q': item['q']}, 'organic': []} for item in items])
+
+        home = ('<html><head><title>Harbor Realty Group | Austin</title></head><body><h1>Harbor Realty Group</h1>'
+                + 'Homes for sale. ' * 30 + '<footer>&copy; 2026 Harbor Realty Group, Austin, TX 78701</footer></body></html>')
+
+        class Guesser:
+            urls = []
+            def get(self, url):
+                Guesser.urls.append(url)
+                if url == 'https://harborrealtygroup.com/':
+                    return FetchResult(url, url, 200, 'text/html', home)
+                return FetchResult(url, url, None, '', '', error='network_error')
+            def close(self):
+                pass
+
+        def dns(host, port, type=None):
+            if host.removeprefix('www.') == 'harborrealtygroup.com':
+                return [(2, 1, 6, '', ('203.0.113.7', port))]
+            raise OSError('nxdomain')
+
+        records = [{'source': 'tx-trec',
+                    'companies': [{'organization': 'Harbor Realty Group', 'city': 'Austin', 'county': 'Travis', 'state': 'TX',
+                                   'source': 'tx-trec', 'license_number': 'G1', 'decision_maker': 'Jordan Blake'},
+                                  {'organization': 'Quillstone Ventures', 'county': 'Bexar', 'state': 'TX',
+                                   'source': 'tx-trec', 'license_number': 'G2', 'decision_maker': 'Casey Morgan'}],
+                    'prospects': []}]
+        report = run_daily(self.work, self.store, self.config, target=5, execute=True, day='2026-01-01', record_sources=records,
+                           sources=('records', 'resolve', 'build'), env={'SERPER_API_KEY': 'SYNTHETIC_TEST'},
+                           transport=Serper(), fetcher=Guesser(), resolver=dns, record_source_names=())
+        step = report['steps']['resolve']
+        self.assertEqual((step['guess_tried'], step['guess_matched']), (2, 1))
+        self.assertEqual(step['by_method'], {'guess': 1})
+        self.assertTrue(searched and all('Quillstone' in q for q in searched))  # only the unmatched firm is searched
+        self.assertNotIn('https://quillstoneventures.com/', Guesser.urls)  # no DNS record, no fetch
+        h = History(self.work / 'lead-history.sqlite3')
+        rows = {r['key']: (r['status'], r['domain'], json.loads(r['data']).get('guess_tried'))
+                for r in h.db.execute('SELECT key, status, domain, data FROM firms')}
+        h.close()
+        self.assertEqual(rows['tx-trec:G1'][:2], ('resolved', 'harborrealtygroup.com'))
+        self.assertEqual(rows['tx-trec:G2'][2], '2026-01-01')
+        # A firm is guessed only once: even back in the pending queue, the next run skips the guess
+        h = History(self.work / 'lead-history.sqlite3')
+        with h.db:
+            h.db.execute("UPDATE firms SET status='pending' WHERE key='tx-trec:G2'")
+        h.close()
+        fetched = len(Guesser.urls)
+        again = run_daily(self.work, self.store, self.config, target=5, execute=True, day='2026-01-02', record_sources=(),
+                          sources=('resolve', 'build'), env={'SERPER_API_KEY': 'SYNTHETIC_TEST'},
+                          transport=Serper(), fetcher=Guesser(), resolver=dns, record_source_names=())
+        self.assertEqual((again['steps']['resolve']['pending_checked'], again['steps']['resolve']['guess_tried']), (1, 0))
+        self.assertEqual(len(Guesser.urls), fetched)
+
+    def test_guess_is_planned_not_fetched_in_dry_run(self):
+        records = [{'source': 'tx-trec', 'companies': [{'organization': 'Harbor Realty Group', 'state': 'TX', 'source': 'tx-trec',
+                                                       'license_number': 'G3'}], 'prospects': []}]
+        h = History(self.work / 'lead-history.sqlite3')
+        h.add_firms(records[0]['companies'], [])
+        h.close()
+
+        class Boom:
+            def get(self, url):
+                raise AssertionError('no fetch in dry run')
+        report = run_daily(self.work, self.store, self.config, target=5, sources=('resolve', 'build'), fetcher=Boom(),
+                           resolver=lambda *a, **k: (_ for _ in ()).throw(AssertionError('no dns')))
+        self.assertEqual(report['steps']['resolve']['guess_planned'], 1)
+
     def test_sec_source_needs_user_agent(self):
         report = run_daily(self.work, self.store, self.config, target=5, execute=True, day='2026-01-01', sources=('records', 'build'),
                            record_source_names=('sec-form-d',), env={})

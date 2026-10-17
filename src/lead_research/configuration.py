@@ -27,6 +27,9 @@ DEFAULT = {'version':1,'providers':{
  'tomba':{'enabled':False,'charges':{'find':{'credits':'1'},'linkedin_email':{'credits':'1'}}},
  'icypeas':{'enabled':False,'charges':{'find':{'credits':'1'}}},
  'reoon':{'enabled':False,'charges':{'verify':{'credits':'1'}}},
+ # v6: QuickEmailVerification (100 free per day) right after Reoon's daily credits. New entries start
+ # disabled with no budget, so inserting them never changes what an existing config spends.
+ 'quickemailverification':{'enabled':False,'charges':{'verify':{'credits':'1'}}},
  # v4 free-tier verifiers sit between Reoon and MillionVerifier: free monthly/daily
  # allowances are spent before MillionVerifier's paid credits. Existing providers keep
  # their relative order, and every new entry starts disabled with no budget.
@@ -35,6 +38,9 @@ DEFAULT = {'version':1,'providers':{
  'kickbox':{'enabled':False,'charges':{'verify':{'credits':'1'}}},
  'bouncer':{'enabled':False,'charges':{'verify':{'credits':'1'}}},
  'myemailverifier':{'enabled':False,'charges':{'verify':{'credits':'1'}}},
+ # v6 free monthly / one-time verifier packs, still ahead of MillionVerifier's paid credits.
+ 'emailvalidation':{'enabled':False,'charges':{'verify':{'requests':'1'}}},
+ 'emaillistverify':{'enabled':False,'charges':{'verify':{'credits':'1'}}},
  'millionverifier':{'enabled':False,'charges':{'verify':{'credits':'1'}}},
  # v4 free-tier lead sources. Firecrawl pools count operations: one 'search' op (limit 10)
  # bills 2 Firecrawl credits, one 'scrape' op bills 1. PDL bills only on a match.
@@ -42,6 +48,13 @@ DEFAULT = {'version':1,'providers':{
  'firecrawl':{'enabled':False,'charges':{'search':{'search_ops':'1'},'scrape':{'scrape_credits':'1'}}},
  'pdl':{'enabled':False,'charges':{'person_enrich':{'credits':'1'}}},
  'serpapi':{'enabled':False,'charges':{'search':{'searches':'1'}}},
+ # v6: Enrow (50 one-time finds, billed only when found) and Lusha (paid plans only: no API on Free).
+ 'enrow':{'enabled':False,'charges':{'find':{'credits':'1'}}},
+ 'lusha':{'enabled':False,'charges':{'find':{'credits':'1'}}},
+ # v6 search fallbacks: Zenserp (50/month), Linkup and You.com (signup credit).
+ 'zenserp':{'enabled':False,'charges':{'search':{'searches':'1'}}},
+ 'linkup':{'enabled':False,'charges':{'search':{'queries':'1'}}},
+ 'youcom':{'enabled':False,'charges':{'search':{'queries':'1'}}},
  # v5: Deepline managed-credit finder, last in auto-route order. 'credits' counts finds locally;
  # Deepline bills about 0.14-0.5 Deepline credits per find (0.34 per found email on the default
  # leadmagic_email_finder route; per executed stage on the waterfall Play).
@@ -54,7 +67,9 @@ MIGRATION_ADDED_PROVIDERS = frozenset({'serper', 'brave', 'overpass',
                                        'apollo', 'prospeo', 'google_places', 'exa', 'tomba', 'icypeas',
                                        'reoon', 'millionverifier',
                                        'abstract', 'emailable', 'kickbox', 'bouncer', 'myemailverifier',
-                                       'tavily', 'firecrawl', 'pdl', 'serpapi', 'deepline'})
+                                       'tavily', 'firecrawl', 'pdl', 'serpapi', 'deepline',
+                                       'quickemailverification', 'emailvalidation', 'emaillistverify',
+                                       'enrow', 'lusha', 'zenserp', 'linkup', 'youcom'})
 MIGRATION_ADDED_CHARGES = {'hunter': frozenset({'discover', 'domain_search'}), 'serper': frozenset({'search_batch'}),
                            'exa': frozenset({'company_search'})}
 # Operations whose fixed charge is multiplied by the number of payload items. The

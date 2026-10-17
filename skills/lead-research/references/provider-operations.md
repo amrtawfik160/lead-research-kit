@@ -18,6 +18,10 @@ Pool names and per-request costs live in `configuration.py`, not in this documen
 
 For changed schemas, reproduce the shape with synthetic fixtures before modifying an adapter. A positive result requires a recognized status and a returned recipient matching the request. Unknown or malformed schemas are errors, not positive results. Do not store gender, inferred demographic data, arbitrary raw error bodies or secret-bearing URLs.
 
+- QuickEmailVerification, emailvalidation.io, EmailListVerify (verify): QEV `api.quickemailverification.com/v1/verify` (key as `apikey` query, 100 free per day); emailvalidation.io `api.emailvalidation.io/v1/info` (`apikey` header, 100/month, 10/min, catch-all reported as status `catch_all`); EmailListVerify `api.emaillistverify.com/api/verifyEmailDetailed` (`secret` query, `ok_for_all` = catch-all). Daily/monthly allowances refill only through `history refill add`.
+- Enrow and Lusha (find): Enrow `api.enrow.io/email/find/single` is asynchronous (submit, then a free GET read via `resume`); `valid` means found and verified by Enrow, still not a fresh check here. Lusha `api.lusha.com/v2/person` (`api_key` header) is paid-plan only: a Free account has no API access. Lusha emails are sourced data (finder status `unknown`), so they still go through verification.
+- Zenserp, Linkup, You.com (search): result rows share the Serper shape, so firm resolution and LinkedIn x-ray can use them. Pools: zenserp `searches`, linkup/youcom `queries`.
+
 ## Before live use
 
 1. Check current provider docs, terms and account entitlement

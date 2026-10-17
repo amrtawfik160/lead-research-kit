@@ -2727,11 +2727,472 @@ class MyEmailVerifier(_NoBalance):
         return Outcome(assessment, email.lower(), tuple(dict.fromkeys(flags)), fields)
 
 
+_QEV_REASONS = frozenset({'invalid_email', 'invalid_domain', 'rejected_email', 'accepted_email', 'no_connect', 'timeout',
+                          'unavailable_smtp', 'unexpected_error', 'no_mx_record', 'temporarily_blocked', 'exceeded_storage'})
+
+
+class QuickEmailVerification(_NoBalance):
+    """QuickEmailVerification single verification.
+
+    Docs (verified 2026-10): https://docs.quickemailverification.com/email-verification-api/verify-an-email-address -
+    GET https://api.quickemailverification.com/v1/verify?email=&apikey= -> {result (valid|invalid|unknown),
+    reason (accepted_email, rejected_email, invalid_domain, no_mx_record, temporarily_blocked, ...),
+    disposable, accept_all, role, free, email (normalized), safe_to_send, success, message}; flags are
+    "true"/"false" strings. Header X-QEV-Remaining-Credits carries the balance. Free tier (pricing page,
+    verified 2026-10): 100 verifications per day with API access. The key is a query parameter (no header
+    auth is documented). Unverified: the free-tier rate limit (spacing 1s is conservative) and the exact
+    HTTP codes for quota/rate errors (mapped by status; success "false" bodies map by message).
+    """
+    id = 'quickemailverification'
+    independence_group = 'quickemailverification'
+    operations = ('verify',)
+    auth_env = ('QUICKEMAILVERIFICATION_API_KEY',)
+    min_spacing = {'verify': 1.0}
+    origin = 'https://api.quickemailverification.com'
+    MAPPING = {'valid': 'provider_valid', 'invalid': 'provider_invalid', 'unknown': 'unknown'}
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        query = urlencode({'email': _text(payload, 'email'), 'apikey': _secret(env, 'QUICKEMAILVERIFICATION_API_KEY')})
+        return self._request('GET', '/v1/verify?' + query, {'Accept': 'application/json'}, timeout=60)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        if _yes(j.get('success')) is False:
+            return _message_error(j.get('message'))
+        result, reason = j.get('result'), j.get('reason')
+        if not isinstance(result, str) or result not in self.MAPPING:
+            return _error('invalid_response')
+        email = _email(j.get('email'))
+        if not email:
+            return _error('invalid_response')
+        assessment = self.MAPPING[result]
+        flags = [flag for key, flag in (('disposable', 'disposable'), ('role', 'role')) if _yes(j.get(key)) is True]
+        if _yes(j.get('accept_all')) is True:
+            flags.append('catch_all')
+            if assessment == 'provider_valid':
+                assessment = 'catch_all'
+        if reason == 'temporarily_blocked':
+            flags.append('greylisted')
+        if assessment == 'provider_valid' and (reason != 'accepted_email' or _yes(j.get('safe_to_send')) is False):
+            assessment = 'unknown'
+        fields = {'status': result, 'reason': reason if reason in _QEV_REASONS else None}
+        if _yes(j.get('free')) is not None:
+            fields['free'] = _yes(j.get('free'))
+        remaining = _int((response.headers or {}).get('X-QEV-Remaining-Credits'))
+        if remaining is not None:
+            fields['remaining_credits'] = remaining
+        return Outcome(assessment, email.lower(), tuple(dict.fromkeys(flags)), fields)
+
+
+_EV_STATUS = {'valid': 'provider_valid', 'invalid': 'provider_invalid', 'catch_all': 'catch_all', 'risky': 'unknown',
+              'do_not_mail': 'unknown', 'unknown': 'unknown'}
+_EV_REASONS = frozenset({'valid_mailbox', 'low_deliverability', 'low_quality', 'invalid_mx', 'invalid_format',
+                         'invalid_mailbox', 'no_connect', 'unexpected_error', 'timeout', 'unavailable_smtp'})
+
+
+class EmailValidationIo(_NoBalance):
+    """emailvalidation.io single validation ('info' endpoint).
+
+    Docs (verified 2026-10): https://emailvalidation.io/docs/info/ - GET
+    https://api.emailvalidation.io/v1/info?email=&timeout=3..60 with header 'apikey' -> {email, state
+    (deliverable|undeliverable|unknown), reason (valid_mailbox, low_deliverability = catch-all/disposable/
+    full, low_quality = role, invalid_mx, invalid_mailbox, ...), status (valid|invalid|catch_all|risky|
+    do_not_mail|unknown), sub_status, recommended_action, role, disposable, free, smtp_check, mx_found,
+    catch_all (null unless catch_all=1 on paid plans)}. Free plan: 100 requests/month, 10 per minute
+    (spacing 6.5s), 5 concurrent; only deliverable/undeliverable results count against the quota.
+    401 bad key, 403 not allowed, 429 quota_exceeded / rate_limit_exceeded (both 429, so the ledger
+    sees 'rate_limit'). Catch-all status is returned on every plan, so catch_all=1 is never sent.
+    """
+    id = 'emailvalidation'
+    independence_group = 'emailvalidation'
+    operations = ('verify',)
+    auth_env = ('EMAILVALIDATION_API_KEY',)
+    min_spacing = {'verify': 6.5}
+    origin = 'https://api.emailvalidation.io'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        query = urlencode({'email': _text(payload, 'email'), 'timeout': 30})
+        return self._request('GET', '/v1/info?' + query, {'apikey': _secret(env, 'EMAILVALIDATION_API_KEY'),
+                                                          'Accept': 'application/json'}, timeout=45)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        status, reason, state = j.get('status'), j.get('reason'), j.get('state')
+        if not isinstance(status, str) or status not in _EV_STATUS:
+            return _error('invalid_response')
+        email = _email(j.get('email'))
+        if not email:
+            return _error('invalid_response')
+        assessment = _EV_STATUS[status]
+        flags = [flag for key, flag in (('disposable', 'disposable'), ('role', 'role')) if j.get(key) is True]
+        if status == 'catch_all' or j.get('catch_all') is True:
+            flags.append('catch_all')
+            if assessment == 'provider_valid':
+                assessment = 'catch_all'
+        if status == 'risky':
+            flags.append('risky')
+        if status == 'do_not_mail':
+            flags.append('disposable')
+        if assessment == 'provider_valid' and state != 'deliverable':
+            assessment = 'unknown'
+        fields = {'status': status, 'state': state if state in ('deliverable', 'undeliverable', 'unknown', 'risky') else None,
+                  'reason': reason if reason in _EV_REASONS else None}
+        if type(j.get('free')) is bool:
+            fields['free'] = j['free']
+        score = j.get('score')
+        if isinstance(score, (int, float)) and not isinstance(score, bool) and 0 <= score <= 1:
+            fields['score'] = score
+        return Outcome(assessment, email.lower(), tuple(dict.fromkeys(flags)), fields)
+
+
+_ELV_RESULTS = {'ok': 'provider_valid', 'ok_for_all': 'catch_all', 'email_disabled': 'provider_invalid',
+                'dead_server': 'provider_invalid', 'invalid_mx': 'provider_invalid', 'invalid_syntax': 'provider_invalid',
+                'disposable': 'unknown', 'spamtrap': 'unknown', 'unknown': 'unknown', 'antispam_system': 'unknown',
+                'smtp_protocol': 'unknown'}
+
+
+class EmailListVerify(_NoBalance):
+    """EmailListVerify detailed single verification (JSON).
+
+    Docs (verified 2026-10): https://api.emaillistverify.com/api-doc and /api-doc-json - GET
+    https://api.emaillistverify.com/api/verifyEmailDetailed?email= -> {email, result (ok | ok_for_all |
+    email_disabled | dead_server | invalid_mx | invalid_syntax | disposable | spamtrap | unknown |
+    antispam_system | smtp_protocol), internalResult, mxServer, esp, isRole, isFree, isNoReply, ...}.
+    The plain /api/verifyEmail returns text, so the JSON 'Detailed' route is used. Auth: 'secret' query
+    parameter (documented). 401 invalid key, 403 disabled account; 'error_credit' means no credits.
+    smtp_protocol / antispam_system cost no credits. Rate limit 10 requests/second (spacing 0.2s).
+    Unverified: whether the Detailed route costs more than 1 credit on the free 100-credit signup pack.
+    """
+    id = 'emaillistverify'
+    independence_group = 'emaillistverify'
+    operations = ('verify',)
+    auth_env = ('EMAILLISTVERIFY_API_KEY',)
+    min_spacing = {'verify': 0.2}
+    origin = 'https://api.emaillistverify.com'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        query = urlencode({'email': _text(payload, 'email'), 'secret': _secret(env, 'EMAILLISTVERIFY_API_KEY')})
+        return self._request('GET', '/api/verifyEmailDetailed?' + query, {'Accept': 'application/json'}, timeout=60)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        result = j.get('result')
+        if result == 'error_credit':
+            return _error('quota')
+        if not isinstance(result, str) or result not in _ELV_RESULTS:
+            return _error('invalid_response')
+        email = _email(j.get('email'))
+        if not email:
+            return _error('invalid_response')
+        assessment = _ELV_RESULTS[result]
+        flags = []
+        if result in ('disposable', 'spamtrap'):
+            flags.append(result)
+        if result == 'ok_for_all':
+            flags.append('catch_all')
+        if j.get('isRole') is True:
+            flags.append('role')
+        if j.get('isNoReply') is True:
+            flags.append('no_reply')
+        fields = {'status': result}
+        if type(j.get('isFree')) is bool:
+            fields['free'] = j['isFree']
+        return Outcome(assessment, email.lower(), tuple(dict.fromkeys(flags)), fields)
+
+
+class Enrow(_NoBalance):
+    """Enrow single email finder: asynchronous submit, then a free GET result read.
+
+    Docs (verified 2026-10): https://docs.enrow.io/api-reference/email-finder/find-single - POST
+    https://api.enrow.io/email/find/single {fullname, company_domain, settings{country_code}} with header
+    x-api-key -> 200 {message, id, credits_used}; https://docs.enrow.io/api-reference/email-finder/get-single-result -
+    GET /email/find/single?id= -> 202 {qualification 'ongoing'} or 200 {email, qualification valid (found and
+    verified, catch-all included) | invalid (not found), credits_used (1 found, 0 not found), info{firstname,
+    lastname, fullname, company_name, company_domain}}. 401 bad key, 402 {reason, success false} for credits,
+    429 throttled; unknown ids return 500 on single routes. Reads are free. Free signup: 50 credits (one-time,
+    per enrow.io/pricing; not re-verified at signup). Rate limits per key are not quantified on the docs page
+    read; spacing 1s submit / 3s poll is conservative.
+    """
+    id = 'enrow'
+    independence_group = 'enrow'
+    operations = ('find',)
+    auth_env = ('ENROW_API_KEY',)
+    min_spacing = {'find': 1.0, 'poll': 3.0}
+    origin = 'https://api.enrow.io'
+    supports_pending = True
+    parses_client_errors = True
+    PATH = '/email/find/single'
+
+    def _headers(self, env, body=False):
+        headers = {'x-api-key': _secret(env, 'ENROW_API_KEY'), 'Accept': 'application/json'}
+        if body:
+            headers['Content-Type'] = 'application/json'
+        return headers
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        first, last = _first_last(payload)
+        body = {'fullname': first + ' ' + last, 'company_domain': _finder_domain(payload), 'settings': {'country_code': 'US'}}
+        return self._request('POST', self.PATH, self._headers(env, body=True), body, timeout=60)
+
+    def _job_id(self, url):
+        match = re.fullmatch(re.escape(self.origin + self.PATH) + r'\?id=([A-Za-z0-9_-]{1,128})', url) if isinstance(url, str) else None
+        if not match:
+            raise PolicyError('unsafe_job_url')
+        return match.group(1)
+
+    def poll_request(self, job_url, env):
+        """Read the stored result; never starts a new search."""
+        return self._request('GET', self.PATH + '?' + urlencode({'id': self._job_id(job_url)}), self._headers(env), timeout=60)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        if j.get('success') is False:
+            return _message_error(j.get('reason'))
+        qualification = j.get('qualification')
+        if qualification is None and 'id' in j:
+            ident = j.get('id')
+            if not isinstance(ident, str) or not _SEARCH_ID.fullmatch(ident):
+                return _error('invalid_response')
+            return Outcome('pending', job_url=self.origin + self.PATH + '?id=' + ident)
+        if qualification == 'ongoing':
+            return Outcome('pending')
+        info = j.get('info') if isinstance(j.get('info'), dict) else {}
+        first, last = clean_text(info.get('firstname'), 60), clean_text(info.get('lastname'), 60)
+        email = _revealed_email(j.get('email'))
+        prospect = {'full_name': clean_text(info.get('fullname'), 120) or (' '.join(x for x in (first, last) if x) or None),
+                    'first_name': first, 'last_name': last, 'name_complete': bool(first and last),
+                    'company': clean_text(info.get('company_name'), 200), 'company_website': _company_domain(info.get('company_domain')),
+                    'email': email, 'email_verification': 'valid' if email else None, 'source': 'enrow', 'source_url': None}
+        fields = {'status': qualification, 'verification_is_fresh': False, 'prospect': prospect}
+        if qualification == 'invalid':
+            return Outcome('not_found', fields=fields)
+        if qualification != 'valid' or not email:
+            return _error('invalid_response')
+        # Enrow states it verifies catch-all mailboxes deterministically; still not a fresh verification here.
+        return Outcome('candidate', email, fields={**fields, 'finder_verification_status': 'valid'})
+
+
+_LUSHA_ERRORS = {401: 'auth', 403: 'auth', 402: 'quota', 429: 'rate_limit'}
+
+
+class Lusha(_NoBalance):
+    """Lusha single contact lookup (API V2 'person', legacy but documented in the V2 OpenAPI).
+
+    Docs (verified 2026-10): https://docs.lusha.com/v2/openapi.json - GET https://api.lusha.com/v2/person
+    ?firstName&lastName&companyDomain&filterBy=emailAddresses, header 'api_key' -> {contact{error{code,
+    name, message} | null, isCreditCharged, data{firstName, lastName, fullName, emailAddresses[{address|email,
+    type|emailType (work|private), emailConfidence (A+..)}], jobTitle{title, seniority}, socialLinks{linkedin},
+    company{name, fqdn}}}}. Errors 401 key, 402 credits, 403 inactive account, 429 rate/daily quota, 451 GDPR.
+    Pricing (lusha.com/pricing, verified 2026-10): Free plan 40 credits/month; 1 credit per revealed email.
+    PAID ONLY: a live Free account (2026-10) shows no API access; the API starts on the Pro plan, even
+    though the API docs say every plan gets a key. Keep it disabled unless the account is Pro or higher.
+    Free per-minute limit unverified (spacing 1.6s ~ 40/min). Lusha emails are
+    sourced data, not a fresh mailbox check, so finder_verification_status is 'unknown'.
+    """
+    id = 'lusha'
+    independence_group = 'lusha'
+    operations = ('find',)
+    auth_env = ('LUSHA_API_KEY',)
+    min_spacing = {'find': 1.6}
+    origin = 'https://api.lusha.com'
+    parses_client_errors = True
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        first, last = _first_last(payload)
+        query = urlencode({'firstName': first, 'lastName': last, 'companyDomain': _finder_domain(payload),
+                           'filterBy': 'emailAddresses'})
+        return self._request('GET', '/v2/person?' + query, {'api_key': _secret(env, 'LUSHA_API_KEY'),
+                                                            'Accept': 'application/json'}, timeout=60)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        if response.status == 451:
+            return _error('provider_application_error')
+        failure = http_failure(response)
+        if failure:
+            return failure
+        contact = response.data.get('contact')
+        if not isinstance(contact, dict):
+            return _error('invalid_response')
+        data = contact.get('data') if isinstance(contact.get('data'), dict) else None
+        error = contact.get('error') if isinstance(contact.get('error'), dict) else None
+        if data is None:
+            code = error.get('code') if error else None
+            if code in _LUSHA_ERRORS:
+                return _error(_LUSHA_ERRORS[code])
+            return Outcome('not_found', fields={'status': 'no_data'})
+        best = None
+        for entry in data.get('emailAddresses') or []:
+            if not isinstance(entry, dict):
+                continue
+            email = _revealed_email(entry.get('address') or entry.get('email'))
+            kind = entry.get('type') or entry.get('emailType')
+            if email and kind != 'private' and (best is None or (kind == 'work' and best[1] != 'work')):
+                best = (email, kind, entry.get('emailConfidence'))
+        first, last = clean_text(data.get('firstName'), 60), clean_text(data.get('lastName'), 60)
+        job = data.get('jobTitle') if isinstance(data.get('jobTitle'), dict) else {}
+        company = data.get('company') if isinstance(data.get('company'), dict) else {}
+        social = data.get('socialLinks') if isinstance(data.get('socialLinks'), dict) else {}
+        confidence = best[2] if best and isinstance(best[2], str) and re.fullmatch(r'[A-F][+-]?', best[2]) else None
+        prospect = {'full_name': clean_text(data.get('fullName'), 120) or (' '.join(x for x in (first, last) if x) or None),
+                    'first_name': first, 'last_name': last, 'name_complete': bool(first and last),
+                    'title': clean_text(job.get('title'), 150), 'company': clean_text(company.get('name'), 200),
+                    'company_website': _company_domain(company.get('fqdn')),
+                    'linkedin_url': canonical_linkedin(social.get('linkedin')) if isinstance(social.get('linkedin'), str) else None,
+                    'email': best[0] if best else None, 'email_confidence': confidence, 'source': 'lusha', 'source_url': None}
+        fields = {'verification_is_fresh': False, 'prospect': prospect, 'credit_charged': contact.get('isCreditCharged') is True}
+        if not best:
+            return Outcome('not_found', fields=fields)
+        return Outcome('candidate', best[0], fields={**fields, 'finder_verification_status': 'unknown'})
+
+
+class Zenserp(_NoBalance):
+    """Zenserp Google search (engine=google), first organic page.
+
+    Docs (verified 2026-10): https://zenserp.com/docs/ - GET https://app.zenserp.com/api/v2/search?q=&engine=google
+    -> {organic[{position, title, url, destination, description} | {position, questions|videos...}]}; a call
+    without a key answers 403 {"error": "No apikey provided."} (seen live). Free plan: 50 searches/month.
+    Auth: 'apikey' header (the documented request builder also accepts an apikey query parameter);
+    location / gl / hl parameters come from the request builder docs and are unverified here, so only
+    q, engine, gl=us and hl=en are sent. Spacing 1s.
+    """
+    id = 'zenserp'
+    independence_group = 'zenserp'
+    operations = ('search',)
+    auth_env = ('ZENSERP_API_KEY',)
+    min_spacing = {'search': 1.0}
+    origin = 'https://app.zenserp.com'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        clean = _search_payload(payload, ())
+        query = urlencode({'q': clean['query'], 'engine': 'google', 'gl': 'us', 'hl': 'en'})
+        return self._request('GET', '/api/v2/search?' + query, {'apikey': _secret(env, 'ZENSERP_API_KEY'),
+                                                                'Accept': 'application/json'}, timeout=60)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        items = response.data.get('organic')
+        if not isinstance(items, list):
+            return _error('invalid_response')
+        results, prospects = _serp_rows([i for i in items if isinstance(i, dict) and i.get('url')], 'title', 'url', 'description')
+        return Outcome('results' if results else 'not_found', fields={'prospects': prospects, 'results': results})
+
+
+class Linkup(_NoBalance):
+    """Linkup search, 'searchResults' output.
+
+    Docs (verified 2026-10): https://docs.linkup.so/pages/documentation/api-reference/endpoint/post-search -
+    POST https://api.linkup.so/v1/search, 'Authorization: Bearer KEY', body {q, depth (flash|fast|standard|
+    deep), outputType searchResults, maxResults, includeDomains (<= 100)} -> {results[...]}. Result item
+    fields (name, url, content, type 'text') are from the SDK / earlier docs and are read defensively
+    (title also accepted). 'fast' is the documented recommended default; its per-call price and the free
+    monthly credit (about EUR 5) are unverified. Spacing 1s.
+    """
+    id = 'linkup'
+    independence_group = 'linkup'
+    operations = ('search',)
+    auth_env = ('LINKUP_API_KEY',)
+    min_spacing = {'search': 1.0}
+    origin = 'https://api.linkup.so'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        clean = _search_payload(payload, ())
+        body = {'q': clean['query'], 'depth': 'fast', 'outputType': 'searchResults', 'maxResults': 20}
+        headers = {'Authorization': 'Bearer ' + _secret(env, 'LINKUP_API_KEY'), 'Content-Type': 'application/json'}
+        return self._request('POST', '/v1/search', headers, body, timeout=60)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        items = response.data.get('results')
+        if not isinstance(items, list):
+            return _error('invalid_response')
+        rows = [{'title': i.get('name') or i.get('title'), 'url': i.get('url'), 'content': i.get('content')}
+                for i in items[:20] if isinstance(i, dict) and i.get('type', 'text') == 'text']
+        results, prospects = _serp_rows(rows, 'title', 'url', 'content')
+        return Outcome('results' if results else 'not_found', fields={'prospects': prospects, 'results': results})
+
+
+class YouCom(_NoBalance):
+    """You.com Web Search API (POST /v1/search, snippets only).
+
+    Docs (verified 2026-10): https://you.com/docs/api-reference/search/v1-search - POST
+    https://ydc-index.io/v1/search, header X-API-Key, body {query, count 1..100 (per section), offset,
+    country, include_domains ...} -> {results{web[{url, title, description, snippets[], page_age}],
+    news[...]}, metadata{search_uuid, query, latency}}. Without a key the endpoint answers 402 (seen live).
+    Signup grants about $10 of free credit (third-party comparison; unverified), about $0.005 per search
+    per you.com/apis. 'extraction' (full pages) is never requested. Spacing 1s.
+    """
+    id = 'youcom'
+    independence_group = 'youcom'
+    operations = ('search',)
+    auth_env = ('YDC_API_KEY',)
+    min_spacing = {'search': 1.0}
+    origin = 'https://ydc-index.io'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        clean = _search_payload(payload, ())
+        headers = {'X-API-Key': _secret(env, 'YDC_API_KEY'), 'Content-Type': 'application/json'}
+        return self._request('POST', '/v1/search', headers, {'query': clean['query'], 'count': 20}, timeout=60)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        results_obj = response.data.get('results')
+        if not isinstance(results_obj, dict):
+            return _error('invalid_response')
+        web = results_obj.get('web') or []
+        if not isinstance(web, list):
+            return _error('invalid_response')
+        rows = []
+        for item in web[:20]:
+            if not isinstance(item, dict):
+                continue
+            snippets = item.get('snippets') if isinstance(item.get('snippets'), list) else []
+            text = ' '.join(x for x in snippets[:2] if isinstance(x, str)) or item.get('description')
+            rows.append({'title': item.get('title'), 'url': item.get('url'), 'snippet': text})
+        results, prospects = _serp_rows(rows, 'title', 'url', 'snippet')
+        return Outcome('results' if results else 'not_found', fields={'prospects': prospects, 'results': results})
+
+
 PROVIDERS = {provider.id: provider for provider in (Hunter(), Verifalia(), Clearout(), ZeroBounce(), HunterInsight(), Disify(),
                                                     Serper(), Brave(), Overpass(), Apollo(), Prospeo(), GooglePlaces(),
                                                     Exa(), Tomba(), Icypeas(), Reoon(), MillionVerifier(),
                                                     AbstractEmail(), Emailable(), Kickbox(), Bouncer(), MyEmailVerifier(),
-                                                    Tavily(), Firecrawl(), PeopleDataLabs(), SerpApi(), Deepline())}
+                                                    Tavily(), Firecrawl(), PeopleDataLabs(), SerpApi(), Deepline(),
+                                                    QuickEmailVerification(), EmailValidationIo(), EmailListVerify(),
+                                                    Enrow(), Lusha(), Zenserp(), Linkup(), YouCom())}
 
 
 def get_provider(provider_id):

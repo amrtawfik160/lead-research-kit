@@ -20,8 +20,12 @@ def _json(value):
 
 
 class Store:
-    def __init__(self, db_path):
+    def __init__(self, db_path, parallel_providers=False):
+        """``parallel_providers``: this connection may reserve while a *different* provider has an
+        active attempt (one active attempt per provider instead of one per workspace). Used only by
+        the daily verification lanes; every other connection keeps the workspace-wide rule."""
         self.path = str(db_path)
+        self.parallel_providers = parallel_providers is True
         if self.path != ':memory:':
             directory = Path(self.path).absolute().parent
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -42,7 +46,8 @@ class Store:
           CREATE TABLE IF NOT EXISTS budgets(provider TEXT,pool TEXT,remaining INTEGER NOT NULL,confirmed_at REAL NOT NULL,source TEXT NOT NULL,PRIMARY KEY(provider,pool));
           CREATE TABLE IF NOT EXISTS attempts(id TEXT PRIMARY KEY,provider TEXT NOT NULL,operation TEXT NOT NULL,input_key TEXT NOT NULL,email TEXT,independence TEXT,state TEXT NOT NULL,data TEXT NOT NULL);
           CREATE UNIQUE INDEX IF NOT EXISTS attempt_input ON attempts(provider,operation,input_key) WHERE state != 'cancelled';
-          CREATE UNIQUE INDEX IF NOT EXISTS one_active ON attempts((1)) WHERE state IN ('reserved','sent','pending');
+          DROP INDEX IF EXISTS one_active;
+          CREATE UNIQUE INDEX IF NOT EXISTS one_active_provider ON attempts(provider) WHERE state IN ('reserved','sent','pending');
           CREATE INDEX IF NOT EXISTS attempts_email ON attempts(email);
           CREATE TABLE IF NOT EXISTS audit(seq INTEGER PRIMARY KEY AUTOINCREMENT,event TEXT NOT NULL,previous TEXT NOT NULL,digest TEXT NOT NULL);
         ''')
@@ -225,7 +230,13 @@ class Store:
         with self._tx():
             if self.provider_state(provider).get('paused'):
                 raise PolicyError('provider_paused')
-            if self.db.execute("SELECT 1 FROM attempts WHERE state IN ('reserved','sent','pending')").fetchone():
+            # Checked inside BEGIN IMMEDIATE, so it is atomic across connections. The schema index
+            # additionally guarantees at most one active attempt per provider.
+            active = "SELECT 1 FROM attempts WHERE state IN ('reserved','sent','pending')"
+            if self.parallel_providers:
+                if self.db.execute(active + ' AND provider=?', (provider,)).fetchone():
+                    raise BusyError('active_attempt_requires_review')
+            elif self.db.execute(active).fetchone():
                 raise BusyError('active_attempt_requires_review')
             if self.get_cached(provider, operation, input_key):
                 raise PolicyError('input_already_attempted')

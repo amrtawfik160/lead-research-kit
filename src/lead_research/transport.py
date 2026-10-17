@@ -6,6 +6,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from . import __version__
+
 from .models import PolicyError, ProviderError, Request, Response
 
 OFFICIAL_ORIGINS = frozenset({
@@ -19,6 +21,9 @@ OFFICIAL_ORIGINS = frozenset({
     'https://api.emailable.com', 'https://api.kickbox.com', 'https://api.usebouncer.com',
     'https://api.myemailverifier.com', 'https://api.peopledatalabs.com', 'https://serpapi.com',
     'https://code.deepline.com',
+    'https://api.quickemailverification.com', 'https://api.emailvalidation.io', 'https://api.emaillistverify.com',
+    'https://api.enrow.io', 'https://api.lusha.com', 'https://app.zenserp.com', 'https://api.linkup.so',
+    'https://ydc-index.io',
 })
 # Hard ceiling for any per-request response cap (Overpass place lists can be large).
 MAX_RESPONSE_CEILING = 5 * 1024 * 1024
@@ -38,6 +43,8 @@ def validate_url(url: str, origins=OFFICIAL_ORIGINS, *, evidence=False) -> str:
         raise PolicyError('unsafe_url') from None
     return url
 
+
+USER_AGENT = f'lead-research-kit/{__version__} (+https://github.com/amrtawfik160/lead-research-kit)'
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -109,6 +116,9 @@ class UrllibTransport:
         elif type(limit) is not int or not 1 <= limit <= MAX_RESPONSE_CEILING:
             raise PolicyError('invalid_response_limit')
         try:
+            if not any(k.lower() == 'user-agent' for k in headers):
+                # Python's default "Python-urllib" agent is refused by some provider firewalls (Cloudflare 1010)
+                headers['User-Agent'] = USER_AGENT
             req = urllib.request.Request(request.url, request.body, headers, method=request.method)
             try:
                 result = self._opener.open(req, timeout=request.timeout)

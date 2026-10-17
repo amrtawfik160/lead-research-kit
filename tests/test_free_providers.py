@@ -122,8 +122,9 @@ class RegistryTests(unittest.TestCase):
 
     def test_verify_route_order(self):
         order = [p for p in DEFAULT['providers'] if 'verify' in get_provider(p).operations]
-        self.assertEqual(order, ['hunter', 'verifalia', 'clearout', 'zerobounce', 'reoon', 'abstract', 'emailable',
-                                 'kickbox', 'bouncer', 'myemailverifier', 'millionverifier'])
+        self.assertEqual(order, ['hunter', 'verifalia', 'clearout', 'zerobounce', 'reoon', 'quickemailverification',
+                                 'abstract', 'emailable', 'kickbox', 'bouncer', 'myemailverifier', 'emailvalidation',
+                                 'emaillistverify', 'millionverifier'])
 
     def test_older_config_migrates_new_providers_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -175,3 +175,103 @@ class StoreTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# --- Domain guessing (free, before any paid search) -------------------------------------------
+
+from lead_research.resolve import guess_domains, resolve_by_guess, verify_guess  # noqa: E402
+
+GUESS_TX = {'organization': 'Harbor Realty Group, LLC', 'county': 'Travis', 'state': 'TX', 'city': 'Austin',
+            'source': 'tx-trec', 'license_number': '9000009-BB'}
+HARBOR_HOME = ('<html><head><title>Harbor Realty Group | Austin Homes</title></head><body><h1>Find your home</h1>'
+               '<p>' + 'Local brokerage serving buyers and sellers. ' * 12 + '</p>'
+               '<footer>&copy; 2026 Harbor Realty Group. 100 Main St, Austin, TX 78701</footer></body></html>')
+
+
+def fake_dns(existing):
+    def resolve(host, port, type=None):
+        if host.removeprefix('www.') in existing:
+            return [(2, 1, 6, '', ('203.0.113.10', port))]
+        raise OSError('nxdomain')
+    return resolve
+
+
+class GuessCandidateTests(unittest.TestCase):
+    def test_candidates_ranked_and_bounded(self):
+        domains = guess_domains(GUESS_TX)
+        self.assertEqual(domains[:2], ['harborrealtygroup.com', 'harborrealty.com'])
+        self.assertLessEqual(len(domains), 8)
+        self.assertTrue(all(d.endswith('.com') for d in domains[:3]))
+        self.assertIn('harborrealtygroup.net', domains)
+        self.assertNotIn('harbor.com', domains)  # bare short word is too often someone else
+
+    def test_and_variants_real_estate_and_extra_try(self):
+        domains = guess_domains({'organization': 'The Smith & Jones Real Estate Group Inc'})
+        self.assertEqual(domains[0], 'smithandjonesrealestategroup.com')
+        self.assertIn('smithjonesrealestate.com', domains)
+        self.assertIn('smithjonesre.com', domains)
+        self.assertIn('quillonrealty.com', guess_domains({'organization': 'Quillon Partners LLC'}))
+
+    def test_dba_first_and_generic_or_franchise_skipped(self):
+        self.assertEqual(guess_domains({'organization': 'Crestwave Property Solutions DBA Rentwave'})[0], 'rentwave.com')
+        self.assertEqual(guess_domains({'organization': 'Real Estate Group LLC'}), [])
+        self.assertEqual(guess_domains({'organization': 'Keller Williams Realty'}), [])
+        self.assertEqual(guess_domains({'organization': 'RE/MAX Elite'}), [])
+        self.assertFalse(any(d in ('realty.com', 'homes.com', 'realtor.com') for d in guess_domains({'organization': 'Homes Realty'})))
+
+
+class GuessVerifyTests(unittest.TestCase):
+    def test_match_with_evidence(self):
+        fetcher = FakeFetcher({'https://harborrealtygroup.com/': ('https://www.harborrealtygroup.com/', HARBOR_HOME)})
+        ok, evidence = verify_guess(GUESS_TX, 'harborrealtygroup.com', fetcher)
+        self.assertTrue(ok, evidence)
+        self.assertEqual(evidence['method'], 'guess')
+        self.assertIn('title', evidence['where'])
+        self.assertIn('Harbor Realty Group', evidence['matched_text'])
+        self.assertEqual(evidence['location'], 'city')
+
+    def test_parked_and_placeholder_pages_rejected(self):
+        pages = {
+            'https://harborrealtygroup.com/': '<html><title>harborrealtygroup.com</title><body>Harbor Realty Group - '
+                                              'This domain is for sale! Make an offer. HugeDomains</body></html>',
+            'https://harborrealty.com/': '<html><title>Harbor Realty Group</title><body>Related searches Austin TX. '
+                                         'This web page is parked FREE, courtesy of GoDaddy.</body></html>',
+            'https://harborrealty.net/': '<html><title>Harbor Realty Group</title><body>Coming soon. Austin, TX</body></html>',
+        }
+        fetcher = FakeFetcher(pages)
+        self.assertEqual(verify_guess(GUESS_TX, 'harborrealtygroup.com', fetcher)[1]['reason'], 'parked_or_for_sale')
+        self.assertEqual(verify_guess(GUESS_TX, 'harborrealty.com', fetcher)[1]['reason'], 'parked_or_for_sale')
+        self.assertEqual(verify_guess(GUESS_TX, 'harborrealty.net', fetcher)[1]['reason'], 'placeholder_page')
+
+    def test_wrong_firm_rejected(self):
+        pages = {
+            # Same words only in body copy, not in the brand zones
+            'https://harborrealtygroup.com/': '<html><title>Seaside Marine Supply</title><body><h1>Boats</h1>'
+                                              'We ship to Harbor Realty Group offices in Austin TX</body></html>',
+            # Right name, wrong state (an Ohio namesake)
+            'https://harborrealty.com/': '<html><title>Harbor Realty Group</title><body><h1>Harbor Realty Group</h1>'
+                                         'Serving Columbus, OH 43215 since 1990 with honest service and local expertise '
+                                         'for every buyer and seller in central Ohio</body></html>',
+            # Redirects to a portal
+            'https://harborrealty.us/': ('https://www.zillow.com/profile/harbor', '<title>Harbor Realty Group</title>'),
+        }
+        fetcher = FakeFetcher(pages)
+        self.assertEqual(verify_guess(GUESS_TX, 'harborrealtygroup.com', fetcher)[1]['reason'], 'name_not_in_brand_zones')
+        self.assertEqual(verify_guess(GUESS_TX, 'harborrealty.com', fetcher)[1]['reason'], 'location_not_on_homepage')
+        self.assertEqual(verify_guess(GUESS_TX, 'harborrealty.us', fetcher)[1]['reason'], 'redirected_off_domain')
+
+    def test_resolve_by_guess_uses_dns_then_first_verified(self):
+        fetcher = FakeFetcher({'https://harborrealty.com/': HARBOR_HOME,
+                               'https://harborrealtygroup.net/': HARBOR_HOME})
+        dns = fake_dns({'harborrealty.com', 'harborrealtygroup.net'})
+        other = {'organization': 'Nowhere Ventures Realty', 'state': 'TX', 'source': 'tx-trec', 'license_number': 'X1'}
+        known = {**GUESS_TX, 'license_number': 'K1', 'company_website': 'known.example'}
+        rows = resolve_by_guess([GUESS_TX, other, known], fetcher, dns=dns, workers=2)
+        self.assertEqual(rows[0]['company_website'], 'harborrealty.com')
+        self.assertEqual(rows[0]['resolution']['status'], 'resolved')
+        self.assertEqual(rows[0]['resolution']['tried'], ['harborrealty.com'])
+        self.assertEqual(fetcher.urls.count('https://harborrealtygroup.net/'), 0)  # stopped at the first match
+        self.assertEqual((rows[1]['company_website'], rows[1]['resolution']['status']), ('', 'no_guess_match'))
+        self.assertEqual(rows[1]['resolution']['tried'], [])  # no DNS record -> no fetch
+        self.assertEqual(rows[2]['company_website'], 'known.example')
+        self.assertNotIn('https://nowhereventuresrealty.com/', fetcher.urls)

@@ -13,7 +13,8 @@ Use `lead-research --help`, or the bundled `scripts/lead-research` launcher. Its
 2. Run `daily --target N` (preview) and read `report.json`: which steps would run, which are skipped for missing keys or budgets
 3. Run `daily --target N --execute`. Deliver `daily/<date>/leads.csv` and state delivered vs target, email sources, and the report's shortfall advice
 4. When short, follow the advice (fund a search provider for firm websites, raise caps, enable a finder/verifier) instead of loosening quality rules
-5. Long-term hygiene: import outreach results with `history feedback`, customers/do-not-contact with `history suppress`, and keep recurring free allowances current with `history refill`. Read `report.md` each morning for low budgets and stopped providers
+5. Long-term hygiene: import outreach tool exports with `history import-results FILE` (Instantly, Smartlead, Lemlist, Apollo, HubSpot auto-detected; `--tool generic` for email + status), customers/do-not-contact with `history suppress`, and keep recurring free allowances current with `history refill`. Read `report.md` each morning for low budgets and stopped providers
+6. Quality check: run `daily audit --sample 20` after delivery and report the confirmed/partial/failed score from `audit.md`. Mention `history patterns` when guessed emails at a domain bounced
 
 Completion: today's file exists, has exactly the 6 headers, contains only people never delivered before, and the shortfall (if any) is explained with the next concrete fix
 

@@ -21,6 +21,7 @@ as a formula are prefixed with a single quote.
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
 import os
@@ -86,7 +87,7 @@ FIELD_ALIASES = {
 }
 PASSTHROUGH_KEYS = (
     'email_source', 'email_confidence', 'email_verification', 'email_evidence_url', 'source', 'source_url',
-    'location', 'country', 'phone',
+    'location', 'country', 'phone', 'city', 'state', 'company_description',
 )
 
 PERSONAL_EMAIL_DOMAINS = frozenset({
@@ -258,6 +259,16 @@ HARD_REASONS = (
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
+
+def _unescape(value):
+    """Decode HTML entities left over from crawled text ("Smith &amp; Co" -> "Smith & Co")."""
+    value = _text(value)
+    for _ in range(2):
+        if '&' not in value:
+            break
+        value = html.unescape(value)
+    return _text(value)
+
 
 def _text(value):
     """Coerce any cell value to a single-line, whitespace-collapsed string."""
@@ -643,7 +654,7 @@ def clean_title(raw, company=''):
     the result stays short.
     """
     fixes = []
-    title = _text(raw)
+    title = _unescape(raw)
     if not title:
         return '', '', fixes
     original = title
@@ -794,10 +805,10 @@ def _company_key(name):
 def clean_company(raw):
     """Clean a company name. Returns ``(company, fixes, flags)``."""
     fixes, flags = [], []
-    company = _text(raw).strip('"\'“”‘’ ')
+    company = _unescape(raw).strip('"\'“”‘’ ')
     if not company:
         return '', fixes, flags
-    if company != _text(raw):
+    if company != _unescape(raw):
         _add(fixes, 'company_quotes_removed')
     if company.endswith(('...', '…')):
         company = company.rstrip('.… ').rstrip(',')
@@ -1589,3 +1600,254 @@ def clean_csv(input_path, output_dir, target=None):
     """Read ``input_path``, clean it, write outputs; returns summary + paths."""
     result = clean_records(read_rows(input_path), target or Target())
     return write_outputs(result, output_dir)
+
+
+# ---------------------------------------------------------------------------
+# Daily delivery extras: email risk, company type, location, source, confidence
+# ---------------------------------------------------------------------------
+
+DAILY_HEADERS = HEADERS + ['City', 'State', 'Company Type', 'Source', 'Confidence']
+VALID_VERIFICATION = frozenset({'valid', 'provider_valid', 'deliverable', 'verified', 'ok'})
+CATCH_ALL_VERIFICATION = frozenset({'catch_all', 'catchall', 'accept_all', 'acceptall'})
+UNSURE_VERIFICATION = frozenset({'unknown', 'risky', 'unverifiable'})
+RISK_ORDER = {'low': 0, 'medium': 1, 'high': 2, '': 3}
+
+
+def _verification_code(record):
+    return fold(record.get('email_verification', '') or '').strip().replace(' ', '_').replace('-', '_')
+
+
+def email_risk(record, mx=None):
+    """('low' | 'medium' | 'high' | '', reason) for the lead's Email.
+
+    ``mx`` is an ``emailcheck.mx_lookup`` result for the email's domain (None = not checked).
+
+    * high: not a work inbox (role like info@/office@, or personal), the domain has no
+      mail server or a null MX, a verifier said invalid, or an unverified pattern guess
+    * medium: catch-all / accept-all, verifier unsure, finder result not yet verified,
+      published email that does not look like the person's name, or any other source
+      without a name-based address
+    * low: verifier said valid on a normal domain, or published on the company's own
+      site with a name-based address. Published + name-based stays low even on a
+      catch-all domain: the company itself printed it, so it is not a guess.
+    """
+    email = record.get('email') or ''
+    if not email:
+        return '', 'no_email'
+    kind = record.get('email_kind') or email_kind(email)
+    if kind == 'role':
+        return 'high', 'role_inbox'
+    if kind != 'work':
+        return 'high', 'not_work_email'
+    if mx:
+        if mx.get('null_mx'):
+            return 'high', 'null_mx'
+        if mx.get('has_mx') is False:
+            return 'high', 'no_mail_server'
+    status = _verification_code(record)
+    if status in ('invalid', 'undeliverable', 'bounced', 'bounce', 'rejected', 'provider_invalid'):
+        return 'high', 'verifier_invalid'
+    source = (record.get('email_source') or '').lower()
+    name_match = record.get('email_name_match')
+    if name_match is None:
+        name_match = email_matches_name(email, record.get('full_name', ''), record.get('name_aliases', ()))
+    catch_all = status in CATCH_ALL_VERIFICATION or bool(record.get('email_catch_all'))
+    published = source == 'website_published'
+    if published and name_match:
+        return 'low', 'published_name_based'
+    if catch_all:
+        return 'medium', 'catch_all'
+    if status in VALID_VERIFICATION:
+        return 'low', 'verified_valid'
+    if source in ('pattern', 'pattern_guess', 'email_candidate'):
+        return 'high', 'unverified_guess'
+    if status in UNSURE_VERIFICATION:
+        return 'medium', 'verifier_unsure'
+    if published:
+        return 'medium', 'published_not_name_based'
+    if source.endswith('_finder'):
+        return 'medium', 'finder_unverified'
+    return 'medium', 'unverified_source'
+
+
+_TYPE_KEYWORDS = (
+    ('property_manager', r'property management|property managers?|management (?:company|group|services|co)|'
+                         r'community management|association management|apartments?|rentals?|leasing|hoa'),
+    ('developer', r'development|developments|developers?|homebuilders?|home builders?|builders?|construction|'
+                  r'communities|land company|land co|devco'),
+    ('investor', r'capital|investments?|investors?|funds?|equity|asset management|reit|holdings|ventures|'
+                 r'acquisitions|partners fund|wealth'),
+    ('brokerage', r'realty|realtors?|brokerage|brokers|real estate|homes team|home team|sotheby\'?s|keller williams|re/?max|'
+                  r'coldwell banker|century 21|berkshire hathaway|exp realty|compass|commercial real estate|cre'),
+)
+# Adjacent businesses that are not one of the four types; compete on the name's head noun
+_OTHER_KEYWORDS = (r'title|escrow|insurance|mortgage|lending|loans?|bank|bancorp|law|attorneys?|legal|logistics|'
+                   r'restaurants?|appraisal|appraisers?|inspections?|staffing|marketing|media|software|technologies')
+_TYPE_PATTERNS = [(kind, re.compile(r'(?<![a-z])(?:%s)(?![a-z])' % words)) for kind, words in _TYPE_KEYWORDS]
+_NAME_PATTERNS = _TYPE_PATTERNS + [('other', re.compile(r'(?<![a-z])(?:%s)(?![a-z])' % _OTHER_KEYWORDS))]
+# Descriptions: generic words ("serving our communities", "homes") are too common to decide
+_DESC_PATTERNS = [(kind, re.compile(r'(?<![a-z])(?:%s)(?![a-z])' % words.replace('communities|', '')))
+                  for kind, words in _TYPE_KEYWORDS]
+_TYPE_LABEL_HINTS = (
+    ('property_manager', ('propertymanagement', 'propertymgmt', 'pm')),
+    ('developer', ('development', 'developers', 'builders', 'homebuilders')),
+    ('investor', ('capital', 'investments', 'equity', 'holdings', 'ventures')),
+    ('brokerage', ('realty', 'realtors', 'realestate', 'homes', 'properties', 'brokerage')),
+)
+RECORD_SOURCE_TYPES = {
+    'tx-trec': 'brokerage', 'ny-dos': 'brokerage', 'co-dora': 'brokerage', 'fl-dbpr-file': 'brokerage',
+    'fl-dbpr': 'brokerage', 'ct-dcp': 'brokerage', 'ct-reb': 'brokerage', 'de-dpr': 'brokerage',
+    'sec-form-d': 'investor',
+}
+COMPANY_TYPES = ('brokerage', 'developer', 'property_manager', 'investor', 'other')
+
+
+def _sources_of(record):
+    return [s.strip().lower() for s in re.split(r'[;,]', record.get('source', '') or '') if s.strip()]
+
+
+def company_type(record):
+    """brokerage | developer | property_manager | investor | other.
+
+    The company name decides first, using its head noun (the keyword that ends
+    latest: "Capital Realty" is a brokerage, "Realty Capital" an investor). Then the
+    public-record source (license lists are brokers, SEC Form D is investors), then
+    the site description, then broker titles, then the domain label.
+    """
+    name = fold(LEGAL_SUFFIX_RE.sub('', record.get('company', '') or ''))
+    best, best_end = None, -1
+    for kind, pattern in _NAME_PATTERNS:
+        for match in pattern.finditer(name):
+            if match.end() > best_end:
+                best, best_end = kind, match.end()
+    if best:
+        return best
+    for source in _sources_of(record):
+        if source in RECORD_SOURCE_TYPES:
+            return RECORD_SOURCE_TYPES[source]
+    description = fold(record.get('company_description', '') or '')
+    if description:
+        scores = {kind: len(pattern.findall(description)) for kind, pattern in _DESC_PATTERNS}
+        top = max(scores.values())
+        if top:
+            return next(kind for kind, _ in _TYPE_KEYWORDS if scores[kind] == top)
+    if re.search(r'(?<![a-z])(?:designated|managing|principal|employing|responsible|qualifying)?\s*broker(?![a-z])',
+                 fold(record.get('title', '') or '')):
+        return 'brokerage'
+    label = _domain_label(record.get('company_website', '') or '').replace('-', '')
+    if label:
+        for kind, hints in _TYPE_LABEL_HINTS:
+            if any(len(h) > 2 and h in label or label.endswith(h) for h in hints):
+                return kind
+    return 'other'
+
+
+_STATE_NAMES = {
+    'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR', 'california': 'CA', 'colorado': 'CO',
+    'connecticut': 'CT', 'delaware': 'DE', 'district of columbia': 'DC', 'washington dc': 'DC', 'washington d.c.': 'DC',
+    'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID', 'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA',
+    'kansas': 'KS', 'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD', 'massachusetts': 'MA',
+    'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS', 'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE',
+    'nevada': 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+    'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK', 'oregon': 'OR', 'pennsylvania': 'PA',
+    'rhode island': 'RI', 'south carolina': 'SC', 'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+    'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV', 'wisconsin': 'WI', 'wyoming': 'WY',
+}
+_STATE_CODES = frozenset(US_STATES.split('|'))
+
+
+def us_state_code(value):
+    """'Arizona' / 'az' / 'AZ 85255' -> 'AZ'; '' when not a US state."""
+    text = fold(_text(value)).strip().strip('.')
+    if not text:
+        return ''
+    text = re.sub(r'\s+\d{5}(?:-\d{4})?$', '', text)
+    if text.upper() in _STATE_CODES:
+        return text.upper()
+    return _STATE_NAMES.get(text, '')
+
+
+def lead_city_state(record):
+    """(City, ST) from explicit fields, then "City, ST" style location text."""
+    city = _text(record.get('city'))
+    state = us_state_code(record.get('state'))
+    location = _text(record.get('location'))
+    if location and (not city or not state):
+        parts = [p.strip() for p in location.split(',') if p.strip()]
+        parts = [p for p in parts if fold(p) not in US_COUNTRY_ALIASES]
+        if parts:
+            tail = us_state_code(parts[-1])
+            if tail:
+                state = state or tail
+                parts = parts[:-1]
+            elif len(parts[-1].split()) >= 2 and us_state_code(parts[-1].split()[-1]):  # "Austin TX"
+                words = parts[-1].split()
+                state = state or us_state_code(words[-1])
+                parts[-1] = ' '.join(words[:-1])
+            if parts and not city and not re.search(r'\bcounty\b', parts[-1], re.I):
+                city = parts[-1] if len(parts) == 1 or tail else parts[0]
+    if city and (re.fullmatch(r'[\d\s-]+', city) or us_state_code(city) == state and len(city) == 2):
+        city = ''
+    if city and (city.isupper() or city.islower()):
+        city = ' '.join(w.capitalize() for w in city.split())
+    return city, state
+
+
+PUBLIC_RECORD_SOURCES = frozenset(RECORD_SOURCE_TYPES)
+FINDER_SOURCES = frozenset({'hunter', 'apollo', 'pdl', 'deepline', 'prospeo', 'tomba', 'icypeas', 'zerobounce',
+                            'lusha', 'enrow', 'getprospect'})
+SEARCH_SOURCES = frozenset({'exa', 'tavily', 'serper', 'brave', 'serpapi', 'google_places', 'openstreetmap',
+                            'hunter_discover', 'firecrawl'})
+
+
+def lead_source(record):
+    """Human-readable origin of the email: website | verified_guess | public_record | linkedin | finder | search."""
+    email_source = (record.get('email_source') or '').lower()
+    sources = _sources_of(record)
+    if email_source == 'website_published':
+        return 'website'
+    if email_source.endswith('_finder'):
+        return 'finder'
+    for source in sources:
+        if source in PUBLIC_RECORD_SOURCES:
+            return 'public_record'
+    if email_source == 'pattern_verified':
+        return 'verified_guess'
+    for source in sources:
+        if source == 'website':
+            return 'website'
+    for source in sources:
+        if source in ('xray', 'linkedin'):
+            return 'linkedin'
+    for source in sources:
+        if source in FINDER_SOURCES:
+            return 'finder'
+    for source in sources:
+        if source in SEARCH_SOURCES:
+            return 'search'
+    if email_source == 'pattern_verified':
+        return 'website'
+    return 'website' if record.get('email_evidence_url') else (sources[0] if sources else 'other')
+
+
+def lead_confidence(record):
+    """high | medium | low from email risk, tier and evidence (a source URL or LinkedIn)."""
+    risk = record.get('email_risk')
+    if risk is None:
+        risk = email_risk(record)[0]
+    points = {'low': 2, 'medium': 1}.get(risk, 0) + {'A': 2, 'B': 1}.get(record.get('tier'), 0)
+    if record.get('linkedin_url') or record.get('email_evidence_url') or record.get('source_url'):
+        points += 1
+    if risk == 'high' or not risk:
+        return 'low'
+    if points >= 4 and risk == 'low':
+        return 'high'
+    return 'medium' if points >= 2 else 'low'
+
+
+def daily_row(record, target=None):
+    """Values for ``DAILY_HEADERS``: the clean 6 columns plus location, type, source, confidence."""
+    city, state = lead_city_state(record)
+    return output_row(record, 'clean', target) + [city, state, record.get('company_type') or company_type(record),
+                                                  lead_source(record), lead_confidence(record)]
+

@@ -500,3 +500,19 @@ class LinkedinMismatchTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HtmlEntityTests(unittest.TestCase):
+    def test_company_and_title_entities_decoded(self):
+        from lead_research.quality import clean_company, clean_title
+        self.assertEqual(clean_company('Smith &amp; Partners Realty')[0], 'Smith & Partners Realty')
+        self.assertEqual(clean_company('Smith &amp;amp; Partners')[0], 'Smith & Partners')
+        self.assertEqual(clean_company('AT&T Realty')[0], 'AT&T Realty')
+        self.assertEqual(clean_title('Owner &amp; Broker')[0].replace('&', 'and').lower().count('broker') >= 1, True)
+        self.assertNotIn('&amp;', clean_title('Owner &amp; Broker')[0])
+
+    def test_extracted_company_name_decoded(self):
+        from lead_research.extract import extract_company
+        page = '<html><head><title>Smith &amp;amp; Co Realty</title><meta property="og:site_name" content="Smith &amp;amp; Co Realty"></head><body></body></html>'
+        company = extract_company(page, 'https://smithco.example/')
+        self.assertNotIn('&amp;', json.dumps(company))

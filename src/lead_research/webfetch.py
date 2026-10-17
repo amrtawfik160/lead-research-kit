@@ -149,40 +149,55 @@ def is_public_address(value: str) -> bool:
 
 # --------------------------------------------------------------------------- default opener
 
+def _open_socket(conn: Any) -> socket.socket:
+    """Connect with the (shorter) connect timeout, then switch to the read timeout.
+
+    Dead or blackholed hosts fail in `connect_timeout` seconds instead of the full read timeout.
+    """
+    read = conn.timeout
+    explicit = isinstance(read, (int, float)) and not isinstance(read, bool)
+    connect = min(conn._connect_timeout, read) if (conn._connect_timeout and explicit) else read
+    sock = socket.create_connection((conn._pinned or conn.host, conn.port), connect, conn.source_address)
+    if explicit:
+        sock.settimeout(read)
+    return sock
+
+
 class _PinnedHTTPConnection(http.client.HTTPConnection):
     """HTTPConnection that connects to a pre-validated IP instead of re-resolving."""
 
-    def __init__(self, *args: Any, pinned: str | None = None, **kwargs: Any):
+    def __init__(self, *args: Any, pinned: str | None = None, connect_timeout: float | None = None, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self._pinned = pinned
+        self._connect_timeout = connect_timeout
 
     def connect(self) -> None:
-        self.sock = socket.create_connection(
-            (self._pinned or self.host, self.port), self.timeout, self.source_address)
+        self.sock = _open_socket(self)
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     """HTTPSConnection pinned to a validated IP; TLS verifies the real hostname."""
 
-    def __init__(self, *args: Any, pinned: str | None = None, **kwargs: Any):
+    def __init__(self, *args: Any, pinned: str | None = None, connect_timeout: float | None = None, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self._pinned = pinned
+        self._connect_timeout = connect_timeout
 
     def connect(self) -> None:
-        sock = socket.create_connection(
-            (self._pinned or self.host, self.port), self.timeout, self.source_address)
-        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+        self.sock = self._context.wrap_socket(_open_socket(self), server_hostname=self.host)
 
 
 class _PinnedHTTPHandler(urllib.request.HTTPHandler):
     def http_open(self, req):  # noqa: D401 - urllib hook
-        return self.do_open(_PinnedHTTPConnection, req, pinned=getattr(req, 'pinned_address', None))
+        return self.do_open(_PinnedHTTPConnection, req, pinned=getattr(req, 'pinned_address', None),
+                            connect_timeout=getattr(req, 'connect_timeout', None))
 
 
 class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
     def https_open(self, req):  # noqa: D401 - urllib hook
         return self.do_open(_PinnedHTTPSConnection, req, context=self._context,
-                            pinned=getattr(req, 'pinned_address', None))
+                            pinned=getattr(req, 'pinned_address', None),
+                            connect_timeout=getattr(req, 'connect_timeout', None))
 
 
 class _PassThroughErrors(urllib.request.HTTPErrorProcessor):
@@ -333,7 +348,8 @@ class SafeFetcher:
     """
 
     def __init__(self, cache_path: str | None = None, user_agent: str = DEFAULT_USER_AGENT,
-                 per_host_delay: float = 1.0, timeout: float = 15, max_bytes: int = 2_000_000,
+                 per_host_delay: float = 1.0, timeout: float = 15, connect_timeout: float | None = 6,
+                 max_bytes: int = 2_000_000,
                  max_redirects: int = 4, respect_robots: bool = True,
                  cache_max_age: float = 14 * 86400,
                  resolver: Callable[..., Any] = socket.getaddrinfo,
@@ -341,6 +357,9 @@ class SafeFetcher:
                  sleep: Callable[[float], None] = time.sleep):
         if max_bytes < 1 or max_redirects < 0 or timeout <= 0 or per_host_delay < 0:
             raise ValueError('invalid_fetcher_settings')
+        if connect_timeout is not None and connect_timeout <= 0:
+            raise ValueError('invalid_fetcher_settings')
+        self.connect_timeout = min(connect_timeout, timeout) if connect_timeout else None
         self.user_agent = user_agent
         self.per_host_delay = float(per_host_delay)
         self.timeout = timeout
@@ -501,6 +520,7 @@ class SafeFetcher:
                  want_html: bool) -> tuple[int, dict[str, str], bytes | None, bool]:
         req = urllib.request.Request(url, headers=dict(self._headers), method='GET')
         req.pinned_address = pinned  # consumed by the pinned handlers
+        req.connect_timeout = self.connect_timeout
         try:
             resp = self._opener.open(req, timeout=self.timeout)
         except urllib.error.HTTPError as exc:

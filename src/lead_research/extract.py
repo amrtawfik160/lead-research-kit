@@ -13,6 +13,7 @@ link, or plain/obfuscated text).
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 import unicodedata
@@ -231,8 +232,17 @@ def _parse(html_text: str) -> _Node:
     return builder.root
 
 
+def _unescape(value: str) -> str:
+    # HTMLParser already decodes markup; this catches double-encoded text and JSON-LD/meta strings ("&amp;amp;")
+    for _ in range(2):
+        if '&' not in value:
+            break
+        value = html.unescape(value)
+    return value
+
+
 def _clean_text(value: str) -> str:
-    value = (value or '').translate(_ZERO_WIDTH).replace('\xa0', ' ')
+    value = _unescape(value or '').translate(_ZERO_WIDTH).replace('\xa0', ' ')
     return re.sub(r'\s+', ' ', value).strip()
 
 
@@ -1188,7 +1198,10 @@ def _merge_company(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any
     return base
 
 
-def _crawl_one(raw_domain: str, fetcher: Any, max_pages: int) -> dict[str, Any]:
+SUBPAGE_FAILURE_LIMIT = 2  # consecutive network/timeout failures after the homepage end a site
+
+
+def _crawl_one(raw_domain: str, fetcher: Any, max_pages: int, classify: bool = True) -> dict[str, Any]:
     host = normalize_domain(raw_domain)
     site = _bare_domain(host or raw_domain or '')
     result: dict[str, Any] = {'domain': site, 'homepage_url': None, 'status': 'unreachable',
@@ -1224,10 +1237,24 @@ def _crawl_one(raw_domain: str, fetcher: Any, max_pages: int) -> dict[str, Any]:
     site = _site_key(home_url) or site
     result['domain'] = site
     pages = [(home_url, home.text)]
+    home_company = None
+    if classify:
+        from .relevance import classify_site
+        home_company = extract_company(home.text, home_url)
+        label, score, signals = classify_site({**home_company, 'domain': site}, home.text)
+        result['relevance'] = {'label': label, 'score': score}
+        if label == 'off_topic':
+            home_company['domain'] = site
+            home_company['generic_emails'] = [e for e in home_company.get('all_emails', [])
+                                              if classify_email(e, site) == 'role']
+            result.update(company=home_company, status='off_topic', pages_fetched=1,
+                          relevance={'label': label, 'score': score, 'negative': signals['negative'][:5]})
+            return result
     seen = {_page_key(home_url), _page_key(candidates[0])}
     queue = discover_pages(home_url, home.text, limit=max(1, max_pages * 2))
     attempts, max_attempts = 0, max(0, max_pages - 1) + 2
-    while queue and len(pages) < max_pages and attempts < max_attempts:
+    failures = 0
+    while queue and len(pages) < max_pages and attempts < max_attempts and failures < SUBPAGE_FAILURE_LIMIT:
         url = queue.pop(0)
         if _page_key(url) in seen:
             continue
@@ -1236,7 +1263,10 @@ def _crawl_one(raw_domain: str, fetcher: Any, max_pages: int) -> dict[str, Any]:
         response = fetcher.get(url)
         if response.error is not None:
             note(response.error)
+            # A struggling host (timeouts, resets) will not get better within this crawl.
+            failures = failures + 1 if response.error in ('timeout', 'network_error') else 0
             continue
+        failures = 0
         final = response.final_url or url
         seen.add(_page_key(final))
         pages.append((final, response.text))
@@ -1245,8 +1275,9 @@ def _crawl_one(raw_domain: str, fetcher: Any, max_pages: int) -> dict[str, Any]:
                 queue.append(extra)
     company: dict[str, Any] = {}
     people: list[dict[str, Any]] = []
-    for page_url, text in pages:
-        _merge_company(company, extract_company(text, page_url))
+    for index, (page_url, text) in enumerate(pages):
+        parsed = home_company if index == 0 and home_company is not None else extract_company(text, page_url)
+        _merge_company(company, dict(parsed))
         people.extend(extract_people(text, page_url))
     company['domain'] = site
     company['generic_emails'] = [e for e in company.get('all_emails', [])
@@ -1260,12 +1291,17 @@ def _crawl_one(raw_domain: str, fetcher: Any, max_pages: int) -> dict[str, Any]:
 
 
 def crawl_domains(domains: Iterable[str], fetcher: Any, max_pages: int = 6, workers: int = 16,
-                  progress: Callable[[int, int, str], None] | None = None) -> list[dict[str, Any]]:
+                  progress: Callable[[int, int, str], None] | None = None,
+                  classify: bool = True, trusted: Iterable[str] = ()) -> list[dict[str, Any]]:
     """Crawl many company sites in parallel (politeness is the fetcher's job).
 
     Returns one result per unique input domain, in input order. A failing site
     yields status 'unreachable' with error codes; it never aborts the batch.
+    With ``classify`` the homepage is checked for real-estate relevance and clearly
+    off-topic sites stop there (status 'off_topic'). Domains in ``trusted`` (e.g. from
+    public license records) are never classified.
     """
+    trusted_set = {(normalize_domain(d) or d).lower().removeprefix('www.') for d in trusted if isinstance(d, str)}
     unique: list[str] = []
     for domain in domains:
         if isinstance(domain, str) and domain.strip() and domain.strip() not in unique:
@@ -1276,7 +1312,8 @@ def crawl_domains(domains: Iterable[str], fetcher: Any, max_pages: int = 6, work
 
     def run(domain: str) -> dict[str, Any]:
         try:
-            return _crawl_one(domain, fetcher, max(1, max_pages))
+            key = (normalize_domain(domain) or domain).lower().removeprefix('www.')
+            return _crawl_one(domain, fetcher, max(1, max_pages), classify=classify and key not in trusted_set)
         except Exception:
             return {'domain': _bare_domain(normalize_domain(domain) or domain), 'homepage_url': None,
                     'status': 'unreachable', 'company': {}, 'people': [], 'pattern': None,

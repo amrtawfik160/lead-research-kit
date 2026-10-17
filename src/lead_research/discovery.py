@@ -66,7 +66,7 @@ HUNTER_NAME_BATCH = 50
 # Single-person operations whose 'candidate' email (and enriched identity) become prospects.
 FINDER_OPERATIONS = ('find', 'people_enrich', 'enrich', 'linkedin_email', 'person_enrich')
 # Providers whose single-query 'search' operation returns {results, prospects} rows (Exa: 'people').
-SEARCH_PROVIDERS = ('serper', 'brave', 'tavily', 'serpapi', 'exa', 'firecrawl')
+SEARCH_PROVIDERS = ('serper', 'brave', 'tavily', 'serpapi', 'exa', 'firecrawl', 'zenserp', 'linkup', 'youcom')
 FIRECRAWL_MAX_HTML = 500_000  # bytes of UTF-8 HTML kept per scraped page
 PLACES_QUERY_TEMPLATES = ('real estate brokerage in {city}, {state}', 'commercial real estate firm in {city}, {state}',
                           'property management company in {city}, {state}')

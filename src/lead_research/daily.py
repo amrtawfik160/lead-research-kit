@@ -30,13 +30,13 @@ from .pipeline import _name_key, build
 
 DEFAULT_SOURCES = ('records', 'resolve', 'hunter-discover', 'google-places', 'osm', 'crawl', 'render-js', 'find-emails', 'verify', 'build')
 OPTIONAL_SOURCES = ('hunter-domains', 'apollo', 'xray-linkedin', 'pdl')
-DEFAULT_RECORD_SOURCES = ('tx-trec', 'ny-dos', 'co-dora', 'sec-form-d')
-DEFAULT_CAPS = {'records': 3000, 'resolve': 600, 'resolve-hunter': 1500, 'hunter-discover': 90, 'google-places': 30, 'osm': 6,
+DEFAULT_RECORD_SOURCES = ('tx-trec', 'ny-dos', 'co-dora', 'ct-dls', 'sec-form-d')
+DEFAULT_CAPS = {'records': 3000, 'resolve': 600, 'resolve-hunter': 1500, 'resolve-guess': 1500, 'hunter-discover': 90, 'google-places': 30, 'osm': 6,
                 'apollo': 20, 'apollo-enrich': 50, 'hunter-domains': 25, 'find-emails': 60, 'verify': 300, 'xray-linkedin': 300,
-                'render-js': 25, 'pdl': 3}
+                'render-js': 25, 'pdl': 3, 'verify-published': 25}
 KEYWORD_SETS = (['property management'], ['commercial real estate'], ['multifamily'], ['real estate investment'],
                 ['real estate development'], ['brokerage'], ['luxury real estate'], ['land'])
-SEARCH_FALLBACK = ('serper', 'tavily', 'exa')
+SEARCH_FALLBACK = ('serper', 'linkup', 'youcom', 'zenserp', 'tavily', 'exa')
 EXPECTED_LEADS_PER_DOMAIN = 0.3  # measured: ~0.3 fresh decision makers with work email per crawled brokerage site
 
 # Large US metros as (place, state) for OpenStreetMap rotation. Official place names
@@ -70,11 +70,13 @@ METROS = (
 )
 
 HEADCOUNTS = ('1-10', '11-50', '51-200')
-OUTCOMES = {'replied', 'interested', 'meeting', 'not_interested', 'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer'}
+OUTCOMES = {'replied', 'interested', 'meeting', 'not_interested', 'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer',
+            'complaint', 'engaged', 'delivered'}
 OUTCOME_ALIASES = {'reply': 'replied', 'positive': 'interested', 'booked': 'meeting', 'bounce': 'bounced', 'hard_bounce': 'bounced',
                    'invalid': 'bounced', 'unsubscribe': 'unsubscribed', 'opt_out': 'unsubscribed', 'optout': 'unsubscribed',
-                   'dnc': 'do_not_contact', 'negative': 'not_interested', 'wrong_contact': 'wrong_person'}
-AUTO_SUPPRESS = {'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer'}
+                   'dnc': 'do_not_contact', 'negative': 'not_interested', 'wrong_contact': 'wrong_person',
+                   'spam': 'complaint', 'opened': 'engaged', 'clicked': 'engaged', 'sent': 'delivered'}
+AUTO_SUPPRESS = {'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer', 'complaint'}
 BACKUPS_KEPT = 14
 
 
@@ -103,6 +105,8 @@ class History:
           CREATE TABLE IF NOT EXISTS suppressed(key TEXT PRIMARY KEY, reason TEXT NOT NULL, added_at REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS outcomes(key TEXT, outcome TEXT NOT NULL, source TEXT, email_source TEXT, batch TEXT, added_at REAL NOT NULL, PRIMARY KEY(key, outcome));
           CREATE TABLE IF NOT EXISTS refills(provider TEXT, pool TEXT, amount TEXT NOT NULL, period TEXT NOT NULL, source TEXT NOT NULL, last_applied TEXT, PRIMARY KEY(provider, pool));
+          CREATE TABLE IF NOT EXISTS result_rows(hash TEXT PRIMARY KEY, tool TEXT, email TEXT, outcome TEXT, added_at REAL NOT NULL);
+          CREATE TABLE IF NOT EXISTS pattern_flags(domain TEXT PRIMARY KEY, reason TEXT NOT NULL, bounces INTEGER NOT NULL DEFAULT 1, added_at REAL NOT NULL);
         ''')
         cols = {r[1] for r in self.db.execute('PRAGMA table_info(delivered)')}
         for col in ('email_source', 'source'):
@@ -188,18 +192,42 @@ class History:
         delivered = {}
         for r in self.db.execute("SELECT COALESCE(email_source,'unknown') AS src, COUNT(DISTINCT batch || full_name || IFNULL(company_website,'')) AS n FROM delivered GROUP BY src"):
             delivered[r['src']] = r['n']
-        stats = {src: {'delivered': n, 'bounced': 0, 'replied': 0} for src, n in delivered.items()}
+        stats = {src: {'delivered': n, 'bounced': 0, 'replied': 0, 'engaged': 0, 'unsubscribed': 0} for src, n in delivered.items()}
         for r in self.db.execute("SELECT COALESCE(email_source,'unknown') AS src, outcome, COUNT(DISTINCT batch || key) AS n FROM outcomes WHERE key LIKE 'em:%' GROUP BY src, outcome"):
-            entry = stats.setdefault(r['src'], {'delivered': 0, 'bounced': 0, 'replied': 0})
+            entry = stats.setdefault(r['src'], {'delivered': 0, 'bounced': 0, 'replied': 0, 'engaged': 0, 'unsubscribed': 0})
             if r['outcome'] == 'bounced':
                 entry['bounced'] += r['n']
             elif r['outcome'] in ('replied', 'meeting', 'interested'):
                 entry['replied'] += r['n']
+            elif r['outcome'] == 'engaged':
+                entry['engaged'] += r['n']
+            elif r['outcome'] in ('unsubscribed', 'complaint'):
+                entry['unsubscribed'] += r['n']
         for entry in stats.values():
             base = max(entry['delivered'], 1)
             entry['bounce_rate'] = round(entry['bounced'] / base, 3)
             entry['reply_rate'] = round(entry['replied'] / base, 3)
         return stats
+
+    # Email patterns that produced hard bounces ------------------------------
+    def distrust_pattern(self, domain, reason, clock=time.time):
+        """Stop guessing emails at ``domain`` (its inferred pattern bounced). True when newly flagged."""
+        domain = quality.normalize_host(domain)
+        if not domain:
+            return False
+        with self.db:
+            if self.db.execute('UPDATE pattern_flags SET bounces=bounces+1 WHERE domain=?', (domain,)).rowcount:
+                return False
+            self.db.execute('INSERT INTO pattern_flags VALUES(?,?,1,?)', (domain, reason, clock()))
+        return True
+
+    def distrusted_patterns(self):
+        return {r['domain']: {'reason': r['reason'], 'bounces': r['bounces'], 'added_at': r['added_at']}
+                for r in self.db.execute('SELECT * FROM pattern_flags')}
+
+    def clear_pattern(self, domain):
+        with self.db:
+            return self.db.execute('DELETE FROM pattern_flags WHERE domain=?', (quality.normalize_host(domain),)).rowcount
 
     # Recurring free allowances (operator-attested) -------------------------
     def add_refill(self, provider, pool, amount, period, source):
@@ -260,6 +288,19 @@ class History:
                 added += cur.rowcount
         return added
 
+    def licensed_domains(self, domains):
+        """Subset of ``domains`` whose source is a public license record (never relevance-filtered)."""
+        from .relevance import is_licensed_source
+        found = set()
+        rows = list(dict.fromkeys(d for d in domains if isinstance(d, str)))
+        for start in range(0, len(rows), 500):
+            chunk = rows[start:start + 500]
+            marks = ','.join('?' * len(chunk))
+            for r in self.db.execute(f'SELECT domain, source FROM domains WHERE domain IN ({marks})', chunk):
+                if is_licensed_source(r['source']):
+                    found.add(r['domain'])
+        return found
+
     def domains_to_crawl(self, limit, recrawl_days=90, clock=time.time):
         cutoff = clock() - recrawl_days * 86400
         rows = self.db.execute('SELECT domain FROM domains WHERE last_crawled IS NULL OR last_crawled < ? '
@@ -285,7 +326,15 @@ class History:
 
     def recent_sites(self, days=100, clock=time.time):
         cutoff = clock() - days * 86400
-        return [json.loads(r['data']) for r in self.db.execute('SELECT data FROM sites WHERE crawled_at >= ?', (cutoff,))]
+        flagged = {r['domain'] for r in self.db.execute('SELECT domain FROM pattern_flags')}
+        sites = []
+        for r in self.db.execute('SELECT data FROM sites WHERE crawled_at >= ?', (cutoff,)):
+            site = json.loads(r['data'])
+            if site.get('domain') in flagged and site.get('pattern'):
+                # A guess from this pattern hard-bounced: no more guesses here until cleared
+                site['pattern'] = {**site['pattern'], 'confidence': 0, 'distrusted': True}
+            sites.append(site)
+        return sites
 
     # Prospects from APIs ------------------------------------------------
     def add_prospects(self, rows, clock=time.time):
@@ -338,6 +387,18 @@ class History:
         with self.db:
             self.db.execute('UPDATE firms SET status=?, domain=? WHERE key=?', (status, domain, company_key(company)))
 
+    def note_firm(self, company, **fields):
+        """Merge ``fields`` into a stored firm's data (e.g. guess_tried) without changing its status."""
+        from .resolve import company_key
+        key = company_key(company)
+        with self.db:
+            row = self.db.execute('SELECT data FROM firms WHERE key=?', (key,)).fetchone()
+            if row is None:
+                return False
+            data = {**json.loads(row['data']), **fields}
+            self.db.execute('UPDATE firms SET data=? WHERE key=?', (json.dumps(data, ensure_ascii=False), key))
+        return True
+
     def prospects(self, days=90, clock=time.time):
         cutoff = clock() - days * 86400
         return [json.loads(r['data']) for r in self.db.execute('SELECT data FROM prospects WHERE added_at >= ?', (cutoff,))]
@@ -365,7 +426,8 @@ class History:
                 'sites_stored': q('SELECT COUNT(*) FROM sites'), 'prospects_stored': q('SELECT COUNT(*) FROM prospects'),
                 'suppressed': q('SELECT COUNT(*) FROM suppressed'), 'outcomes': q('SELECT COUNT(*) FROM outcomes'),
                 'firms_pending_website': q("SELECT COUNT(*) FROM firms WHERE status='pending'"),
-                'firms_resolved': q("SELECT COUNT(*) FROM firms WHERE status='resolved'")}
+                'firms_resolved': q("SELECT COUNT(*) FROM firms WHERE status='resolved'"),
+                'patterns_distrusted': q('SELECT COUNT(*) FROM pattern_flags'), 'results_rows_imported': q('SELECT COUNT(*) FROM result_rows')}
 
 
 def _run_jobs(store, config, jobs, execute, env, transport, cap):
@@ -387,18 +449,196 @@ def _run_jobs(store, config, jobs, execute, env, transport, cap):
     return report
 
 
+# Verifiers in the order their free allowance should be spent (recurring daily/monthly first).
+VERIFY_LANE_ORDER = ('reoon', 'quickemailverification', 'abstract', 'bouncer', 'myemailverifier',
+                     'emailvalidation', 'emaillistverify', 'emailable', 'kickbox', 'millionverifier')
+
+
+def plan_verify_lanes(store, config, emails, env, order=VERIFY_LANE_ORDER):
+    """Pre-assign emails to funded verifiers so each provider can run in its own lane.
+
+    Providers are taken in ``order`` (then any other enabled verifier). A provider is skipped if it
+    is unknown to this version, disabled, paused, missing its key, or has no verify charge. Each
+    gets at most as many emails as its confirmed free budget covers. Returns (lanes, unassigned)
+    where lanes is an ordered dict provider -> [email].
+    """
+    from .providers import PROVIDERS, get_provider
+    from .runner import Runner
+    from .policy import parse_units
+    probe = Runner(store, config, env=env)
+    budgets = {(b['provider'], b['pool']): b['remaining_units'] for b in store.budgets()}
+    configured = config.get('providers', {})
+    candidates = [p for p in order if p in configured] + [p for p in configured if p not in order]
+    lanes, rest = {}, list(dict.fromkeys(emails))
+    for pid in candidates:
+        if not rest:
+            break
+        entry = configured.get(pid) or {}
+        if pid not in PROVIDERS or not entry.get('enabled'):
+            continue
+        try:
+            provider = get_provider(pid)
+        except Exception:
+            continue
+        if 'verify' not in provider.operations or store.provider_state(pid).get('paused') or not probe._auth(provider):
+            continue
+        charges = (entry.get('charges') or {}).get('verify') or {}
+        try:
+            per = {pool: parse_units(v, positive=True) for pool, v in charges.items()}
+        except Exception:
+            continue
+        if not per:
+            continue
+        capacity = min(budgets.get((pid, pool), 0) // units for pool, units in per.items())
+        if capacity <= 0:
+            continue
+        lanes[pid], rest = rest[:capacity], rest[capacity:]
+    return lanes, rest
+
+
+def _run_verify_lanes(store, config, lanes, execute, env, transport):
+    """Run each provider's lane in its own thread and Store connection.
+
+    Ledger guarantees are unchanged per provider: reserve (debit) before send, one active attempt
+    per provider, finish/uncertain after, and a provider problem pauses and stops only its lane.
+    The hash-chained audit stays consistent because every write is a BEGIN IMMEDIATE transaction.
+    """
+    import threading
+    report = {'planned': sum(len(v) for v in lanes.values()), 'sent': 0, 'stopped': False,
+              'skipped_reasons': {}, 'lanes': {}}
+
+    def jobs_for(pid):
+        return [{'provider': pid, 'operation': 'verify', 'payload': {'email': e}} for e in lanes[pid]]
+
+    def merge(pid, step):
+        report['lanes'][pid] = {k: step[k] for k in ('planned', 'sent', 'stopped')}
+        report['sent'] += step['sent']
+        report['stopped'] = report['stopped'] or step['stopped']
+        for reason, n in step['skipped_reasons'].items():
+            report['skipped_reasons'][reason] = report['skipped_reasons'].get(reason, 0) + n
+
+    parallel = execute and len(lanes) > 1 and getattr(store, 'path', ':memory:') != ':memory:'
+    if not parallel:
+        for pid in lanes:
+            merge(pid, _run_jobs(store, config, jobs_for(pid), execute, env, transport, len(lanes[pid])))
+        return report
+    results, errors = {}, {}
+
+    from .store import Store
+
+    def lane(pid):
+        lane_store = Store(store.path, parallel_providers=True)
+        try:
+            results[pid] = _run_jobs(lane_store, config, jobs_for(pid), True, env, transport, len(lanes[pid]))
+        except Exception as exc:  # recorded, never silently dropped
+            errors[pid] = type(exc).__name__
+        finally:
+            lane_store.close()
+
+    threads = [threading.Thread(target=lane, args=(pid,), name=f'verify-{pid}') for pid in lanes]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for pid in lanes:
+        if pid in results:
+            merge(pid, results[pid])
+        else:
+            report['lanes'][pid] = {'planned': len(lanes[pid]), 'sent': 0, 'stopped': True, 'error': errors.get(pid)}
+            report['stopped'] = True
+    return report
+
+
 def _selection_key(record, source_quality=None):
-    """Best first: tier, has email, sources that bounce less (once feedback exists), LinkedIn, score."""
+    """Best first: email risk (low before medium), tier, has email, sources that bounce less
+    (once feedback exists), LinkedIn, score."""
     bounce = ((source_quality or {}).get(record.get('email_source') or 'unknown') or {}).get('bounce_rate', 0)
-    return (quality.TIER_ORDER[record['tier']], 0 if record.get('email') else 1, 1 if bounce > 0.05 else 0,
+    risk = quality.RISK_ORDER.get(record.get('email_risk') or ('medium' if record.get('email') else ''), 3)
+    return (risk, quality.TIER_ORDER[record['tier']], 0 if record.get('email') else 1, 1 if bounce > 0.05 else 0,
             0 if record.get('linkedin_url') else 1, -record['score'])
 
 
+def _email_domain(email):
+    return email.rsplit('@', 1)[1].lower() if email and '@' in email else ''
+
+
+def _risk_context(store, prospects):
+    """Emails/domains a verifier or finder already called catch-all, and domains with any verify result."""
+    from .pipeline import _verification_index
+    verified = _verification_index(store)
+    catch_all_emails = {e for e, v in verified.items() if v.get('status') == 'catch_all'}
+    for prospect in prospects:
+        email = (prospect.get('email') or '').lower()
+        flags = set(prospect.get('email_risk_flags') or ())
+        if email and (prospect.get('email_verification') == 'accept_all' or 'catch_all' in flags):
+            catch_all_emails.add(email)
+    return {'catch_all_emails': catch_all_emails,
+            'catch_all_domains': {_email_domain(e) for e in catch_all_emails},
+            'checked_domains': {_email_domain(e) for e in verified}}
+
+
+def discover_locations(store):
+    """{domain: (city, state)} from Hunter Discover jobs filtered to one headquarters location.
+
+    The filter is Hunter's own headquarters match, so a company returned for
+    "Austin, TX" is headquartered there (state-only jobs give just the state).
+    """
+    places = {}
+    for attempt in store.attempts():
+        if attempt.get('provider') != 'hunter' or attempt.get('operation') != 'discover' or attempt.get('state') != 'completed':
+            continue
+        filters = (attempt.get('payload') or {}).get('filters') or {}
+        include = ((filters.get('headquarters_location') or {}).get('include')) or []
+        if len(include) != 1 or not isinstance(include[0], dict):
+            continue
+        city, state = include[0].get('city') or '', quality.us_state_code(include[0].get('state') or '')
+        if not state:
+            continue
+        for company in ((attempt.get('outcome') or {}).get('fields') or {}).get('companies') or []:
+            domain = quality.normalize_host((company or {}).get('domain') or '')
+            if domain and (city or domain not in places):
+                places[domain] = (city, state)
+    return places
+
+
+def fill_locations(records, places):
+    """Give records without a state the discovery location of their company domain (in place)."""
+    filled = 0
+    for record in records:
+        city, state = quality.lead_city_state(record)
+        place = places.get(record.get('company_website') or '')
+        if place and not state:
+            record['city'], record['state'] = city or place[0], place[1]
+            filled += 1
+        elif place and not city and place[0] and place[1] == state:
+            record['city'] = place[0]
+            filled += 1
+    return filled
+
+
+def annotate_email_risk(records, mx_facts, context):
+    """Set email_risk / email_risk_reason / mx_provider / company_type on each record (in place)."""
+    for record in records:
+        domain = _email_domain(record.get('email'))
+        if record.get('email') and (record['email'].lower() in context['catch_all_emails']
+                                    or domain in context['catch_all_domains']):
+            record['email_catch_all'] = True
+        mx = mx_facts.get(domain)
+        record['email_risk'], record['email_risk_reason'] = quality.email_risk(record, mx)
+        record['mx_provider'] = (mx or {}).get('provider', '')
+        record['company_type'] = quality.company_type(record)
+    return records
+
+
 def run_daily(work, store, config, *, target=500, execute=False, day=None, sources=DEFAULT_SOURCES,
-              output_root=None, max_domains=None, workers=24, require_email=True, min_tier='B',
+              output_root=None, max_domains=None, workers=48, require_email=True, min_tier='B',
               caps=None, env=None, transport=None, fetcher=None, record_sources=(), record_source_names=DEFAULT_RECORD_SOURCES,
-              search_provider='serper', records_getter=None, clock=time.time):
-    """One daily cycle. Returns a report; writes files under ``output_root/day``."""
+              search_provider='serper', records_getter=None, resolver=None, clock=time.time, mx_check=None, mx_resolver=None):
+    """One daily cycle. Returns a report; writes files under ``output_root/day``.
+
+    ``mx_check`` (free DNS lookups of email domains) defaults to on for live runs
+    (``execute`` with the real network transport) or when ``mx_resolver`` is given.
+    """
     work = Path(work)
     env = os.environ if env is None else env
     day = day or today_iso(clock)
@@ -451,7 +691,8 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
             report['steps']['records'] = step
 
         if 'resolve' in sources:
-            report['steps']['resolve'] = _resolve_firms(history, store, config, execute, env, transport, caps, search_provider)
+            report['steps']['resolve'] = _resolve_firms(history, store, config, execute, env, transport, caps, search_provider,
+                                                        fetcher=fetcher, dns=resolver, work=work, day=day)
 
         backlog = history.backlog()
         report['backlog_before'] = backlog
@@ -508,12 +749,14 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                 own = fetcher is None
                 active = fetcher or SafeFetcher(cache_path=work / 'web-cache.sqlite3', per_host_delay=1.0)
                 try:
-                    sites = crawl_domains(domains, active, max_pages=6, workers=workers)
+                    sites = crawl_domains(domains, active, max_pages=6, workers=workers,
+                                          trusted=history.licensed_domains(domains))
                 finally:
                     if own:
                         active.close()
                 history.save_sites(sites)
                 step.update(sites_ok=sum(s['status'] == 'ok' for s in sites),
+                            off_topic=sum(s['status'] == 'off_topic' for s in sites),
                             people=sum(len(s['people']) for s in sites),
                             people_with_email=sum(1 for s in sites for p in s['people'] if p.get('email')))
             report['steps']['crawl'] = step
@@ -526,6 +769,20 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
 
         target_cfg = quality.Target(min_tier=min_tier)
         result = build(prospects=history.prospects(), site_results=history.recent_sites(), store=store, target=target_cfg)
+        from . import emailcheck
+        mx_on = mx_check if mx_check is not None else (mx_resolver is not None or (execute and transport is None))
+        mx_facts = {}
+
+        def check_mx(emails):
+            if not mx_on:
+                return
+            domains = {_email_domain(e) for e in emails} - set(mx_facts)
+            # Reserved test domains only resolve through an injected resolver
+            domains = [d for d in domains if d and (mx_resolver is not None or not quality.is_reserved_domain(d))]
+            if domains:
+                mx_facts.update(emailcheck.check_domains(history.db, domains, resolver=mx_resolver, clock=clock))
+
+        check_mx([r.get('email') for r in result['clean'] + result['review']] + [c['Candidate Email'] for c in result['candidates']])
         if 'find-emails' in sources:
             # Fresh decision makers with a known company site but no published email
             need = [r for r in result['clean'] + result['review'] if not r.get('email') and r.get('company_website')
@@ -536,18 +793,63 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                     for r in need[:caps['find-emails']]]
             run('find-emails', jobs, caps['find-emails'])
         if 'verify' in sources:
-            emails = [c['Candidate Email'] for c in result['candidates']]
-            emails += [p['email'] for p in history.prospects() if p.get('email') and str(p.get('email_source', '')).endswith('_finder')
-                       and p.get('email_verification') not in ('valid', 'provider_valid')]
-            checked = {(a.get('payload') or {}).get('email') for a in store.attempts() if a.get('operation') == 'verify'}
-            fresh = [e for e in dict.fromkeys(e.lower() for e in emails) if e not in checked]
-            jobs = [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': e}} for e in fresh]
-            step = run('verify', jobs, caps['verify'])
-            step['already_checked'] = len(set(e.lower() for e in emails)) - len(fresh)
+            # Risk-first: guesses for fresh decision makers, weak published emails, finder results, the rest
+            records = result['clean'] + result['review']
+            by_person = {(r.get('company_website'), _name_key(r.get('full_name'))): r for r in records}
+            by_email = {r['email'].lower(): r for r in records if r.get('email')}
+            candidates = []
+            for c in result['candidates']:
+                r = by_person.get((c['Company Website'], _name_key(c['Full Name']))) or {}
+                candidates.append({'email': c['Candidate Email'], 'kind': 'pattern', 'decision_maker': r.get('decision_maker', True),
+                                   'fresh': history.is_fresh(r) if r else True, 'tier': c.get('Tier'), 'score': r.get('score')})
+            prospects_now = history.prospects()
+            for p in prospects_now:
+                if p.get('email') and str(p.get('email_source', '')).endswith('_finder') and p.get('email_verification') not in ('valid', 'provider_valid'):
+                    r = by_email.get(p['email'].lower()) or {}
+                    candidates.append({'email': p['email'], 'kind': 'finder', 'tier': r.get('tier'), 'score': r.get('score'),
+                                       'fresh': history.is_fresh(r) if r else True})
+            for r in result['clean']:
+                if r.get('email') and r.get('email_source') == 'website_published' and r.get('decision_maker') \
+                        and not r.get('email_verification') and quality.email_kind(r['email']) == 'work':
+                    candidates.append({'email': r['email'], 'kind': 'published', 'name_match': r.get('email_name_match'),
+                                       'fresh': history.is_fresh(r), 'tier': r['tier'], 'score': r['score']})
+            context = _risk_context(store, prospects_now)
+            checked = {((a.get('payload') or {}).get('email') or '').lower() for a in store.attempts() if a.get('operation') == 'verify'}
+            no_mail = [d for d, m in mx_facts.items() if m.get('has_mx') is False]
+            order = emailcheck.prioritize_verify(candidates, {'checked': checked, 'catch_all_domains': context['catch_all_domains'],
+                                                              'checked_domains': context['checked_domains'], 'no_mail_domains': no_mail},
+                                                 published_cap=caps['verify-published'])
+            # Risk-ordered list feeds per-provider lanes (each verifier in its own thread, within its own budget)
+            lanes, unassigned = plan_verify_lanes(store, config, order['emails'][:caps['verify']], env)
+            step = _run_verify_lanes(store, config, lanes, execute, env, transport)
+            step['planned'] = len(order['emails'])
+            step['unassigned_no_budget'] = len(unassigned)
+            report['steps']['verify'] = step
+            if execute and step['sent']:
+                gathered = discovery.collect(store)
+                step['domains_added'] = history.add_domains(gathered['companies'], 'verify')
+                step['prospects_added'] = history.add_prospects(gathered['prospects'])
+            step['already_checked'] = order['skipped'].get('already_checked', 0)
+            step['priority'] = order['groups']
+            step['not_worth_checking'] = {k: v for k, v in order['skipped'].items() if k != 'already_checked'}
         if execute and ({'find-emails', 'verify'} & set(sources)):
             result = build(prospects=history.prospects(), site_results=history.recent_sites(), store=store, target=target_cfg)
 
-        pool = [r for r in result['clean'] if (r.get('email') or not require_email) and history.is_fresh(r)]
+        check_mx([r.get('email') for r in result['clean']])
+        annotate_email_risk(result['clean'], mx_facts, _risk_context(store, history.prospects()))
+        safety = {'mx_check': mx_on, 'mx': emailcheck.summarize(mx_facts), 'dropped': {},
+                  'locations_filled': fill_locations(result['clean'], discover_locations(store))}
+        pool = []
+        for r in result['clean']:
+            if not ((r.get('email') or not require_email) and history.is_fresh(r)):
+                continue
+            if r.get('email_risk') == 'high':
+                safety['dropped'][r['email_risk_reason']] = safety['dropped'].get(r['email_risk_reason'], 0) + 1
+                if require_email:
+                    continue
+                r['rejected_email'], r['email'], r['email_risk'] = r['email'], '', ''
+            pool.append(r)
+        report['steps']['email-safety'] = safety
         source_quality = history.source_quality()
         pool.sort(key=lambda r: _selection_key(r, source_quality))
         picked, seen = [], set()
@@ -578,6 +880,8 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
         report['delivered'] = len(picked)
         report['shortfall'] = max(0, target - len(picked))
         report['delivered_by_source'] = _count_by(picked, 'email_source')
+        report['delivered_by_risk'] = _count_by(picked, 'email_risk')
+        report['delivered_by_company_type'] = _count_by(picked, 'company_type')
         if report['shortfall']:
             report['advice'] = shortfall_advice(report['shortfall'], history)
         out_dir = Path(output_root or work / 'daily') / (day if execute else day + '-preview')
@@ -629,18 +933,27 @@ def _funded(store, config, provider, pool):
     return next((b['remaining_units'] // 1_000_000 for b in store.budgets() if b['provider'] == provider and b['pool'] == pool), 0)
 
 
-SEARCH_POOLS = {'serper': 'queries', 'tavily': 'credits', 'exa': 'queries', 'brave': 'queries'}
+SEARCH_POOLS = {'serper': 'queries', 'tavily': 'credits', 'exa': 'queries', 'brave': 'queries',
+                'zenserp': 'searches', 'linkup': 'queries', 'youcom': 'queries'}
 
 
-def _resolve_firms(history, store, config, execute, env, transport, caps, provider='serper'):
+def _resolve_firms(history, store, config, execute, env, transport, caps, provider='serper', *, fetcher=None,
+                   dns=None, work=None, day=None):
     """Find websites for public-record firms.
 
     1. Hunter Discover by firm name (free, 50 names per call) - exact name/state matches only
-    2. Search engines for the rest, cheapest first: Serper batches of 100, then Tavily, then Exa
+    2. Domain guessing from the firm name (free): DNS check, then the homepage must show the firm's
+       name in its title/heading/© line and its city/county/state. Each firm is guessed once.
+    3. Search engines for the rest, cheapest first: Serper batches of 100, then Tavily, then Exa
     Saved results are always reused before anything is spent.
+
+    ``fetcher`` is a SafeFetcher-compatible object; without one a workspace SafeFetcher is opened
+    (cache work/web-cache.sqlite3) only when there are firms to guess. ``dns`` is getaddrinfo-
+    compatible; by default the SafeFetcher's resolver (or socket.getaddrinfo for an own fetcher),
+    and no DNS precheck for an injected fetcher without one.
     """
-    from .resolve import (exa_resolution_jobs, resolution_batch_jobs, resolution_jobs, resolve_from_hunter,
-                          resolve_from_store, searched_queries)
+    from .resolve import (exa_resolution_jobs, resolution_batch_jobs, resolution_jobs, resolve_by_guess,
+                          resolve_from_hunter, resolve_from_store, searched_queries)
     from .discovery import hunter_name_resolution_jobs
     step = {'pending_checked': 0, 'resolved': 0, 'no_website': 0, 'by_method': {}}
 
@@ -662,7 +975,7 @@ def _resolve_firms(history, store, config, execute, env, transport, caps, provid
                 left.append({k: v for k, v in row.items() if k not in ('resolution',)} | {'company_website': ''})
         return left
 
-    firms = history.pending_firms(max(caps['resolve-hunter'], caps['resolve']))
+    firms = history.pending_firms(max(caps['resolve-hunter'], caps['resolve'], caps.get('resolve-guess', 0)))
     step['pending_checked'] = len(firms)
     if not firms:
         return step
@@ -672,7 +985,33 @@ def _resolve_firms(history, store, config, execute, env, transport, caps, provid
         jobs = hunter_name_resolution_jobs(names)
         step['hunter'] = _run_jobs(store, config, jobs, execute, env, transport, len(jobs))
     left = apply(resolve_from_hunter(store, firms), 'hunter_name', final=False)
-    # 2. Search engines for what is left, within the daily cap
+    # 2. Guess the domain from the firm name (free; each firm once)
+    guessable = [f for f in left if not f.get('guess_tried')][:caps.get('resolve-guess', 0)]
+    step['guess_tried'], step['guess_matched'] = 0, 0
+    if guessable and not execute:
+        step['guess_planned'] = len(guessable)
+    elif guessable:
+        active, own = fetcher, False
+        if active is None:
+            from .webfetch import SafeFetcher
+            active, own = SafeFetcher(cache_path=(Path(work) / 'web-cache.sqlite3') if work else None, per_host_delay=1.0), True
+        resolver = dns if dns is not None else getattr(active, '_resolver', None)
+        try:
+            guessed = resolve_by_guess(guessable, active, dns=resolver)
+        finally:
+            if own:
+                active.close()
+        step['guess_tried'] = len(guessable)
+        stamp = day or today_iso()
+        resolved_rows = [r for r in guessed if (r.get('resolution') or {}).get('status') == 'resolved']
+        for row in guessed:
+            if (row.get('resolution') or {}).get('status') != 'resolved':
+                history.note_firm(row, guess_tried=stamp)
+        step['guess_matched'] = len(resolved_rows)
+        apply(resolved_rows, 'guess', final=False)
+        done = {_firm_identity(r) for r in resolved_rows}
+        left = [f for f in left if _firm_identity(f) not in done]
+    # 3. Search engines for what is left, within the daily cap
     left = left[:caps['resolve']]
     order = [provider] + [p for p in SEARCH_FALLBACK if p != provider]
     for engine in order:
@@ -693,6 +1032,11 @@ def _resolve_firms(history, store, config, execute, env, transport, caps, provid
         if execute:
             left = apply(resolve_from_store(store, left, engine), engine, final=True)
     return step
+
+
+def _firm_identity(company):
+    from .resolve import company_key
+    return company_key(company)
 
 
 def _render_js_sites(history, store, config, execute, env, transport, cap):
@@ -768,7 +1112,16 @@ def render_report(report):
     by = report.get('delivered_by_source') or {}
     if by:
         lines.append('Email sources: ' + ', '.join(f'{k} {v}' for k, v in sorted(by.items(), key=lambda kv: -kv[1])))
+    risk = report.get('delivered_by_risk') or {}
+    if risk:
+        lines.append('Email risk: ' + ', '.join(f'{k or "none"} {risk[k]}' for k in ('low', 'medium', '') if risk.get(k)))
+    types = report.get('delivered_by_company_type') or {}
+    if types:
+        lines.append('Company types: ' + ', '.join(f'{k} {v}' for k, v in sorted(types.items(), key=lambda kv: -kv[1])))
     steps = report.get('steps', {})
+    safety = steps.get('email-safety') or {}
+    if safety.get('dropped'):
+        lines.append('Dropped unsafe emails: ' + ', '.join(f'{k} {v}' for k, v in sorted(safety['dropped'].items(), key=lambda kv: -kv[1])))
     crawl = steps.get('crawl', {})
     if crawl.get('sites_ok') is not None:
         lines.append(f"Crawled {crawl.get('domains_planned', 0)} sites, {crawl.get('sites_ok', 0)} reachable, {crawl.get('people_with_email', 0)} people with emails")
@@ -788,6 +1141,17 @@ def render_report(report):
         lines.append('Low free budgets: ' + ', '.join(low))
     for tip in report.get('advice') or []:
         lines.append('Next: ' + tip)
+    files = report.get('files') or {}
+    if files.get('leads'):
+        from .audit import latest_score
+        folder = Path(files['leads']).parent
+        score = latest_score(folder)
+        if score:
+            lines.append(score + ' (see audit.md)')
+        lines += ['', 'Delivery', f'- Folder: {folder}', f"- leads.csv: {report.get('delivered', 0)} leads (6 core columns plus City, State, Company Type, Source, Confidence)",
+                  '- leads-details.csv: same leads plus tier, score, email source, evidence link and email risk', '- report.json: full run details']
+        if score:
+            lines.append('- audit.md: spot-check of a random sample against its evidence')
     return '\n'.join(lines) + '\n'
 
 
@@ -852,16 +1216,22 @@ def attach_linkedin(records, prospects):
     return filled
 
 
+DETAIL_EXTRA_HEADERS = ['Tier', 'Score', 'Email Source', 'Source URL', 'Issues', 'Email Risk', 'Email Risk Reason',
+                        'MX Provider', 'Email Verification']
+
+
 def write_daily(records, out_dir):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(out_dir, 0o700)
     leads = out_dir / 'leads.csv'
     details = out_dir / 'leads-details.csv'
-    quality._write_csv(str(leads), quality.HEADERS, [quality.output_row(r) for r in records])
-    quality._write_csv(str(details), quality.HEADERS + ['Tier', 'Score', 'Email Source', 'Source URL', 'Issues'],
-                       [quality.output_row(r) + [r['tier'], r['score'], r.get('email_source', ''),
-                                                 r.get('email_evidence_url') or r.get('source_url', ''), '; '.join(r['issues'])]
+    quality._write_csv(str(leads), quality.DAILY_HEADERS, [quality.daily_row(r) for r in records])
+    quality._write_csv(str(details), quality.DAILY_HEADERS + DETAIL_EXTRA_HEADERS,
+                       [quality.daily_row(r) + [r['tier'], r['score'], r.get('email_source', ''),
+                                                r.get('email_evidence_url') or r.get('source_url', ''), '; '.join(r['issues']),
+                                                r.get('email_risk') or quality.email_risk(r)[0], r.get('email_risk_reason', ''),
+                                                r.get('mx_provider', ''), r.get('email_verification', '')]
                         for r in records])
     return {'leads': str(leads), 'details': str(details)}
 

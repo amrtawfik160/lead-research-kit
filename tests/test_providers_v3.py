@@ -439,8 +439,8 @@ class RunnerTests(unittest.TestCase):
         quotes = route_run(self.store, self.config, [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': EMAIL}}], env=ENV)
         options = [q['provider'] for q in quotes['results'][0]['options']]
         verifiers = [p for p in options if 'verify' in get_provider(p).operations]
-        self.assertEqual(verifiers[-7:], ['reoon', 'abstract', 'emailable', 'kickbox', 'bouncer', 'myemailverifier',
-                                          'millionverifier'])
+        self.assertEqual(verifiers[-10:], ['reoon', 'quickemailverification', 'abstract', 'emailable', 'kickbox', 'bouncer',
+                                          'myemailverifier', 'emailvalidation', 'emaillistverify', 'millionverifier'])
         self.assertLess(options.index('zerobounce'), options.index('reoon'))
         self.store.confirm_budget('millionverifier', 'credits', '1', 'synthetic free')
         plan = route_run(self.store, self.config, [{'provider': 'auto', 'operation': 'verify', 'payload': {'email': EMAIL}}], env=ENV)
