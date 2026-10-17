@@ -107,6 +107,9 @@ def parser():
     dy.add_argument('--max-domains',type=int,help='Domains to crawl today (default: target / 0.3 x 1.2)');dy.add_argument('--workers',type=int,default=24)
     dy.add_argument('--allow-missing-email',action='store_true',help='Also deliver leads without a work email');dy.add_argument('--min-tier',choices=['A','B'],default='B')
     dy.add_argument('--cap',action='append',default=[],help='Per-source daily cap, e.g. hunter-domains=50 (repeatable)')
+    da=s.add_parser('daily-audit',help='Spot-check a sample of a day\'s delivered leads against their evidence (also: `daily audit`)')
+    da.add_argument('--date',help='YYYY-MM-DD (default: today)');da.add_argument('--sample',type=int,default=20);da.add_argument('--seed',type=int)
+    da.add_argument('--output-root',help='Folder with dated outputs (default: <workspace>/daily)')
     rc=s.add_parser('records',help='Public license and SEC records: decision makers at real-estate firms (free)')
     rs=rc.add_subparsers(dest='records_action',required=True)
     rs.add_parser('list',help='Available sources and their reuse terms')
@@ -120,6 +123,9 @@ def parser():
     hf=hs.add_parser('feedback',help='Import outreach results (Outcome column: replied, meeting, bounced, unsubscribed, ...); bounces/unsubscribes get blocked')
     hf.add_argument('files',nargs='+')
     hs.add_parser('sources',help='Bounce and reply rates by email source, from imported feedback')
+    hx=hs.add_parser('import-results',help='Import an outreach tool export (Instantly, Smartlead, Lemlist, Apollo, HubSpot or generic email+status); bounces and unsubscribes get blocked, safe to re-import')
+    hx.add_argument('files',nargs='+');hx.add_argument('--tool',choices=['auto','instantly','smartlead','lemlist','apollo','hubspot','generic'],default='auto')
+    hp=hs.add_parser('patterns',help='Domains whose guessed-email pattern hard-bounced (no more guesses there)');hp.add_argument('--clear',metavar='DOMAIN',help='Trust this domain\'s pattern again')
     rf=hs.add_parser('refill',help='Recurring FREE allowances (e.g. Reoon 20/day) the daily run resets automatically')
     rfs=rf.add_subparsers(dest='refill_action',required=True)
     ra=rfs.add_parser('add');ra.add_argument('provider',choices=list(PROVIDERS));ra.add_argument('--pool',required=True);ra.add_argument('--amount',required=True);ra.add_argument('--period',choices=['daily','monthly'],required=True);ra.add_argument('--source',required=True,help='Where this free allowance is documented')
@@ -241,8 +247,16 @@ def _demo(store,output):
     return {'synthetic_demo':True,'live_requests':0,'real_addresses_checked':0,'export':export_workspace(store,output),'audit_ok':store.verify_audit(),'report':report}
 
 
+def _daily_audit_alias(argv):
+    """`daily audit ...` -> `daily-audit ...` (daily itself takes only options)."""
+    argv=list(sys.argv[1:] if argv is None else argv)
+    for i,token in enumerate(argv[:-1]):
+        if token=='daily' and argv[i+1]=='audit':return argv[:i]+['daily-audit']+argv[i+2:]
+    return argv
+
+
 def main(argv=None):
-    args=parser().parse_args(argv)
+    args=parser().parse_args(_daily_audit_alias(argv))
     if args.env_file:load_env_file(args.env_file)
     work=Path(args.workspace).expanduser().resolve()
     if args.command=='records':
@@ -320,6 +334,19 @@ def main(argv=None):
             result=run_daily(work,store,config,target=args.target,execute=args.execute,day=args.date,sources=sources+('build',),output_root=args.output_root,
                              max_domains=args.max_domains,workers=args.workers,require_email=not args.allow_missing_email,min_tier=args.min_tier,caps=caps,record_sources=records,
                              record_source_names=names,search_provider=args.search_provider)
+        elif args.command=='daily-audit':
+            from .audit import run_audit
+            from .daily import today_iso, render_report
+            from .webfetch import SafeFetcher
+            if not 1<=args.sample<=500:raise PolicyError('sample_out_of_range')
+            day_dir=Path(args.output_root or work/'daily')/(args.date or today_iso())
+            with SafeFetcher(cache_path=str(work/'web-cache.sqlite3'),cache_max_age=86400,per_host_delay=1.0) as fetcher:
+                report=run_audit(day_dir,fetcher,store=store,sample=args.sample,seed=args.seed)
+            daily_json=day_dir/'report.json'
+            if daily_json.exists():
+                (day_dir/'report.md').write_text(render_report(json.loads(daily_json.read_text(encoding='utf-8'))),encoding='utf-8');os.chmod(day_dir/'report.md',0o600)
+            result={k:report[k] for k in ('date','rows_in_file','sampled','counts','score','top_reasons')}
+            result['files']={'json':str(day_dir/'audit.json'),'markdown':str(day_dir/'audit.md')}
         elif args.command=='history':
             from .daily import History, import_history
             if args.history_action=='import':result=import_history(work,args.files,args.batch)
@@ -331,6 +358,12 @@ def main(argv=None):
                     if args.history_action=='suppress':result={'blocked_keys':h.suppress([r for f in args.files for r in read_rows(f)],args.reason),**h.stats()}
                     elif args.history_action=='feedback':result={'outcomes':h.record_outcomes([r for f in args.files for r in read_rows(f)]),'by_source':h.source_quality()}
                     elif args.history_action=='sources':result=h.source_quality()
+                    elif args.history_action=='import-results':
+                        from .results import import_results
+                        result={'files':len(args.files),'results':[import_results(h,read_rows(f),args.tool) for f in args.files],'by_source':h.source_quality()}
+                    elif args.history_action=='patterns':
+                        if args.clear:h.clear_pattern(args.clear)
+                        result={'distrusted_patterns':h.distrusted_patterns()}
                     elif args.history_action=='refill':
                         if args.refill_action=='add':
                             allowed={p for charges in config['providers'][args.provider]['charges'].values() for p in charges}
@@ -357,7 +390,7 @@ def main(argv=None):
             written=write_build(build(imports=imports,prospects=prospects,site_results=sites,companies=companies,store=store,target=_target(args)),args.output)
             result={'output':written['paths'],'summary':written['summary']}
         else:result={'contacts':len(store.contacts()),'held':sum(bool(r.get('held')) for r in store.contacts()),'budgets':store.budgets(),'providers':{p:store.provider_state(p) for p in config['providers']},'unresolved_attempts':[{'id':a['id'],'provider':a['provider'],'state':a['state']} for a in store.attempts() if a['state'] in ('reserved','sent','pending','uncertain')],'audit_ok':store.verify_audit()}
-        emit(result,getattr(args,'output',None) if args.command not in ('demo','build','daily','history') else None)
+        emit(result,getattr(args,'output',None) if args.command not in ('demo','build','daily','daily-audit','history') else None)
         if isinstance(result,dict) and result.get('stopped'):return 2
         return 0
     finally:store.close()

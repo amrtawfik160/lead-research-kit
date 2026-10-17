@@ -70,11 +70,13 @@ METROS = (
 )
 
 HEADCOUNTS = ('1-10', '11-50', '51-200')
-OUTCOMES = {'replied', 'interested', 'meeting', 'not_interested', 'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer'}
+OUTCOMES = {'replied', 'interested', 'meeting', 'not_interested', 'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer',
+            'complaint', 'engaged', 'delivered'}
 OUTCOME_ALIASES = {'reply': 'replied', 'positive': 'interested', 'booked': 'meeting', 'bounce': 'bounced', 'hard_bounce': 'bounced',
                    'invalid': 'bounced', 'unsubscribe': 'unsubscribed', 'opt_out': 'unsubscribed', 'optout': 'unsubscribed',
-                   'dnc': 'do_not_contact', 'negative': 'not_interested', 'wrong_contact': 'wrong_person'}
-AUTO_SUPPRESS = {'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer'}
+                   'dnc': 'do_not_contact', 'negative': 'not_interested', 'wrong_contact': 'wrong_person',
+                   'spam': 'complaint', 'opened': 'engaged', 'clicked': 'engaged', 'sent': 'delivered'}
+AUTO_SUPPRESS = {'bounced', 'unsubscribed', 'do_not_contact', 'wrong_person', 'customer', 'complaint'}
 BACKUPS_KEPT = 14
 
 
@@ -103,6 +105,8 @@ class History:
           CREATE TABLE IF NOT EXISTS suppressed(key TEXT PRIMARY KEY, reason TEXT NOT NULL, added_at REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS outcomes(key TEXT, outcome TEXT NOT NULL, source TEXT, email_source TEXT, batch TEXT, added_at REAL NOT NULL, PRIMARY KEY(key, outcome));
           CREATE TABLE IF NOT EXISTS refills(provider TEXT, pool TEXT, amount TEXT NOT NULL, period TEXT NOT NULL, source TEXT NOT NULL, last_applied TEXT, PRIMARY KEY(provider, pool));
+          CREATE TABLE IF NOT EXISTS result_rows(hash TEXT PRIMARY KEY, tool TEXT, email TEXT, outcome TEXT, added_at REAL NOT NULL);
+          CREATE TABLE IF NOT EXISTS pattern_flags(domain TEXT PRIMARY KEY, reason TEXT NOT NULL, bounces INTEGER NOT NULL DEFAULT 1, added_at REAL NOT NULL);
         ''')
         cols = {r[1] for r in self.db.execute('PRAGMA table_info(delivered)')}
         for col in ('email_source', 'source'):
@@ -188,18 +192,42 @@ class History:
         delivered = {}
         for r in self.db.execute("SELECT COALESCE(email_source,'unknown') AS src, COUNT(DISTINCT batch || full_name || IFNULL(company_website,'')) AS n FROM delivered GROUP BY src"):
             delivered[r['src']] = r['n']
-        stats = {src: {'delivered': n, 'bounced': 0, 'replied': 0} for src, n in delivered.items()}
+        stats = {src: {'delivered': n, 'bounced': 0, 'replied': 0, 'engaged': 0, 'unsubscribed': 0} for src, n in delivered.items()}
         for r in self.db.execute("SELECT COALESCE(email_source,'unknown') AS src, outcome, COUNT(DISTINCT batch || key) AS n FROM outcomes WHERE key LIKE 'em:%' GROUP BY src, outcome"):
-            entry = stats.setdefault(r['src'], {'delivered': 0, 'bounced': 0, 'replied': 0})
+            entry = stats.setdefault(r['src'], {'delivered': 0, 'bounced': 0, 'replied': 0, 'engaged': 0, 'unsubscribed': 0})
             if r['outcome'] == 'bounced':
                 entry['bounced'] += r['n']
             elif r['outcome'] in ('replied', 'meeting', 'interested'):
                 entry['replied'] += r['n']
+            elif r['outcome'] == 'engaged':
+                entry['engaged'] += r['n']
+            elif r['outcome'] in ('unsubscribed', 'complaint'):
+                entry['unsubscribed'] += r['n']
         for entry in stats.values():
             base = max(entry['delivered'], 1)
             entry['bounce_rate'] = round(entry['bounced'] / base, 3)
             entry['reply_rate'] = round(entry['replied'] / base, 3)
         return stats
+
+    # Email patterns that produced hard bounces ------------------------------
+    def distrust_pattern(self, domain, reason, clock=time.time):
+        """Stop guessing emails at ``domain`` (its inferred pattern bounced). True when newly flagged."""
+        domain = quality.normalize_host(domain)
+        if not domain:
+            return False
+        with self.db:
+            if self.db.execute('UPDATE pattern_flags SET bounces=bounces+1 WHERE domain=?', (domain,)).rowcount:
+                return False
+            self.db.execute('INSERT INTO pattern_flags VALUES(?,?,1,?)', (domain, reason, clock()))
+        return True
+
+    def distrusted_patterns(self):
+        return {r['domain']: {'reason': r['reason'], 'bounces': r['bounces'], 'added_at': r['added_at']}
+                for r in self.db.execute('SELECT * FROM pattern_flags')}
+
+    def clear_pattern(self, domain):
+        with self.db:
+            return self.db.execute('DELETE FROM pattern_flags WHERE domain=?', (quality.normalize_host(domain),)).rowcount
 
     # Recurring free allowances (operator-attested) -------------------------
     def add_refill(self, provider, pool, amount, period, source):
@@ -298,7 +326,15 @@ class History:
 
     def recent_sites(self, days=100, clock=time.time):
         cutoff = clock() - days * 86400
-        return [json.loads(r['data']) for r in self.db.execute('SELECT data FROM sites WHERE crawled_at >= ?', (cutoff,))]
+        flagged = {r['domain'] for r in self.db.execute('SELECT domain FROM pattern_flags')}
+        sites = []
+        for r in self.db.execute('SELECT data FROM sites WHERE crawled_at >= ?', (cutoff,)):
+            site = json.loads(r['data'])
+            if site.get('domain') in flagged and site.get('pattern'):
+                # A guess from this pattern hard-bounced: no more guesses here until cleared
+                site['pattern'] = {**site['pattern'], 'confidence': 0, 'distrusted': True}
+            sites.append(site)
+        return sites
 
     # Prospects from APIs ------------------------------------------------
     def add_prospects(self, rows, clock=time.time):
@@ -390,7 +426,8 @@ class History:
                 'sites_stored': q('SELECT COUNT(*) FROM sites'), 'prospects_stored': q('SELECT COUNT(*) FROM prospects'),
                 'suppressed': q('SELECT COUNT(*) FROM suppressed'), 'outcomes': q('SELECT COUNT(*) FROM outcomes'),
                 'firms_pending_website': q("SELECT COUNT(*) FROM firms WHERE status='pending'"),
-                'firms_resolved': q("SELECT COUNT(*) FROM firms WHERE status='resolved'")}
+                'firms_resolved': q("SELECT COUNT(*) FROM firms WHERE status='resolved'"),
+                'patterns_distrusted': q('SELECT COUNT(*) FROM pattern_flags'), 'results_rows_imported': q('SELECT COUNT(*) FROM result_rows')}
 
 
 def _run_jobs(store, config, jobs, execute, env, transport, cap):
@@ -962,6 +999,17 @@ def render_report(report):
         lines.append('Low free budgets: ' + ', '.join(low))
     for tip in report.get('advice') or []:
         lines.append('Next: ' + tip)
+    files = report.get('files') or {}
+    if files.get('leads'):
+        from .audit import latest_score
+        folder = Path(files['leads']).parent
+        score = latest_score(folder)
+        if score:
+            lines.append(score + ' (see audit.md)')
+        lines += ['', 'Delivery', f'- Folder: {folder}', f"- leads.csv: {report.get('delivered', 0)} leads in the 6-column format",
+                  '- leads-details.csv: same leads plus tier, score, email source and evidence link', '- report.json: full run details']
+        if score:
+            lines.append('- audit.md: spot-check of a random sample against its evidence')
     return '\n'.join(lines) + '\n'
 
 
