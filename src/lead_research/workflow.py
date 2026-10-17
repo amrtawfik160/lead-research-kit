@@ -33,9 +33,11 @@ def route_run(store, config, jobs, *, execute=False, limit=10, env=None, transpo
                 for p,v in selected['charges'].items():available[(selected['provider'],p)]-=parse_units(v,positive=True)
                 calls+=1
             results.append(selected);continue
-        before=len(store.attempts())
+        # Count only this provider's attempts: parallel verify lanes write other providers' rows meanwhile
+        mine=lambda:sum(1 for a in store.attempts() if a['provider']==selected['provider'])
+        before=mine()
         report=engine.run([selected],execute=True,limit=1)
-        calls+=len(store.attempts())-before
+        calls+=mine()-before
         for item in report['results']:
             if item.get('attempt_id'):
                 store.capture_finder(store.get_attempt(item['attempt_id']))
