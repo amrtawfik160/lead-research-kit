@@ -61,15 +61,21 @@ Steps without an enabled, funded provider are skipped and reported, never forced
 lead-research --workspace WS history refill add reoon --pool credits --amount 20 --period daily --source "Reoon free plan"
 lead-research --workspace WS history suppress customers.csv --reason customer      # people or whole domains, forever
 lead-research --workspace WS history feedback outreach-results.csv                 # Outcome: replied, meeting, bounced, unsubscribed...
+lead-research --workspace WS history import-results instantly-export.csv          # Instantly, Smartlead, Lemlist, Apollo, HubSpot (auto-detected)
+lead-research --workspace WS history import-results events.csv --tool generic      # any file with email + status/event
+lead-research --workspace WS history patterns                                      # domains whose guessed-email pattern bounced
 lead-research --workspace WS history sources                                       # bounce / reply rate per email source
 lead-research --workspace WS --env-file WS/keys.env daily --target 500 --execute
+lead-research --workspace WS daily audit --sample 20                               # spot-check today's leads against their evidence
 ```
 
 - **Recurring free allowances** are operator-attested: each pool is reset to its documented free amount once per day or month, never added on top
 - **Feedback**: bounces, unsubscribes, wrong-person and do-not-contact rows are blocked automatically. Sources with a bounce rate above 5% are deprioritized
+- **Send results** (`history import-results`): reads outreach tool exports directly. Hard bounces block the email forever; unsubscribes, spam complaints and do-not-contact block the whole person; replies, meetings and opens count toward each email source's reply/engagement rate. When a guessed (`pattern_verified`) email hard-bounces, that domain's pattern is distrusted and no more guesses are made there until `history patterns --clear DOMAIN`. Soft bounces are ignored. Re-importing the same file changes nothing
+- **Spot-check** (`daily audit`): re-fetches the evidence page of a random sample (robots.txt respected, cache reused only when under a day old) and checks the name, published email, title, website and LinkedIn slug, plus a passing verifier result for guessed emails. Writes `audit.json` / `audit.md` with % confirmed, partial and failed, and the score is added to `report.md`
 - **Recrawl**: company sites are revisited every 90 days to catch new people; crawl data older than 100 days is not delivered
 - **Backups**: every executed run makes consistent copies of the ledger and history in `WS/backups/<date>/` (newest 14 kept)
-- **Morning summary**: `daily/<date>/report.md` (delivered vs target, sources, low budgets, next steps)
+- **Morning summary**: `daily/<date>/report.md` (delivered vs target, sources, low budgets, next steps, a Delivery section listing the files, and the spot-check score once `daily audit` has run)
 - **Keys**: `--env-file` reads a private 0600 `KEY=VALUE` file; existing environment variables win
 
 ### What it takes to reach 500 a day
