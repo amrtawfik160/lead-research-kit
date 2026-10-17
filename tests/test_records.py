@@ -549,7 +549,7 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(result['cursor'], '2026-10-15')
 
     def test_registry(self):
-        self.assertEqual(set(SOURCES), {'tx-trec', 'ny-dos', 'co-dora', 'sec-form-d', 'fl-dbpr-file'})
+        self.assertEqual(set(SOURCES), {'tx-trec', 'ny-dos', 'co-dora', 'ct-dls', 'sec-form-d', 'fl-dbpr-file'})
         for meta in SOURCES.values():
             self.assertTrue(meta['description'] and meta['terms_note'] and meta['decision_maker_rule'])
         self.assertNotIn('ca-dre', SOURCES)

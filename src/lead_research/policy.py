@@ -220,7 +220,8 @@ OSM_DEFAULT_TAGS = ('office=estate_agent',)
 SEARCH_PAGING_DEFAULTS = {'num': 10, 'page': 1, 'count': 20, 'offset': 0}
 # tavily 'count' is max_results (1..20, one credit regardless); serpapi 'page' maps to start=(page-1)*10.
 SEARCH_PAGING_BY_PROVIDER = {'serper': frozenset({'num', 'page'}), 'brave': frozenset({'count', 'offset'}), 'exa': frozenset(),
-                             'tavily': frozenset({'count'}), 'serpapi': frozenset({'page'}), 'firecrawl': frozenset()}
+                             'tavily': frozenset({'count'}), 'serpapi': frozenset({'page'}), 'firecrawl': frozenset(),
+                             'zenserp': frozenset(), 'linkup': frozenset(), 'youcom': frozenset()}
 # Providers whose search API takes a documented domain allowlist (Tavily include_domains,
 # Firecrawl includeDomains). Anyone else would silently ignore it, so it is rejected.
 SEARCH_DOMAIN_FILTER_PROVIDERS = frozenset({'tavily', 'firecrawl'})

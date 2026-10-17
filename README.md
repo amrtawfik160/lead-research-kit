@@ -32,7 +32,7 @@ lead-research --workspace /private/ws daily --target 500 --execute     # writes 
 One `daily --execute` run:
 
 1. **Polls** any saved pending finder/verifier jobs
-2. **Public records** (free): pulls new or updated decision makers from Texas TREC (designated brokers of every brokerage), New York DOS (principal and owner brokers), Colorado DORA (responsible brokers) and SEC Form D (executives of new real-estate offerings). Cursors make each day a delta
+2. **Public records** (free): pulls new or updated decision makers from Texas TREC (designated brokers of every brokerage), New York DOS (principal and owner brokers), Colorado DORA (responsible brokers), Connecticut DCP (active broker firms; public domain; the website and people come from resolution and the crawl) and SEC Form D (executives of new real-estate offerings). Cursors make each day a delta
 3. **Resolve**: finds the website of each public-record firm with one search query (Serper or Brave), skipping portals, directories and franchise parents
 4. **Discover** more companies when the backlog is short: Hunter Discover (free calls), Google Places (1,000 free requests a month), OpenStreetMap. Markets rotate so each day covers new states and metros
 5. **Crawl** the oldest uncrawled company sites in parallel for published names, titles, emails and email patterns
@@ -47,13 +47,13 @@ Steps without an enabled, funded provider are skipped and reported, never forced
 
 | Job | Providers (free allowance as of Oct 2026, check before relying on it) |
 |---|---|
-| Company discovery | Hunter Discover (free calls; rotate cities, states, niches, hiring), OpenStreetMap, public license records (TX, NY, CO, SEC Form D) |
-| Firm website lookup | Hunter Discover by firm name (free, 50 names per call), then Serper batches of 100 (2,500 one-time), Tavily (1,000/month), Exa ($10/month) |
-| People + emails | Your crawler (free), Firecrawl rendering for JavaScript-only team pages (~1,000 credits/month), Deepline promo credits (LeadMagic finder ~0.34 credits per found email; set `DEEPLINE_FIND_ROUTE=waterfall` for the multi-provider play) |
-| Email verification | Reoon (20/day), Abstract (100/month), Bouncer (100 one-time), MyEmailVerifier (100), Verifalia, Clearout, MillionVerifier, Emailable, Kickbox |
+| Company discovery | Hunter Discover (free calls; rotate cities, states, niches, hiring), OpenStreetMap, public license records (TX, NY, CO, CT, SEC Form D) |
+| Firm website lookup | Hunter Discover by firm name (free, 50 names per call), then Serper batches of 100 (2,500 one-time), Tavily (1,000/month), Exa ($10/month), Zenserp (50/month), Linkup (~EUR 5/month credit, unverified), You.com (signup credit, ~$0.005/search) |
+| People + emails | Your crawler (free), Firecrawl rendering for JavaScript-only team pages (~1,000 credits/month), Deepline promo credits (LeadMagic finder ~0.34 credits per found email; set `DEEPLINE_FIND_ROUTE=waterfall` for the multi-provider play), Enrow (50 one-time, billed only when found), Lusha (paid plans only: the Free plan has no API) |
+| Email verification | Reoon (20/day), QuickEmailVerification (100/day), Abstract (100/month), emailvalidation.io (100/month, 10/min), Bouncer (100 one-time), MyEmailVerifier (100), EmailListVerify (100 one-time), Verifalia, Clearout, MillionVerifier, Emailable, Kickbox |
 | LinkedIn URLs | Serper/Tavily search, People Data Labs (100/month, identity fields only on free) |
 
-`verify` uses the first enabled, funded verifier in configuration order, so free pools are used one after another as each runs out.
+`verify` uses the first enabled, funded verifier in configuration order, so free pools are used one after another as each runs out. Daily and monthly allowances (Reoon 20/day, QuickEmailVerification 100/day, emailvalidation.io 100/month, Zenserp 50/month) refill only if you add them with `history refill add`.
 
 ### Long-term operations
 

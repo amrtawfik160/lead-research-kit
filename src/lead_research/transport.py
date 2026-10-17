@@ -19,6 +19,9 @@ OFFICIAL_ORIGINS = frozenset({
     'https://api.emailable.com', 'https://api.kickbox.com', 'https://api.usebouncer.com',
     'https://api.myemailverifier.com', 'https://api.peopledatalabs.com', 'https://serpapi.com',
     'https://code.deepline.com',
+    'https://api.quickemailverification.com', 'https://api.emailvalidation.io', 'https://api.emaillistverify.com',
+    'https://api.enrow.io', 'https://api.lusha.com', 'https://app.zenserp.com', 'https://api.linkup.so',
+    'https://ydc-index.io',
 })
 # Hard ceiling for any per-request response cap (Overpass place lists can be large).
 MAX_RESPONSE_CEILING = 5 * 1024 * 1024

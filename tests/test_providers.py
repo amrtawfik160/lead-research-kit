@@ -6,7 +6,10 @@ from urllib.parse import parse_qs, urlsplit
 from lead_research.models import PolicyError, ProviderError, Response
 from lead_research.providers import PROVIDERS, get_provider
 
-ENV = {'HUNTER_API_KEY': 'fixture-secret', 'VERIFALIA_TOKEN': 'fixture-secret',
+ENV = {'QUICKEMAILVERIFICATION_API_KEY': 'fixture-secret', 'EMAILVALIDATION_API_KEY': 'fixture-secret',
+       'EMAILLISTVERIFY_API_KEY': 'fixture-secret', 'ENROW_API_KEY': 'fixture-secret', 'LUSHA_API_KEY': 'fixture-secret',
+       'ZENSERP_API_KEY': 'fixture-secret', 'LINKUP_API_KEY': 'fixture-secret', 'YDC_API_KEY': 'fixture-secret',
+       'HUNTER_API_KEY': 'fixture-secret', 'VERIFALIA_TOKEN': 'fixture-secret',
        'CLEAROUT_API_KEY': 'fixture-secret', 'ZEROBOUNCE_API_KEY': 'fixture-secret',
        'SERPER_API_KEY': 'fixture-secret', 'BRAVE_API_KEY': 'fixture-secret',
        'APOLLO_API_KEY': 'fixture-secret', 'PROSPEO_API_KEY': 'fixture-secret', 'GOOGLE_MAPS_API_KEY': 'fixture-secret',
@@ -42,7 +45,8 @@ class ProviderTests(unittest.TestCase):
                                           'serper', 'brave', 'overpass', 'apollo', 'prospeo', 'google_places', 'exa',
                                           'tomba', 'icypeas', 'reoon', 'millionverifier', 'abstract', 'emailable',
                                           'kickbox', 'bouncer', 'myemailverifier', 'tavily', 'firecrawl', 'pdl', 'serpapi',
-                                          'deepline'})
+                                          'deepline', 'quickemailverification', 'emailvalidation', 'emaillistverify',
+                                          'enrow', 'lusha', 'zenserp', 'linkup', 'youcom'})
         for p in PROVIDERS.values():
             for operation in p.operations:
                 payload = PEOPLE_SEARCH[p.id] if operation == 'people_search' else OPERATION_PAYLOADS.get(operation, PAYLOAD)

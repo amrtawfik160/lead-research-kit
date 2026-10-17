@@ -46,7 +46,7 @@ except Exception:  # noqa: BLE001
 
 __all__ = ['ALLOWED_ORIGINS', 'SOURCES', 'RecordsError', 'RecordsGetter', 'socrata_fetch', 'fetch_source',
            'load_local_file', 'person_name', 'company_name', 'parse_tx_rows', 'parse_ny_rows', 'parse_co_rows',
-           'parse_sec_index', 'parse_form_d', 'parse_fl_rows', 'sec_filing_urls', 'dedupe']
+           'parse_sec_index', 'parse_form_d', 'parse_fl_rows', 'parse_ct_rows', 'sec_filing_urls', 'dedupe']
 
 ALLOWED_ORIGINS = frozenset({'https://data.texas.gov', 'https://data.ny.gov', 'https://data.colorado.gov',
                              'https://data.ct.gov', 'https://www.sec.gov'})
@@ -60,7 +60,7 @@ DEFAULT_MAX_FILINGS = 400
 TX_URL = 'https://data.texas.gov/resource/s7ft-44qi.json'
 NY_URL = 'https://data.ny.gov/resource/yg7h-zjbf.json'
 CO_URL = 'https://data.colorado.gov/resource/4zse-6bnw.json'
-CT_URL = 'https://data.ct.gov/resource/6tja-6vdt.json'
+CT_URL = 'https://data.ct.gov/resource/fwpc-pgqj.json'
 SEC_INDEX = 'https://www.sec.gov/Archives/edgar/daily-index/{y}/QTR{q}/form.{ymd}.idx'
 FL_URL = 'https://www2.myfloridalicense.com/real-estate-commission/public-records/'
 
@@ -118,6 +118,17 @@ SOURCES = {
                                "relationshipClarification when it names a decision-maker role) or "
                                "'Promoter' whose clarification names a decision-maker role.",
         'delta': 'since -> daily index files since..today (default yesterday..today, max 5 days)',
+    },
+    'ct-dls': {
+        'description': 'Connecticut DCP real estate broker licenses (data.ct.gov eLicensing, updated daily)',
+        'url': 'https://data.ct.gov/d/fwpc-pgqj',
+        'terms_note': 'Dataset license: Public Domain (data.ct.gov metadata, checked 2026-10). Licensing data, '
+                      'not consent: email outreach must follow CAN-SPAM.',
+        'decision_maker_rule': "Active credentialtype 'REB' business rows (LLC / corporation / partnership / "
+                               "business) become firms needing a website; no person is named (the designated "
+                               "broker rows are not linked to their firm), so decision-makers come from the "
+                               "crawl. Individual REB rows are skipped: their DBA is usually a name variant.",
+        'delta': 'since -> issuedate >= since (new-broker feed); without since, every active firm',
     },
     'fl-dbpr-file': {
         'description': 'Florida DBPR real estate licensee extract CSV downloaded by the user',
@@ -604,6 +615,35 @@ def parse_ny_rows(rows, today=None):
     return dedupe(companies, ('organization', 'state')), dedupe(prospects, ('full_name', 'company'))
 
 
+
+CT_ACTIVE = ('ACTIVE', 'ACTIVE IN RENEWAL')
+CT_BUSINESS_TYPES = ('LIMITED LIABILITY COMPANY', 'CORPORATION', 'BUSINESS', 'PARTNERSHIP',
+                     'LIMITED LIABILITY PARTNERSHIP', 'LIMITED PARTNERSHIP')
+
+
+def parse_ct_rows(rows, today=None):
+    """CT eLicensing REB rows -> (companies, prospects). Firms only; prospects stay empty."""
+    today = today or date.today()
+    companies = []
+    for row in rows:
+        if _clean(row.get('credentialtype')).upper() != 'REB' or _clean(row.get('active')) != '1':
+            continue
+        if _clean(row.get('status')).upper() not in CT_ACTIVE or _clean(row.get('type')).upper() not in CT_BUSINESS_TYPES:
+            continue
+        expires = _clean(row.get('expirationdate'))[:10]
+        if expires and expires < today.isoformat():
+            continue
+        raw = _clean(row.get('businessname')) or _clean(row.get('name'))
+        if not raw or raw.upper().startswith('SEE '):
+            continue
+        firm = company_name(raw)
+        if not firm:
+            continue
+        companies.append(_company('ct-dls', firm, '', city=_clean(row.get('city')), state=_state(row.get('state')) or 'CT',
+                                  license_number=_clean(row.get('fullcredentialcode') or row.get('credentialnumber'), 40)))
+    return dedupe(companies, ('organization', 'state')), []
+
+
 def _co_number(row):
     text = _clean(row.get('licensenumber'), 20)
     return int(text) if text.isdigit() else None
@@ -952,6 +992,14 @@ def fetch_source(name, *, since=None, max_rows=DEFAULT_MAX_ROWS, env=None, gette
                   'licensetype,licensefirstissuedate,licenseexpirationdate,licensestatus')
         rows = list(socrata_fetch(CO_URL, where, select, 'licensenumber', max_rows=max_rows, getter=getter))
         companies, prospects = parse_co_rows(rows, today)
+    elif name == 'ct-dls':
+        where = ("credentialtype='REB' AND active='1' AND status in ('ACTIVE','ACTIVE IN RENEWAL') "
+                 "AND type!='INDIVIDUAL'")
+        if start:
+            where += ' AND issuedate >= ' + _quote(start.isoformat() + 'T00:00:00')
+        select = 'name,type,businessname,dba,fullcredentialcode,credentialnumber,credentialtype,status,active,issuedate,expirationdate,city,state,zip'
+        rows = list(socrata_fetch(CT_URL, where, select, 'issuedate DESC, credentialnumber', max_rows=max_rows, getter=getter))
+        companies, prospects = parse_ct_rows(rows, today)
     else:  # sec-form-d
         getter.headers_for('https://www.sec.gov')  # refuse early without SEC_USER_AGENT
         first = start or (today - timedelta(days=1))

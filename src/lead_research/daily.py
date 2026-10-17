@@ -30,7 +30,7 @@ from .pipeline import _name_key, build
 
 DEFAULT_SOURCES = ('records', 'resolve', 'hunter-discover', 'google-places', 'osm', 'crawl', 'render-js', 'find-emails', 'verify', 'build')
 OPTIONAL_SOURCES = ('hunter-domains', 'apollo', 'xray-linkedin', 'pdl')
-DEFAULT_RECORD_SOURCES = ('tx-trec', 'ny-dos', 'co-dora', 'sec-form-d')
+DEFAULT_RECORD_SOURCES = ('tx-trec', 'ny-dos', 'co-dora', 'ct-dls', 'sec-form-d')
 DEFAULT_CAPS = {'records': 3000, 'resolve': 600, 'resolve-hunter': 1500, 'hunter-discover': 90, 'google-places': 30, 'osm': 6,
                 'apollo': 20, 'apollo-enrich': 50, 'hunter-domains': 25, 'find-emails': 60, 'verify': 300, 'xray-linkedin': 300,
                 'render-js': 25, 'pdl': 3}
