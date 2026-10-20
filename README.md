@@ -308,6 +308,18 @@ Adapters retain selected facts, not raw arbitrary provider bodies, names/geodata
 
 Provider-valid is an observation, not delivery, inbox placement, consent, current employment or ownership proof. "Accepted options" exclude known risk/review flags but are not an outreach approval list. Verification observations are cached; inspect their timestamps before deciding whether fresh checks are needed.
 
+## Dashboard
+
+A local Linear-style UI lives in [`dashboard/`](dashboard/README.md). It reads a private workspace through the kit (or an opt-in synthetic sample) and does not store API keys.
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Open http://127.0.0.1:3000. See the dashboard README for screens, sample mode, and `LEAD_RESEARCH_WORKSPACE`.
+
 ## Development
 
 ```bash

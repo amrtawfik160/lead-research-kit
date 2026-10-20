@@ -5,9 +5,10 @@ import re
 import sys
 from pathlib import Path
 
-SKIP={'.git','__pycache__','.venv','venv','build','dist'}
+SKIP={'.git','__pycache__','.venv','venv','build','dist','node_modules','.next','.data','.turbo','coverage'}
 PRIVATE_NAMES={'credentials.json','secrets.json','provider-state.json','research.sqlite3','providers.json'}
 PRIVATE_SUFFIXES={'.sqlite','.sqlite3','.db','.log','.p12','.pfx','.pem','.key'}
+TOOLING_JSON={'package.json','package-lock.json','tsconfig.json','components.json','jsconfig.json','.eslintrc.json'}
 EMAIL=re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+)")
 RESERVED=('example.com','example.org','example.net','example','test','invalid','localhost')
 PATTERNS={
@@ -30,7 +31,9 @@ def check(root):
   if name in PRIVATE_NAMES and not example or p.suffix in PRIVATE_SUFFIXES or name.endswith(('-wal','-shm')) or (name.startswith('.env') and name!='.env.example'):
    findings.append({'path':str(rel),'rule':'private_runtime_file'});continue
   if p.suffix in {'.csv','.json','.jsonl'} and not example:
-   findings.append({'path':str(rel),'rule':'data_outside_synthetic_examples'});continue
+   tooling=name in TOOLING_JSON or (name.startswith('tsconfig') and name.endswith('.json'))
+   if not tooling:
+    findings.append({'path':str(rel),'rule':'data_outside_synthetic_examples'});continue
   try:text=p.read_text(encoding='utf-8')
   except UnicodeError:findings.append({'path':str(rel),'rule':'unexpected_binary'});continue
   if name=='.env.example':

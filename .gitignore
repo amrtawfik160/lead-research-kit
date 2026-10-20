@@ -27,3 +27,10 @@ dist/
 !examples/*.csv
 !examples/*.json
 !examples/*.jsonl
+# Dashboard tooling (never workspace data)
+!dashboard/package.json
+!dashboard/package-lock.json
+!dashboard/tsconfig.json
+!dashboard/components.json
+!dashboard/.eslintrc.json
+!dashboard/tsconfig*.json
