@@ -43,7 +43,7 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                 </button>
               ))}
             </div>
-            <Tabs defaultValue="leads" className="min-h-0 flex-1 px-4 py-3 sm:px-6">
+            <Tabs defaultValue={data.leads.length ? "leads" : "report"} className="min-h-0 flex-1 px-4 py-3 sm:px-6">
               <TabsList variant="underline" size="sm">
                 <TabsTab value="leads">Leads</TabsTab>
                 <TabsTab value="report">Report</TabsTab>

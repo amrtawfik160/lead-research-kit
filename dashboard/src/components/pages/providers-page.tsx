@@ -78,8 +78,13 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
                 {
                   key: "paused",
                   header: "Pause",
-                  value: (item) => (item.paused ? "paused" : "clear"),
-                  render: (item) => <StatusBadge value={item.paused ? "paused" : "clear"} />,
+                  value: (item) => (item.paused ? item.pause_reason || "paused" : "clear"),
+                  render: (item) => (
+                    <StatusBadge
+                      value={item.paused ? item.pause_reason || "paused" : "clear"}
+                      fallback={item.paused ? "warning" : "secondary"}
+                    />
+                  ),
                 },
                 {
                   key: "operations",

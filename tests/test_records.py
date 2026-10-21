@@ -446,7 +446,24 @@ class GetterTests(unittest.TestCase):
         sec, opener, _ = getter_for(lambda url: FakeResponse(b'ok'), env=dict(SEC_ENV, SOCRATA_APP_TOKEN='SYNTHETICTOKEN123'))
         sec.get('https://www.sec.gov/Archives/edgar/daily-index/')
         self.assertEqual(opener.requests[0].get_header('User-agent'), SEC_ENV['SEC_USER_AGENT'])
+        self.assertEqual(opener.requests[0].get_header('Host'), 'www.sec.gov')
+        self.assertEqual(opener.requests[0].get_header('Accept-encoding'), 'gzip, deflate')
         self.assertIsNone(opener.requests[0].get_header('X-app-token'))
+        email_only, _, _ = getter_for(lambda url: FakeResponse(b'ok'), env={'SEC_USER_AGENT': 'ops@example.com'})
+        with self.assertRaises(RecordsError) as ctx:
+            email_only.get('https://www.sec.gov/Archives/edgar/daily-index/')
+        self.assertEqual(str(ctx.exception), 'sec_user_agent_required')
+
+    def test_sec_403_is_access_denied_not_generic_http(self):
+        blocked, _, _ = getter_for(
+            lambda url: urllib.error.HTTPError(url, 403, 'forbidden', {}, None), env=SEC_ENV)
+        with self.assertRaises(RecordsError) as ctx:
+            blocked.get('https://www.sec.gov/Archives/edgar/daily-index/')
+        self.assertEqual(str(ctx.exception), 'sec_access_denied')
+        texas, _, _ = getter_for(lambda url: urllib.error.HTTPError(url, 403, 'forbidden', {}, None))
+        with self.assertRaises(RecordsError) as ctx:
+            texas.get('https://data.texas.gov/resource/abcd-1234.json')
+        self.assertEqual(str(ctx.exception), 'http_403')
 
     def test_polite_spacing(self):
         getter, _, clock = getter_for(lambda url: json_response([]), env=SEC_ENV)

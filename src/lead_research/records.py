@@ -215,10 +215,16 @@ class RecordsGetter:
     def headers_for(self, origin):
         headers = {'Accept-Encoding': 'gzip', 'User-Agent': 'lead-research-kit public-records reader'}
         if origin == 'https://www.sec.gov':
-            if not self._sec_agent or '@' not in self._sec_agent or len(self._sec_agent) > 200 \
-                    or any(ord(c) < 32 for c in self._sec_agent):
+            # Fair-access sample: company name, a space, then a contact mailbox, plus
+            # Accept-Encoding gzip, deflate and Host www.sec.gov.
+            # https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data
+            agent = self._sec_agent
+            if not agent or '@' not in agent or ' ' not in agent or len(agent) > 200 \
+                    or any(ord(c) < 32 for c in agent):
                 raise RecordsError('sec_user_agent_required')
-            headers['User-Agent'] = self._sec_agent
+            headers['User-Agent'] = agent
+            headers['Accept-Encoding'] = 'gzip, deflate'
+            headers['Host'] = 'www.sec.gov'
         elif self._token:
             headers['X-App-Token'] = self._token
         return headers
@@ -252,6 +258,8 @@ class RecordsGetter:
                 pass
             if status == 404:
                 return 404, b''
+            if status == 403 and origin == 'https://www.sec.gov':
+                raise RecordsError('sec_access_denied') from None
             raise RecordsError('http_%d' % status) from None
         except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):
             raise RecordsError('network_error') from None
@@ -262,6 +270,8 @@ class RecordsGetter:
             status = getattr(response, 'status', None) or response.getcode()
             if status == 404:
                 return 404, b''
+            if int(status) == 403 and origin == 'https://www.sec.gov':
+                raise RecordsError('sec_access_denied')
             if not 200 <= int(status) < 300:
                 raise RecordsError('http_%d' % int(status))
             rheaders = response.headers
@@ -272,6 +282,8 @@ class RecordsGetter:
             encoding = (rheaders.get('Content-Encoding') or '').lower() if rheaders is not None else ''
             if encoding == 'gzip' or body[:2] == b'\x1f\x8b':
                 body = _gunzip(body, self.max_bytes)
+            elif encoding == 'deflate':
+                body = _deflate(body, self.max_bytes)
             return int(status), body
         except RecordsError:
             raise
@@ -319,6 +331,22 @@ def _gunzip(body, limit):
         out = decoder.decompress(body, limit + 1)
     except zlib.error:
         raise RecordsError('invalid_gzip') from None
+    if len(out) > limit or decoder.unconsumed_tail:
+        raise RecordsError('response_too_large')
+    return out
+
+
+def _deflate(body, limit):
+    """SEC fair-access sample asks for Accept-Encoding gzip, deflate."""
+    try:
+        decoder = zlib.decompressobj(-zlib.MAX_WBITS)
+        out = decoder.decompress(body, limit + 1)
+    except zlib.error:
+        try:
+            decoder = zlib.decompressobj()
+            out = decoder.decompress(body, limit + 1)
+        except zlib.error:
+            raise RecordsError('invalid_deflate') from None
     if len(out) > limit or decoder.unconsumed_tail:
         raise RecordsError('response_too_large')
     return out

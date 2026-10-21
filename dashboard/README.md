@@ -46,11 +46,24 @@ LEAD_RESEARCH_WORKSPACE=/private/path/research npm run dev
 
 Or switch in Settings. Providers stay disabled until you enable them here or with the CLI; budgets still require `budget confirm` on the CLI. Keys stay in the environment — the UI only reports whether the named variable is present.
 
-Production-style local serve after `npm run build`:
+### Production-style local serve
+
+Veinore is loopback-only. Do not publish `:3000` or `:8787`.
 
 ```bash
+set -a
+. /private/path/keys.env    # never copy this file into the repo
+set +a
+cd dashboard
+npm run build
 npm start
 ```
+
+`.env` and `.env.*` are gitignored. Keys stay in the process environment. The UI only reports whether a named variable is present — never the value.
+
+`server.py` refuses any bind host except `127.0.0.1`, `localhost`, or `::1`. Browser GET reads retry a few times on a local 502/503 or a dropped connection. Provider failures still pause that route; the dashboard does not replay a spent request.
+
+Daily execute, budget confirm, and `resume --execute` stay on the CLI. The dashboard can preview a daily plan and toggle enable flags.
 
 ## Architecture
 

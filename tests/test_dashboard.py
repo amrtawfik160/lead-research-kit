@@ -52,6 +52,20 @@ class SampleWorkspaceTests(unittest.TestCase):
         self.assertNotIn('example-jordan', queue_ids)
         self.assertTrue(queue_ids)
 
+    def test_daily_list_prefers_executed_batch_over_preview(self):
+        preview = self.root / 'daily' / '2026-10-20-preview'
+        preview.mkdir(parents=True)
+        (preview / 'report.json').write_text(json.dumps({
+            'date': '2026-10-20', 'execute': False, 'target': 10, 'delivered': 0, 'shortfall': 10,
+        }))
+        batches = self.dash.daily_list()
+        self.assertEqual(batches[0]['date'], '2026-10-20')
+        self.assertTrue(batches[0]['execute'])
+        self.assertGreaterEqual(batches[0]['delivered'], 10)
+        names = [row['date'] for row in batches]
+        self.assertIn('2026-10-20-preview', names)
+        self.assertGreater(names.index('2026-10-20-preview'), names.index('2026-10-20'))
+
     def test_daily_leads_have_six_core_columns(self):
         payload = self.dash.leads('2026-10-20')
         self.assertGreaterEqual(len(payload['leads']), 10)
@@ -213,6 +227,30 @@ class ReleaseAllowsDashboardTooling(unittest.TestCase):
             rules = {item['path']: item['rule'] for item in result['findings']}
             self.assertNotIn('dashboard/public/favicon-32.png', rules)
             self.assertEqual(rules.get('notes.png'), 'unexpected_binary')
+
+
+class DashboardSafetyTests(unittest.TestCase):
+    def test_api_refuses_non_loopback_bind(self):
+        import server as dashboard_server
+        with self.assertRaises(SystemExit) as ctx:
+            dashboard_server.main(['--host', '0.0.0.0'])
+        self.assertIn('loopback', str(ctx.exception))
+
+    def test_provider_rows_expose_env_names_not_values(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / 'sample'
+        seed_sample(root)
+        os.environ['HUNTER_API_KEY'] = 'SUPERSECRETKEYVALUE'
+        self.addCleanup(lambda: os.environ.pop('HUNTER_API_KEY', None))
+        payload = Dashboard(root, sample=False).providers()
+        blob = json.dumps(payload)
+        self.assertNotIn('SUPERSECRETKEYVALUE', blob)
+        hunter = next(row for row in payload['providers'] if row['id'] == 'hunter')
+        self.assertEqual(hunter['auth_env'], ['HUNTER_API_KEY'])
+        self.assertTrue(hunter['key_present'])
+        self.assertNotIn('api_key', hunter)
+        self.assertNotIn('url', hunter)
 
 
 if __name__ == '__main__':

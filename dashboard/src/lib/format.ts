@@ -26,6 +26,12 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_response: "The dashboard API returned a response the UI could not read.",
   contact_not_found: "That contact is not in this workspace.",
   unknown_provider: "That provider is not in the kit.",
+  provider_paused: "That provider is paused. Review it on the CLI before sending more work.",
+  quota: "That provider returned a quota or credit error. Leave it paused.",
+  auth: "That provider rejected the API key. Check the environment variable, not the UI.",
+  sec_access_denied:
+    "SEC EDGAR refused this host. Confirm SEC_USER_AGENT is 'Name you@domain' and that this IP is allowed.",
+  missing_auth: "That provider is enabled but its environment variable is empty.",
 };
 
 export function explainError(raw: string): string {

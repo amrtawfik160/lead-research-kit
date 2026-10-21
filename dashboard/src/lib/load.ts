@@ -43,13 +43,17 @@ export type HistoryPayload = {
 const ORIGIN = process.env.DASHBOARD_API_ORIGIN || "http://127.0.0.1:8787";
 
 export async function loadApi<T>(path: string): Promise<T | null> {
-  try {
-    const response = await fetch(`${ORIGIN}${path}`, { cache: "no-store" });
-    if (!response.ok) return null;
-    return (await response.json()) as T;
-  } catch {
-    return null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(`${ORIGIN}${path}`, { cache: "no-store" });
+      if (response.ok) return (await response.json()) as T;
+      if (![502, 503, 504].includes(response.status) || attempt === 2) return null;
+    } catch {
+      if (attempt === 2) return null;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
   }
+  return null;
 }
 
 export async function loadDaily(date?: string): Promise<DailyPayload | null> {

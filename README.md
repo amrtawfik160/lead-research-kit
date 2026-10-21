@@ -6,7 +6,7 @@
 
 Veinore is an evidence-first Python toolkit, with a local operator dashboard, for finding business contacts and researching their work emails without mixing guesses, public sources, and provider claims
 
-**Status: v0.4.0 alpha, local CLI, Python 3.11+, no runtime dependencies**
+**Status: v0.5.0 alpha, local CLI and Veinore dashboard, Python 3.11+, no runtime dependencies**
 
 This is a clean source-code project. It contains synthetic examples, not the contact database, account state, API credentials, or captures from the research that inspired it. Source repository: https://github.com/amrtawfik160/lead-research-kit. No package has been published to PyPI.
 

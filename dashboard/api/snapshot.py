@@ -284,7 +284,9 @@ class Dashboard:
         if not root.is_dir():
             return []
         rows = []
-        for folder in sorted((p for p in root.iterdir() if p.is_dir()), reverse=True):
+        for folder in root.iterdir():
+            if not folder.is_dir():
+                continue
             report_path = folder / 'report.json'
             if not report_path.exists():
                 continue
@@ -293,7 +295,7 @@ class Dashboard:
             except (OSError, ValueError):
                 continue
             rows.append({
-                'date': report.get('date') or folder.name,
+                'date': folder.name,
                 'target': report.get('target'),
                 'delivered': report.get('delivered'),
                 'execute': report.get('execute'),
@@ -301,6 +303,8 @@ class Dashboard:
                 'has_audit': (folder / 'audit.json').exists(),
                 'has_leads': (folder / 'leads.csv').exists(),
             })
+        # Executed batches first so a same-day dry preview cannot hide delivery.
+        rows.sort(key=lambda row: (bool(row.get('execute')), str(row.get('date') or '')), reverse=True)
         return rows
 
     def daily(self, date=None):

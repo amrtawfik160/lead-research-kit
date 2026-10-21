@@ -10,7 +10,13 @@ import type {
   ProviderRow,
 } from "@/lib/types";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function requestOnce<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: {
@@ -31,6 +37,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   return data;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || "GET").toUpperCase();
+  const tries = method === "GET" ? 3 : 1;
+  let last: Error | null = null;
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    try {
+      return await requestOnce<T>(path, init);
+    } catch (err) {
+      last = err instanceof Error ? err : new Error("request_failed");
+      const transient =
+        last.message === "api_unreachable" || /request_failed_50[234]/.test(last.message);
+      if (method !== "GET" || !transient || attempt === tries - 1) {
+        throw last;
+      }
+      await sleep(200 * (attempt + 1));
+    }
+  }
+  throw last || new Error("request_failed");
 }
 
 export const api = {
