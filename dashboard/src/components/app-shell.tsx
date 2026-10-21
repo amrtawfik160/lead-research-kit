@@ -1,6 +1,6 @@
 "use client";
 
-import { Moon, Sun } from "lucide-react";
+import { Moon, Search, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useState } from "react";
@@ -19,6 +19,7 @@ import {
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
@@ -26,12 +27,13 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { NAV } from "@/lib/nav";
+import { cn } from "@/lib/utils";
 
 export function AppShell({ children }: { children: React.ReactNode }): React.ReactElement {
   const pathname = usePathname();
-  const { toggleTheme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   useCommandHotkeys(openPalette);
@@ -41,17 +43,20 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
       <SidebarProvider
         style={
           {
-            "--sidebar-width": "15rem",
+            "--sidebar-width": "15.5rem",
             "--sidebar-width-icon": "3rem",
           } as React.CSSProperties
         }
       >
         <Sidebar collapsible="icon" variant="inset">
           <SidebarHeader className="px-3 py-3">
-            <Link href="/" className="flex items-center gap-2 overflow-hidden rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+            <Link
+              href="/"
+              className="flex items-center gap-2 overflow-hidden rounded-md outline-none transition-colors hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            >
               <Mark className="size-5 text-sidebar-accent-foreground" />
               <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-                <div className="truncate text-sm font-medium tracking-tight text-sidebar-accent-foreground">
+                <div className="truncate text-[13px] font-medium tracking-tight text-sidebar-accent-foreground">
                   Veinore
                 </div>
                 <div className="truncate text-[11px] text-muted-foreground">Evidence-first</div>
@@ -61,8 +66,10 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
           <SidebarSeparator />
           <SidebarContent>
             {NAV.map((group) => (
-              <SidebarGroup key={group.label}>
-                <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              <SidebarGroup key={group.label} className="py-1">
+                <SidebarGroupLabel className="text-[10px] tracking-wider uppercase">
+                  {group.label}
+                </SidebarGroupLabel>
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {group.items.map((item) => {
@@ -75,10 +82,17 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
                             size="sm"
                             tooltip={item.label}
                             render={<Link href={item.href} />}
+                            className={cn(
+                              "transition-colors duration-150",
+                              active && "shadow-[inset_2px_0_0_#5e6ad2]",
+                            )}
                           >
-                            <item.icon />
+                            <item.icon className={cn(active && "text-[#8b93e8]")} />
                             <span>{item.label}</span>
                           </SidebarMenuButton>
+                          <SidebarMenuBadge className="pointer-events-none text-[10px] font-normal text-muted-foreground opacity-0 transition-opacity group-hover/menu-item:opacity-100">
+                            {item.shortcut}
+                          </SidebarMenuBadge>
                         </SidebarMenuItem>
                       );
                     })}
@@ -90,11 +104,14 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
           <SidebarFooter className="px-2 pb-3">
             <Button
               size="sm"
-              variant="outline"
-              className="w-full justify-between text-xs group-data-[collapsible=icon]:px-0"
+              variant="ghost"
+              className="w-full justify-between text-xs text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:px-0"
               onClick={openPalette}
             >
-              <span className="group-data-[collapsible=icon]:hidden">Search</span>
+              <span className="inline-flex items-center gap-1.5 group-data-[collapsible=icon]:hidden">
+                <Search className="size-3.5" />
+                Search
+              </span>
               <Kbd className="group-data-[collapsible=icon]:hidden">⌘K</Kbd>
             </Button>
           </SidebarFooter>
@@ -103,16 +120,26 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
         <SidebarInset className="min-w-0 bg-background">
           <header className="flex h-11 items-center gap-2 border-b px-3">
             <SidebarTrigger />
-            <Button size="icon-sm" variant="ghost" aria-label="Toggle color theme" onClick={toggleTheme}>
-              <Sun className="hidden dark:block" />
-              <Moon className="dark:hidden" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button size="icon-sm" variant="ghost" aria-label="Toggle color theme" onClick={toggleTheme} />
+                }
+              >
+                <Sun className="hidden dark:block" />
+                <Moon className="dark:hidden" />
+              </TooltipTrigger>
+              <TooltipPopup>{theme === "dark" ? "Switch to light" : "Switch to dark"}</TooltipPopup>
+            </Tooltip>
             <button
               type="button"
               onClick={openPalette}
-              className="flex h-7 min-w-0 flex-1 items-center justify-between rounded-md border bg-muted/40 px-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted"
+              className="flex h-8 min-w-0 flex-1 items-center justify-between rounded-md bg-muted/50 px-2.5 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
-              <span>Search leads, contacts, commands…</span>
+              <span className="inline-flex min-w-0 items-center gap-2 truncate">
+                <Search className="size-3.5 shrink-0 opacity-70" />
+                Search leads, contacts, commands…
+              </span>
               <Kbd>⌘K</Kbd>
             </button>
           </header>

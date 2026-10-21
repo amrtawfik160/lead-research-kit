@@ -8,8 +8,9 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { toastManager } from "@/components/ui/toast";
-import { PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
+import { Card, CardPanel } from "@/components/ui/card";
 import { useTheme } from "@/components/theme-provider";
 import { api } from "@/lib/api";
 import { explainError } from "@/lib/format";
@@ -81,9 +82,11 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
         description="Point Veinore at a private workspace, or use the synthetic sample. API keys stay in the environment."
         crumbs={[{ href: "/", label: "Overview" }, { label: "Settings" }]}
       />
-      <QueryGate loading={loading} error={error} empty={!data}>
+      <QueryGate loading={loading} error={error} empty={!data} skeleton="form">
         {data ? (
-          <div className="flex max-w-xl flex-col gap-5 p-4 sm:p-6">
+          <PageBody className="flex max-w-xl flex-col gap-5 p-4 sm:p-6">
+          <Card>
+          <CardPanel className="flex flex-col gap-5 p-5">
             {locked ? (
               <Alert variant="warning">
                 <AlertTitle>Environment workspace is active</AlertTitle>
@@ -182,7 +185,9 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
                 Rebuild sample
               </Button>
             </div>
-          </div>
+          </CardPanel>
+          </Card>
+          </PageBody>
         ) : null}
       </QueryGate>
     </>

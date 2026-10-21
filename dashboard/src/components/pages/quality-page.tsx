@@ -1,8 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { Inbox } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card, CardPanel } from "@/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -10,7 +19,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toastManager } from "@/components/ui/toast";
 import { DataTable } from "@/components/data-table";
-import { PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import type { CleanResult } from "@/lib/types";
@@ -65,8 +74,9 @@ export function QualityPage(): React.ReactElement {
           </Button>
         }
       />
-      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,22rem)_1fr] sm:p-6">
-        <div className="flex flex-col gap-4">
+      <PageBody className="grid gap-4 p-4 lg:grid-cols-[minmax(0,22rem)_1fr] sm:p-6">
+        <Card>
+        <CardPanel className="flex flex-col gap-4 p-4">
           <Field>
             <FieldLabel>Lead list (CSV or JSON)</FieldLabel>
             <FieldDescription>Same loose column matching as `lead-research clean`.</FieldDescription>
@@ -93,7 +103,8 @@ export function QualityPage(): React.ReactElement {
             Keep non-decision-makers
             <Switch checked={keepOthers} onCheckedChange={setKeepOthers} />
           </label>
-        </div>
+        </CardPanel>
+        </Card>
         <div className="min-w-0">
           {error ? (
             <Alert variant="error">
@@ -122,12 +133,12 @@ export function QualityPage(): React.ReactElement {
                     rows={result.clean}
                     rowKey={(row) => `${row.full_name}-${row.email}`}
                     columns={[
-                      { key: "full_name", header: "Name" },
-                      { key: "title", header: "Title" },
-                      { key: "company", header: "Company" },
-                      { key: "email", header: "Email" },
-                      { key: "tier", header: "Tier", render: (row) => <StatusBadge value={String(row.tier)} /> },
-                      { key: "score", header: "Score" },
+                      { key: "full_name", header: "Name", width: "11rem" },
+                      { key: "title", header: "Title", width: "11rem" },
+                      { key: "company", header: "Company", width: "13rem" },
+                      { key: "email", header: "Email", width: "14rem", mono: true },
+                      { key: "tier", header: "Tier", width: "4.5rem", render: (row) => <StatusBadge value={String(row.tier)} /> },
+                      { key: "score", header: "Score", width: "5rem", align: "right" },
                     ]}
                   />
                 </TabsPanel>
@@ -157,10 +168,18 @@ export function QualityPage(): React.ReactElement {
               </Tabs>
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">Paste a list and run Clean. Sample CSV is already loaded.</p>
+            <Empty className="min-h-64 rounded-xl border py-10">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Inbox />
+                </EmptyMedia>
+                <EmptyTitle className="text-base font-medium">Paste a list</EmptyTitle>
+                <EmptyDescription>Sample CSV is already loaded. Run Clean — nothing is sent to providers.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </div>
-      </div>
+      </PageBody>
     </>
   );
 }

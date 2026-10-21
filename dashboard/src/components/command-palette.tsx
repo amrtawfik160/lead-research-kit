@@ -1,5 +1,6 @@
 "use client";
 
+import { Moon, Settings, ShieldCheck, Sun } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef } from "react";
 import {
@@ -20,11 +21,13 @@ import {
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { useTheme } from "@/components/theme-provider";
 import { ALL_NAV } from "@/lib/nav";
+import type { LucideIcon } from "lucide-react";
 
 type CommandEntry = {
   value: string;
   label: string;
   shortcut?: string;
+  icon?: LucideIcon;
   run: () => void;
 };
 
@@ -42,6 +45,7 @@ export function CommandPalette({
       value: `go:${item.href}`,
       label: `Go to ${item.label}`,
       shortcut: item.shortcut,
+      icon: item.icon,
       run: () => router.push(item.href),
     }));
     return [
@@ -52,16 +56,19 @@ export function CommandPalette({
           {
             value: "action:quality",
             label: "Clean a lead list",
+            icon: ShieldCheck,
             run: () => router.push("/quality"),
           },
           {
             value: "action:settings",
             label: "Workspace settings",
+            icon: Settings,
             run: () => router.push("/settings"),
           },
           {
             value: "action:theme",
             label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
+            icon: theme === "dark" ? Sun : Moon,
             run: () => toggleTheme(),
           },
         ],
@@ -77,7 +84,7 @@ export function CommandPalette({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandDialogPopup>
+      <CommandDialogPopup className="max-h-[min(36rem,82vh)]">
         <Command items={groups}>
           <CommandInput placeholder="Type a command or search…" />
           <CommandEmpty>No commands found.</CommandEmpty>
@@ -89,6 +96,7 @@ export function CommandPalette({
                   <CommandCollection>
                     {(item: CommandEntry) => (
                       <CommandItem key={item.value} value={item} onClick={() => run(item)}>
+                        {item.icon ? <item.icon className="size-4 text-muted-foreground" /> : null}
                         {item.label}
                         {item.shortcut ? <CommandShortcut>{item.shortcut}</CommandShortcut> : null}
                       </CommandItem>
@@ -133,6 +141,9 @@ export function useCommandHotkeys(onOpen: () => void): void {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         onOpen();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
         return;
       }
       if (typing) return;

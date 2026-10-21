@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -8,7 +9,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { Separator } from "@/components/ui/separator";
 
 export function PageHeader({
   title,
@@ -22,18 +22,18 @@ export function PageHeader({
   actions?: ReactNode;
 }): React.ReactElement {
   return (
-    <div className="flex flex-col gap-3 border-b px-4 py-3 sm:px-6">
+    <div className="flex flex-col gap-2 border-b px-4 py-3 sm:px-6">
       {crumbs && crumbs.length > 0 ? (
         <Breadcrumb>
-          <BreadcrumbList>
+          <BreadcrumbList className="text-[11px] text-muted-foreground">
             {crumbs.map((crumb, index) => (
-              <span key={crumb.label} className="contents">
+              <span key={`${crumb.label}-${index}`} className="contents">
                 {index > 0 ? <BreadcrumbSeparator /> : null}
                 <BreadcrumbItem>
                   {crumb.href ? (
                     <BreadcrumbLink render={<Link href={crumb.href} />}>{crumb.label}</BreadcrumbLink>
                   ) : (
-                    <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                    <BreadcrumbPage className="text-foreground/80">{crumb.label}</BreadcrumbPage>
                   )}
                 </BreadcrumbItem>
               </span>
@@ -43,14 +43,23 @@ export function PageHeader({
       ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="font-heading text-lg font-medium tracking-tight">{title}</h1>
+          <h1 className="font-heading text-[15px] font-medium tracking-tight">{title}</h1>
           {description ? (
-            <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">{description}</p>
+            <p className="mt-0.5 max-w-2xl text-[12px] leading-5 text-muted-foreground">{description}</p>
           ) : null}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
-      <Separator className="hidden" />
     </div>
   );
+}
+
+export function PageBody({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}): React.ReactElement {
+  return <div className={cn("page-enter min-h-0 flex-1", className)}>{children}</div>;
 }

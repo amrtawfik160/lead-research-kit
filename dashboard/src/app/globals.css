@@ -233,7 +233,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
   }
   code, kbd, samp, pre {
     font-family: var(--font-mono);
@@ -241,5 +241,29 @@
   html {
     @apply font-sans;
     font-size: 13px;
+  }
+  ::selection {
+    background: color-mix(in srgb, #5e6ad2 36%, transparent);
+  }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.page-enter {
+  animation: page-enter 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter {
+    animation: none;
   }
 }
