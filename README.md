@@ -18,9 +18,9 @@ Synthetic sample workspace (light theme, GR8R-style chrome). No real people or k
 |---|---|
 | ![Overview](docs/screenshots/overview.png) | ![Leads](docs/screenshots/leads-table.png) |
 
-| Lead detail | Daily report |
+| Lead detail | Inbox |
 |---|---|
-| ![Lead detail](docs/screenshots/lead-detail.png) | ![Daily report](docs/screenshots/daily-report.png) |
+| ![Lead detail](docs/screenshots/lead-detail.png) | ![Inbox](docs/screenshots/daily-report.png) |
 
 | Providers | Command palette |
 |---|---|

@@ -76,6 +76,7 @@ await page.waitForTimeout(150);
 
 await page.goto(`${origin}/daily`, { waitUntil: "networkidle" });
 await page.addStyleTag({ content: freezeMotion });
+await hasText(page, "select a delivery");
 await hasText(page, "2026-10-20");
 const reportTab = page.getByRole("tab", { name: /report/i });
 if (await reportTab.count()) {

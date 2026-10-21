@@ -3,17 +3,18 @@
 import { useEffect, useState } from "react";
 import { ArrowUpRight, Calendar, CircleCheck, CircleDashed, ClockAlert, FolderKanban } from "lucide-react";
 import Link from "next/link";
+import { EmptyState } from "@/components/empty-state";
 import { EntityAvatar } from "@/components/entity-avatar";
 import { LabelChip } from "@/components/label-chip";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { Panel, PanelHeader, SegTabs } from "@/components/panel";
+import { ProgBar } from "@/components/prog-bar";
 import { QueryGate, useQuery } from "@/components/query-state";
-import { StatusBadge } from "@/components/status-badge";
-import { PriorityGlyph, StatusGlyph } from "@/components/status-glyph";
+import { QuietStatus, PriorityGlyph, StatusGlyph } from "@/components/status-glyph";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { display } from "@/lib/format";
-import { greeting, issueKey, longDate } from "@/lib/gr8r";
+import { greeting, longDate } from "@/lib/gr8r";
 import type { LeadRow, Overview } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -123,12 +124,19 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                       </>
                     }
                   />
-                  {(lists[tab].length ? lists[tab].slice(0, 6) : []).map((row, index) => (
-                    <MiniTask key={`${row.Email}-${index}`} row={row} index={index} />
-                  ))}
-                  {lists[tab].length === 0 ? (
-                    <p className="px-3.5 pb-3.5 text-[12.5px] text-muted-foreground">No leads in this view.</p>
-                  ) : null}
+                  {lists[tab].length ? (
+                    lists[tab].slice(0, 7).map((row, index) => <MiniTask key={`${row.Email}-${index}`} row={row} />)
+                  ) : (
+                    <EmptyState
+                      compact
+                      title={tab === "overdue" ? "Nothing overdue" : "No tasks here"}
+                      description={
+                        tab === "overdue"
+                          ? "Every lead in this view is on schedule."
+                          : "Deliver a daily file to get things moving."
+                      }
+                    />
+                  )}
                 </Panel>
                 <Panel>
                   <PanelHeader
@@ -145,29 +153,39 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                         <tr className="border-t text-left text-[12px] font-medium text-muted-foreground">
                           <th className="px-3.5 py-2 font-medium">Provider</th>
                           <th className="py-2 font-medium">Status</th>
-                          <th className="py-2 font-medium">Key</th>
+                          <th className="py-2 font-medium">Progress</th>
                           <th className="px-3.5 py-2 text-right font-medium">Pools</th>
                         </tr>
                       </thead>
                       <tbody>
                         {Object.values(data.status.providers)
                           .slice(0, 6)
-                          .map((provider) => (
-                            <tr key={provider.id} className="border-t">
-                              <td className="px-3.5 py-2.5">
-                                <LabelChip value={provider.id} />
-                              </td>
-                              <td className="py-2.5">
-                                <StatusBadge value={provider.paused ? "paused" : provider.enabled ? "enabled" : "off"} />
-                              </td>
-                              <td className="py-2.5">
-                                <StatusBadge value={provider.key_present ? "present" : "missing"} />
-                              </td>
-                              <td className="px-3.5 py-2.5 text-right font-mono text-[12px] tabular-nums text-muted-foreground">
-                                {provider.budgets.length || "—"}
-                              </td>
-                            </tr>
-                          ))}
+                          .map((provider) => {
+                            const pools = provider.budgets.length;
+                            const pct = provider.enabled ? (provider.key_present ? (pools ? 100 : 64) : 30) : 8;
+                            return (
+                              <tr key={provider.id} className="border-t">
+                                <td className="px-3.5 py-2.5">
+                                  <LabelChip value={provider.id} />
+                                </td>
+                                <td className="py-2.5">
+                                  <QuietStatus value={provider.paused ? "paused" : provider.enabled ? "enabled" : "off"} />
+                                </td>
+                                <td className="py-2.5">
+                                  <span className="flex items-center gap-2">
+                                    <ProgBar
+                                      value={pct}
+                                      tone={provider.paused ? "bad" : provider.enabled && provider.key_present ? "ok" : undefined}
+                                    />
+                                    <span className="w-8 text-[11.5px] tabular-nums text-muted-foreground">{pct}%</span>
+                                  </span>
+                                </td>
+                                <td className="px-3.5 py-2.5 text-right font-mono text-[12px] tabular-nums text-muted-foreground">
+                                  {pools || "—"}
+                                </td>
+                              </tr>
+                            );
+                          })}
                       </tbody>
                     </table>
                   </div>
@@ -188,7 +206,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                     <DeadlineGroup label="This run" count={data.report?.this_run} />
                     <div className="flex h-[30px] items-center gap-2 text-[13px]">
                       <span className="size-2 rounded-[3px] bg-[#3570c4]" />
-                      <span className="min-w-0 flex-1 truncate">{data.latest_daily?.date || "No daily file"}</span>
+                      <span className="issue-title min-w-0 flex-1 truncate">{data.latest_daily?.date || "No daily file"}</span>
                       <span className="tabular-nums text-muted-foreground">
                         {delivered}/{target || "—"}
                       </span>
@@ -224,7 +242,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                             <span className="font-medium">{attempt.provider}</span>{" "}
                             <span className="text-muted-foreground">{attempt.operation}</span>
                           </div>
-                          <StatusBadge value={attempt.state} />
+                          <QuietStatus value={attempt.state} />
                         </div>
                       ))
                     )}
@@ -248,15 +266,14 @@ function DeadlineGroup({ label, count }: { label: string; count?: number }): Rea
   );
 }
 
-function MiniTask({ row, index }: { row: LeadRow; index: number }): React.ReactElement {
+function MiniTask({ row }: { row: LeadRow }): React.ReactElement {
   return (
     <Link
       href="/leads"
       className="flex min-h-[38px] items-center gap-2.5 border-t px-3.5 text-[13.5px] transition-colors hover:bg-[#f6f5f2] dark:hover:bg-[#252524]"
     >
       <StatusGlyph value={row["Email Risk"]} />
-      <span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">{issueKey("LEA", index)}</span>
-      <span className="min-w-0 flex-1 truncate">{display(row["Full Name"])}</span>
+      <span className="issue-title min-w-0 flex-1 truncate">{display(row["Full Name"])}</span>
       <LabelChip value={row.Company} className="hidden max-w-[140px] sm:inline-flex" />
       <PriorityGlyph value={row.Tier} />
       <span className="w-14 truncate text-right text-[12px] text-muted-foreground">{display(row.City)}</span>

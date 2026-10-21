@@ -1,16 +1,10 @@
 "use client";
 
-import { ChevronDown, ChevronUp, ChevronsUpDown, Inbox, Search } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronUp, ChevronsUpDown, Filter, Inbox, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CellText } from "@/components/cell-text";
+import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -226,21 +220,24 @@ export function DataTable<T extends object>({
         ) : null}
         <ToolbarSeparator />
         <ToolbarGroup>
+          <ToolbarButton render={<Button size="xs" variant="ghost" className="h-[26px] text-[12px]" />}>
+            <Filter className="size-3.5" />
+            Filter
+          </ToolbarButton>
+          <ToolbarButton
+            render={<Button size="xs" variant="ghost" className="h-[26px] text-[12px]" />}
+            onClick={() => columns[0] && toggleSort(columns[0].key)}
+          >
+            <ArrowUpDown className="size-3.5" />
+            Sort
+          </ToolbarButton>
           <span className="px-1 text-[11px] tabular-nums text-muted-foreground">
             {filtered.length} {filtered.length === 1 ? "row" : "rows"}
           </span>
         </ToolbarGroup>
       </Toolbar>
       {filtered.length === 0 ? (
-        <Empty className="py-16">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <Inbox />
-            </EmptyMedia>
-            <EmptyTitle className="text-base font-medium">{emptyTitle}</EmptyTitle>
-            <EmptyDescription>{emptyDescription}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+        <EmptyState icon={Inbox} title={emptyTitle} description={emptyDescription} />
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           <Table>
@@ -383,7 +380,9 @@ function GroupRows<T extends object>({
                 {column.render ? (
                   column.render(row)
                 ) : (
-                  <CellText value={cellValue(row, column, column.key)} mono={column.mono} />
+                  <span className={cn(column.key === columns[0]?.key && "issue-title")}>
+                    <CellText value={cellValue(row, column, column.key)} mono={column.mono} />
+                  </span>
                 )}
               </TableCell>
             ))}

@@ -11,7 +11,7 @@ import { toastManager } from "@/components/ui/toast";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { Card, CardPanel } from "@/components/ui/card";
-import { useTheme } from "@/components/theme-provider";
+import { ThemeCards } from "@/components/theme-cards";
 import { api } from "@/lib/api";
 import { explainError } from "@/lib/format";
 import type { SettingsPayload } from "@/lib/load";
@@ -22,7 +22,6 @@ function failureText(error: unknown): string {
 
 export function SettingsPage({ initial = null }: { initial?: SettingsPayload | null }): React.ReactElement {
   const router = useRouter();
-  const { theme, setTheme } = useTheme();
   const { data, error, loading, reload } = useQuery(() => api.settings(), [], initial);
   const [workspace, setWorkspace] = useState("");
   const [busy, setBusy] = useState(false);
@@ -84,7 +83,16 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
       />
       <QueryGate loading={loading} error={error} empty={!data} skeleton="form">
         {data ? (
-          <PageBody className="flex max-w-xl flex-col gap-5 px-6 pb-16">
+          <PageBody className="flex max-w-2xl flex-col gap-5 px-6 pb-16">
+          <Card>
+          <CardPanel className="flex flex-col gap-4 p-5">
+            <div>
+              <h2 className="text-[14.5px] font-semibold">Theme</h2>
+              <p className="mt-1 text-[12.5px] text-muted-foreground">Customize how Veinore looks on this device.</p>
+            </div>
+            <ThemeCards />
+          </CardPanel>
+          </Card>
           <Card>
           <CardPanel className="flex flex-col gap-5 p-5">
             {locked ? (
@@ -127,18 +135,6 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
                 aria-label="Sample data"
               />
             </label>
-            <Field>
-              <FieldLabel>Appearance</FieldLabel>
-              <FieldDescription>Light or dark. Stored in this browser.</FieldDescription>
-              <div className="flex gap-2">
-                <Button size="sm" variant={theme === "light" ? "default" : "outline"} onClick={() => setTheme("light")}>
-                  Light
-                </Button>
-                <Button size="sm" variant={theme === "dark" ? "default" : "outline"} onClick={() => setTheme("dark")}>
-                  Dark
-                </Button>
-              </div>
-            </Field>
             <Field>
               <FieldLabel>Kit version</FieldLabel>
               <Input readOnly value={data.kit_version} size="sm" />

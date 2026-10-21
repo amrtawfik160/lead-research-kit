@@ -264,8 +264,89 @@
   animation: page-enter 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
+@keyframes shimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.sk {
+  display: block;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #eeede9 0%, #f6f5f2 45%, #eeede9 90%);
+  background-size: 220% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+}
+
+.dark .sk {
+  background: linear-gradient(90deg, #2d2d2b 0%, #252524 45%, #2d2d2b 90%);
+  background-size: 220% 100%;
+}
+
+.issue-title {
+  text-underline-offset: 3px;
+}
+
+button:hover .issue-title,
+a:hover .issue-title {
+  text-decoration: underline;
+  text-decoration-color: #dad7d0;
+}
+
+.dark button:hover .issue-title,
+.dark a:hover .issue-title {
+  text-decoration-color: #3a3936;
+}
+
+.prog {
+  height: 4px;
+  min-width: 40px;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #eeede9;
+}
+
+.dark .prog {
+  background: #2d2d2b;
+}
+
+.prog > i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 4px;
+  background: #4b5bd6;
+  transform: scaleX(var(--p, 0));
+  transform-origin: left;
+}
+
+.dark .prog > i {
+  background: #8e9af3;
+}
+
+.prog.ok > i {
+  background: #25754b;
+}
+
+.prog.bad > i {
+  background: #b23c30;
+}
+
+.dark .prog.ok > i {
+  background: #5cba86;
+}
+
+.dark .prog.bad > i {
+  background: #e57d70;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .page-enter {
+  .page-enter,
+  .sk {
     animation: none;
   }
 }

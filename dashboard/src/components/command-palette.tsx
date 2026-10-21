@@ -1,6 +1,6 @@
 "use client";
 
-import { Moon, Settings, ShieldCheck, Sun } from "lucide-react";
+import { Keyboard, Moon, Settings, ShieldCheck, Sun } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef } from "react";
 import {
@@ -34,9 +34,11 @@ type CommandEntry = {
 export function CommandPalette({
   open,
   onOpenChange,
+  onShortcuts,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onShortcuts?: () => void;
 }): React.ReactElement {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
@@ -55,7 +57,7 @@ export function CommandPalette({
           {
             value: "action:inbox",
             label: "Open inbox",
-            shortcut: "G D",
+            shortcut: "N",
             icon: ALL_NAV.find((item) => item.href === "/daily")?.icon,
             run: () => router.push("/daily"),
           },
@@ -85,15 +87,23 @@ export function CommandPalette({
             run: () => router.push("/settings"),
           },
           {
+            value: "action:shortcuts",
+            label: "Keyboard shortcuts",
+            shortcut: "?",
+            icon: Keyboard,
+            run: () => onShortcuts?.(),
+          },
+          {
             value: "action:theme",
             label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
+            shortcut: "D",
             icon: theme === "dark" ? Sun : Moon,
             run: () => toggleTheme(),
           },
         ],
       },
     ];
-  }, [router, theme, toggleTheme]);
+  }, [onShortcuts, router, theme, toggleTheme]);
 
   function run(entry: CommandEntry) {
     onOpenChange(false);
@@ -103,7 +113,7 @@ export function CommandPalette({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandDialogPopup className="max-h-[min(36rem,82vh)]">
+      <CommandDialogPopup className="w-[min(640px,calc(100vw-32px))] max-w-[640px] rounded-[12px]">
         <Command items={groups}>
           <CommandInput placeholder="Type a command or search…" />
           <CommandEmpty>No commands found.</CommandEmpty>
@@ -150,7 +160,17 @@ export function CommandPalette({
   );
 }
 
-export function useCommandHotkeys(onOpen: () => void): void {
+export function useCommandHotkeys({
+  onOpen,
+  onShortcuts,
+  onToggleSidebar,
+  onToggleTheme,
+}: {
+  onOpen: () => void;
+  onShortcuts?: () => void;
+  onToggleSidebar?: () => void;
+  onToggleTheme?: () => void;
+}): void {
   const router = useRouter();
   const pending = useRef<string | null>(null);
   const clearTimer = useRef<number>(0);
@@ -170,10 +190,32 @@ export function useCommandHotkeys(onOpen: () => void): void {
         onOpen();
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
+      if (typing) return;
+      if (event.key === "/") {
+        event.preventDefault();
+        onOpen();
         return;
       }
-      if (typing) return;
+      if (event.key === "?" ) {
+        event.preventDefault();
+        onShortcuts?.();
+        return;
+      }
+      if (event.key === "[") {
+        event.preventDefault();
+        onToggleSidebar?.();
+        return;
+      }
+      if (event.key === "d" || event.key === "D") {
+        event.preventDefault();
+        onToggleTheme?.();
+        return;
+      }
+      if (event.key === "n" || event.key === "N") {
+        event.preventDefault();
+        router.push("/daily");
+        return;
+      }
       if (event.key === "g" || event.key === "G") {
         pending.current = "g";
         window.clearTimeout(clearTimer.current);
@@ -200,5 +242,5 @@ export function useCommandHotkeys(onOpen: () => void): void {
       document.removeEventListener("keydown", onKey);
       window.clearTimeout(clearTimer.current);
     };
-  }, [onOpen, router]);
+  }, [onOpen, onShortcuts, onToggleSidebar, onToggleTheme, router]);
 }

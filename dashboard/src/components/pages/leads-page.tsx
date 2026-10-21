@@ -34,27 +34,26 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
   const [tab, setTab] = useState<"all" | "website" | "finder" | "review">("all");
 
   const issues = useMemo(() => (data?.leads || []).map(toIssue), [data]);
-  const visible = useMemo(() => {
-    if (tab === "website") return issues.filter((item) => String(item.status).toLowerCase().includes("website"));
-    if (tab === "finder") return issues.filter((item) => String(item.status).toLowerCase().includes("finder"));
-    if (tab === "review") return issues.filter((item) => /high|medium|review/.test(String(item.raw["Email Risk"] || "").toLowerCase()));
-    return issues;
-  }, [issues, tab]);
+  const website = issues.filter((item) => String(item.status).toLowerCase().includes("website"));
+  const finder = issues.filter((item) => String(item.status).toLowerCase().includes("finder"));
+  const review = issues.filter((item) => /high|medium|review/.test(String(item.raw["Email Risk"] || "").toLowerCase()));
+  const visible = tab === "website" ? website : tab === "finder" ? finder : tab === "review" ? review : issues;
+  const selected = lead ? issues.find((item) => item.raw === lead) : undefined;
 
   return (
     <>
       <PageHeader
         title="My Tasks"
-        description={`${data?.leads.length ?? 0} delivered · latest daily file`}
+        description={`${website.length} website · ${review.length} review · ${finder.length} finder`}
         actions={
           <SegTabs
             value={tab}
             onChange={setTab}
             items={[
               { value: "all", label: "All", count: issues.length },
-              { value: "website", label: "Website" },
-              { value: "finder", label: "Finder" },
-              { value: "review", label: "Review" },
+              { value: "website", label: "Website", count: website.length },
+              { value: "finder", label: "Finder", count: finder.length },
+              { value: "review", label: "Review", count: review.length },
             ]}
           />
         }
@@ -70,8 +69,8 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
           <PageBody className="flex min-h-0 flex-1 flex-col">
             <IssueList
               items={visible}
-              selectedId={lead ? issues.find((item) => item.raw === lead)?.id : undefined}
-              onSelect={(item) => setLead(item.raw)}
+              selectedId={selected?.id}
+              onSelect={(item) => setLead(item?.raw ?? null)}
               emptyTitle="No leads match"
               emptyDescription="Clear the filter or change grouping."
             />
@@ -80,6 +79,7 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
               onOpenChange={(open) => !open && setLead(null)}
               title={display(lead?.["Full Name"])}
               description={`${display(lead?.Title)} · ${display(lead?.Company)}`}
+              issueId={selected?.id}
               sections={leadFieldSections(lead)}
             />
           </PageBody>
