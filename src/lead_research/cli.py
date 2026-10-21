@@ -100,7 +100,7 @@ def parser():
     dy=s.add_parser('daily',help='Produce today\'s fresh lead file: refill domains, crawl, score, skip anything delivered before')
     dy.add_argument('--target',type=int,default=500);dy.add_argument('--execute',action='store_true',help='Fetch, spend confirmed budgets and record delivery (default: preview only)')
     dy.add_argument('--output-root',help='Folder for dated outputs (default: <workspace>/daily)');dy.add_argument('--date',help='Override the batch date, YYYY-MM-DD')
-    dy.add_argument('--sources',default='records,resolve,hunter-discover,google-places,osm,crawl,find-emails,verify',help='Comma list from: records, resolve, hunter-discover, google-places, osm, apollo, crawl, hunter-domains, find-emails, verify, xray-linkedin')
+    dy.add_argument('--sources',default='records,resolve,hunter-discover,google-places,osm,crawl,find-emails,verify',help='Comma list from: records, resolve, hunter-discover, google-places, osm, apollo, crawl, jina-read, render-js, hunter-domains, find-emails, verify, xray-linkedin, pdl')
     dy.add_argument('--record-sources',default='tx-trec,ny-dos,co-dora,sec-form-d',help='Public-record feeds to pull (empty to skip)')
     dy.add_argument('--search-provider',choices=['serper','brave'],default='serper',help='Used to find websites for public-record firms and LinkedIn URLs')
     dy.add_argument('--records',action='append',default=[],help='JSON with companies/prospects from `records` importers (repeatable)')

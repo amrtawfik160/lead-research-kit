@@ -82,6 +82,51 @@ class SampleWorkspaceTests(unittest.TestCase):
         self.assertTrue(contact['held'])
         self.assertEqual(contact['hold_reason'], 'stale_leadership_claim')
 
+    def test_same_day_merge_keeps_overview_and_daily_counts(self):
+        from lead_research.configuration import default_config
+        from lead_research.daily import History, run_daily
+        from lead_research.store import Store
+
+        def person(first, last, domain, title='Owner'):
+            return {'full_name': f'{first} {last}', 'title': title, 'email': f'{first.lower()}@{domain}',
+                    'linkedin_url': None, 'evidence_url': f'https://{domain}/team', 'method': 'mailto'}
+
+        def site(domain, people):
+            return {'domain': domain, 'status': 'ok', 'company': {'name': 'Harbor Realty'},
+                    'people': people, 'pattern': None, 'pages_fetched': 2, 'errors': []}
+
+        work = Path(self.tmp.name) / 'merge-ws'
+        work.mkdir()
+        store = Store(work / 'research.sqlite3')
+        self.addCleanup(store.close)
+        history = History(work / 'lead-history.sqlite3')
+        history.save_sites([site('harbor.example', [
+            person('Jordan', 'Blake', 'harbor.example'),
+            person('Casey', 'Morgan', 'harbor.example', 'President'),
+            person('Riley', 'Quinn', 'harbor.example', 'Managing Broker'),
+        ])])
+        history.close()
+        (work / 'providers.json').write_text(json.dumps(default_config()))
+        first = run_daily(work, store, default_config(), target=1, sources=('build',), execute=True, day='2026-01-01')
+        second = run_daily(work, store, default_config(), target=3, sources=('build',), execute=True, day='2026-01-01')
+        self.assertEqual((first['delivered'], second['delivered'], second['this_run'], second['prior_delivered']), (1, 3, 2, 1))
+        dash = Dashboard(work, sample=False)
+        overview = dash.overview()
+        self.assertEqual(overview['latest_daily']['date'], '2026-01-01')
+        self.assertEqual(overview['latest_daily']['delivered'], 3)
+        self.assertEqual(overview['latest_daily']['target'], 3)
+        self.assertTrue(overview['latest_daily']['execute'])
+        self.assertEqual(overview['report']['this_run'], 2)
+        self.assertEqual(overview['report']['prior_delivered'], 1)
+        daily = dash.daily('2026-01-01')
+        self.assertEqual(len(daily['leads']), 3)
+        self.assertIn('This run added 2', daily['markdown'])
+        names = {row['Full Name'] for row in daily['leads']}
+        self.assertIn('Jordan Blake', names)
+        folders = [p.name for p in (work / 'daily').iterdir() if p.is_dir()]
+        self.assertEqual(folders, ['2026-01-01'])
+        self.assertTrue((work / 'daily' / '2026-01-01' / 'runs').is_dir())
+
     def test_provider_toggle_writes_config(self):
         before = {p['id']: p for p in self.dash.providers()['providers']}
         self.assertTrue(before['hunter']['enabled'])

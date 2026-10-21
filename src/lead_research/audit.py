@@ -223,6 +223,15 @@ def run_audit(day_dir, fetcher, store=None, sample=DEFAULT_SAMPLE, seed=None, cl
                         'partial_pct': round(100 * counts['partial'] / total, 1),
                         'failed_pct': round(100 * counts['failed'] / total, 1)},
               'top_reasons': dict(sorted(reasons.items(), key=lambda kv: -kv[1])), 'leads': leads}
+    existing = day_dir / 'audit.json'
+    if existing.exists():
+        dest = day_dir / 'audits'
+        dest.mkdir(parents=True, exist_ok=True, mode=0o700)
+        stamp = str(int(clock()))
+        write_private(dest / (stamp + '-audit.json'), existing.read_text(encoding='utf-8'))
+        prior_md = day_dir / 'audit.md'
+        if prior_md.exists():
+            write_private(dest / (stamp + '-audit.md'), prior_md.read_text(encoding='utf-8'))
     write_private(day_dir / 'audit.json', json.dumps(report, indent=2, ensure_ascii=False) + '\n')
     write_private(day_dir / 'audit.md', render_audit(report))
     return report

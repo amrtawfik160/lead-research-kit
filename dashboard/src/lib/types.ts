@@ -75,6 +75,8 @@ export type DailyReport = {
   execute?: boolean;
   target?: number;
   delivered?: number;
+  this_run?: number;
+  prior_delivered?: number;
   shortfall?: number;
   fresh_available?: number;
   delivered_by_source?: Record<string, number>;

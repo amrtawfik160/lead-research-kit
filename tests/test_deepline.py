@@ -61,7 +61,8 @@ class RegistryTests(unittest.TestCase):
                          ('https://code.deepline.com', ('DEEPLINE_API_KEY',), ('find',), 'deepline'))
         self.assertIn(p.origin, OFFICIAL_ORIGINS)
         self.assertEqual(DEFAULT['providers']['deepline'], {'enabled': False, 'charges': {'find': {'credits': '1'}}})
-        self.assertEqual(list(DEFAULT['providers'])[-1], 'deepline')  # last in auto-route order
+        order = list(DEFAULT['providers'])
+        self.assertLess(order.index('deepline'), order.index('jina'))  # v7 adapters are appended after
         self.assertIn('deepline', MIGRATION_ADDED_PROVIDERS)
         self.assertEqual((p.min_spacing['find'], p.min_spacing['poll']), (1.0, 3.0))
         self.assertTrue(p.supports_pending)

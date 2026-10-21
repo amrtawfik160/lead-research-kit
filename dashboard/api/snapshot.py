@@ -461,7 +461,9 @@ class Dashboard:
 def _provider_row(name, config, store):
     entry = config['providers'][name]
     adapter = get_provider(name)
-    keys = tuple(getattr(adapter, 'auth_env', ()) or ())
+    required = tuple(getattr(adapter, 'auth_env', ()) or ())
+    optional = tuple(getattr(adapter, 'optional_auth_env', ()) or ())
+    keys = required or optional
     state = store.provider_state(name)
     budgets = [b for b in store.budgets() if b['provider'] == name]
     return {
@@ -469,7 +471,7 @@ def _provider_row(name, config, store):
         'enabled': bool(entry.get('enabled')),
         'operations': list(getattr(adapter, 'operations', ()) or ()),
         'auth_env': list(keys),
-        'key_present': True if not keys else any(bool(os.environ.get(k)) for k in keys),
+        'key_present': True if not required else any(bool(os.environ.get(k)) for k in required),
         'paused': bool(state.get('paused')),
         'pause_reason': state.get('pause_reason'),
         'charges': entry.get('charges') or {},

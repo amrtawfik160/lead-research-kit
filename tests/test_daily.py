@@ -78,6 +78,60 @@ class DailyTests(unittest.TestCase):
         self.assertEqual(third['shortfall'], 5)
         self.assertTrue(third['advice'])
 
+    def test_same_day_execute_merges_instead_of_overwrite(self):
+        self.seed([site('harbor.example', [
+            person('Jordan', 'Blake', 'harbor.example'),
+            person('Casey', 'Morgan', 'harbor.example', 'President'),
+            person('Riley', 'Quinn', 'harbor.example', 'Managing Broker'),
+        ])])
+        first = run_daily(self.work, self.store, self.config, target=1, sources=('build',), execute=True, day='2026-01-01')
+        second = run_daily(self.work, self.store, self.config, target=3, sources=('build',), execute=True, day='2026-01-01')
+        self.assertEqual(first['delivered'], 1)
+        self.assertEqual(second['prior_delivered'], 1)
+        self.assertEqual(second['this_run'], 2)
+        self.assertEqual(second['delivered'], 3)
+        self.assertEqual(second['shortfall'], 0)
+        from lead_research.quality import read_rows
+        rows = read_rows(second['files']['leads'])
+        names = {r['Full Name'] for r in rows}
+        self.assertEqual(len(names), 3)
+        self.assertIn('Jordan Blake', names)
+        self.assertTrue((self.work / 'daily' / '2026-01-01' / 'runs').is_dir())
+        third = run_daily(self.work, self.store, self.config, target=3, sources=('build',), execute=True, day='2026-01-01')
+        self.assertEqual((third['delivered'], third['this_run'], third['shortfall']), (3, 0, 0))
+
+    def test_jina_read_follows_team_page(self):
+        import json as _json
+        from lead_research.models import Response
+        self.config['providers']['jina']['enabled'] = True
+        self.store.confirm_budget('jina', 'reads', '2', 'synthetic keyless', attested_free=True)
+        home = ('<html><head><title>Ridge Realty</title></head><body>'
+                '<a href="/team">Our Team</a><p>Welcome to Ridge Realty.</p></body></html>')
+        team = ('<html><head><title>Team</title></head><body>'
+                '<div><h3>Casey Morgan</h3><p>President</p>'
+                '<a href="mailto:casey@ridge.example">casey@ridge.example</a></div></body></html>')
+        seen = []
+
+        class Jina:
+            def send(self, request):
+                body = _json.loads(request.body)
+                seen.append(body['url'])
+                html = team if '/team' in body['url'] else home
+                return Response(200, {'code': 200, 'data': {'html': html, 'url': body['url'], 'title': 'Ridge'}})
+
+        h = History(self.work / 'lead-history.sqlite3')
+        h.add_domains(['ridge.example'], 'records')
+        h.save_sites([{'domain': 'ridge.example', 'status': 'ok', 'company': {'name': 'Ridge Realty'},
+                       'people': [], 'pattern': None, 'pages_fetched': 1, 'errors': []}])
+        h.close()
+        report = run_daily(self.work, self.store, self.config, target=5, sources=('jina-read', 'build'),
+                           execute=True, day='2026-01-01', transport=Jina(), env={})
+        self.assertEqual(report['steps']['jina-read']['reads']['sent'], 1)
+        self.assertEqual(report['steps']['jina-read']['team_pages']['sent'], 1)
+        self.assertEqual(report['steps']['jina-read']['people'], 1)
+        self.assertEqual(report['delivered'], 1)
+        self.assertEqual(seen, ['https://ridge.example/', 'https://ridge.example/team'])
+
     def test_requires_work_email_by_default(self):
         self.seed([site('harbor.example', [person('Jordan', 'Blake', 'harbor.example', email=False)])])
         self.assertEqual(run_daily(self.work, self.store, self.config, target=5, sources=('build',))['delivered'], 0)
