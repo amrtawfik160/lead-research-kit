@@ -139,9 +139,9 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
                 detail ? (
                   <div className="space-y-4">
                     <div>
-                      <h3 className="mb-2 text-[13.5px] font-semibold">Evidence</h3>
+                      <h3 className="mb-2 text-sm font-semibold">Evidence</h3>
                       {detail.evidence.length === 0 ? (
-                        <p className="text-[12px] text-muted-foreground">None recorded.</p>
+                        <p className="text-sm text-muted-foreground">None recorded.</p>
                       ) : (
                         detail.evidence.map((item) => (
                           <FieldList
@@ -157,12 +157,12 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
                       )}
                     </div>
                     <div>
-                      <h3 className="mb-2 text-[13.5px] font-semibold">Candidates</h3>
+                      <h3 className="mb-2 text-sm font-semibold">Candidates</h3>
                       {detail.candidates.length === 0 ? (
-                        <p className="text-[12px] text-muted-foreground">None.</p>
+                        <p className="text-sm text-muted-foreground">None.</p>
                       ) : (
                         detail.candidates.map((item) => (
-                          <p key={String(item.id)} className="text-[12px]">
+                          <p key={String(item.id)} className="text-sm">
                             {display(item.email)} · {display(item.kind)}
                           </p>
                         ))

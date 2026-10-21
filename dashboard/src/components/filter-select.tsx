@@ -17,7 +17,7 @@ export function FilterSelect({
 }): React.ReactElement {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[12px] text-muted-foreground">{label}</span>
+      <span className="text-sm text-muted-foreground">{label}</span>
       <Select items={options} value={value} onValueChange={(next) => onChange(String(next ?? ""))}>
         <SelectTrigger size="sm" aria-label={ariaLabel} className="min-w-36">
           <SelectValue />

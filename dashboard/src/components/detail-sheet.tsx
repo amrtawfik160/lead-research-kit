@@ -75,11 +75,11 @@ export function DetailSheet({
       >
         <div className="flex h-[46px] shrink-0 items-center gap-1 border-b px-2.5 ps-4">
           {description ? (
-            <span className="truncate text-[12.5px] text-muted-foreground">{description}</span>
+            <span className="truncate text-sm text-muted-foreground">{description}</span>
           ) : null}
           {description && issueId ? <span className="text-muted-foreground">/</span> : null}
           {issueId ? (
-            <span className="font-mono text-[11.5px] text-muted-foreground">{issueId}</span>
+            <span className="font-mono text-xs text-muted-foreground">{issueId}</span>
           ) : null}
           <SheetTitle className="sr-only">{title}</SheetTitle>
           {description ? <SheetDescription className="sr-only">{description}</SheetDescription> : null}
@@ -89,12 +89,12 @@ export function DetailSheet({
           </Button>
         </div>
         <SheetPanel className="px-6 pt-5 pb-8">
-          <p className="mb-3 text-[19px] font-semibold tracking-[-0.018em] leading-[1.3]">{title}</p>
+          <p className="mb-3 font-heading text-2xl font-semibold tracking-tight">{title}</p>
           <div className="flex flex-col">
             {extra && extraFirst ? <div className="mb-[26px]">{extra}</div> : null}
             {blocks.map((block, index) => (
               <section key={block.title || `fields-${index}`} className={cn(index > 0 && "mt-[26px]")}>
-                {block.title ? <h3 className="mb-2 text-[13.5px] font-semibold">{block.title}</h3> : null}
+                {block.title ? <h3 className="mb-2 text-sm font-semibold">{block.title}</h3> : null}
                 <PropertyGrid rows={block.fields} />
               </section>
             ))}
@@ -113,16 +113,16 @@ export function PropertyGrid({
   rows: Array<{ label: string; value: React.ReactNode }>;
 }): React.ReactElement {
   return (
-    <dl className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-0 gap-y-0.5 text-[12.5px]">
+    <dl className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-0 gap-y-0.5 text-sm">
       {rows.map((row) => {
         const Icon = iconFor(row.label);
         return (
           <div key={row.label} className="contents">
-            <dt className="flex h-[30px] items-center gap-[7px] text-[#57544e] dark:text-[#b5b2ab]">
-              <Icon className="size-3.5 text-[#8c8880] dark:text-[#6f6c66]" />
+            <dt className="flex h-8 items-center gap-2 text-muted-foreground">
+              <Icon className="size-3.5" />
               {row.label}
             </dt>
-            <dd className="flex min-h-[30px] min-w-0 items-center wrap-break-word text-foreground">
+            <dd className="flex min-h-8 min-w-0 items-center wrap-break-word text-foreground">
               {row.value ?? "—"}
             </dd>
           </div>
@@ -148,16 +148,16 @@ export function FieldList({
   className?: string;
 }): React.ReactElement {
   return (
-    <dl className={cn("grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-[12.5px]", className)}>
+    <dl className={cn("grid grid-cols-[112px_minmax(0,1fr)] items-center gap-y-0.5 text-sm", className)}>
       {rows.map((row) => {
         const Icon = iconFor(row.label);
         return (
           <div key={row.label} className="contents">
-            <dt className="flex h-[30px] items-center gap-[7px] text-[#57544e] dark:text-[#b5b2ab]">
-              <Icon className="size-3.5 text-[#8c8880] dark:text-[#6f6c66]" />
+            <dt className="flex h-8 items-center gap-2 text-muted-foreground">
+              <Icon className="size-3.5" />
               {row.label}
             </dt>
-            <dd className="flex min-h-[30px] min-w-0 items-center wrap-break-word">{display(row.value)}</dd>
+            <dd className="flex min-h-8 min-w-0 items-center wrap-break-word">{display(row.value)}</dd>
           </div>
         );
       })}

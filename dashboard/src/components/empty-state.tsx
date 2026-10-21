@@ -25,9 +25,9 @@ export function EmptyState({
         <EmptyMedia variant="icon" className={compact ? "mb-2" : "mb-3"}>
           <Icon />
         </EmptyMedia>
-        <EmptyTitle className={compact ? "text-[14px] font-semibold" : "text-lg font-semibold"}>{title}</EmptyTitle>
+        <EmptyTitle className={compact ? "text-base font-semibold" : undefined}>{title}</EmptyTitle>
         {description ? (
-          <EmptyDescription className="max-w-[340px] text-[12.5px] leading-5">{description}</EmptyDescription>
+          <EmptyDescription className="max-w-[360px]">{description}</EmptyDescription>
         ) : null}
       </EmptyHeader>
     </Empty>

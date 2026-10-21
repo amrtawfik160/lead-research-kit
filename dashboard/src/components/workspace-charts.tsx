@@ -16,17 +16,17 @@ import type { TooltipContentProps } from "recharts";
 import { EmptyState } from "@/components/empty-state";
 import { cn } from "@/lib/utils";
 
-const AXIS = { fill: "var(--muted-foreground)", fontSize: 11 };
+const AXIS = { fill: "var(--muted-foreground)", fontSize: 12 };
 const GRID = "var(--border)";
 
 function shortLabel(value: string | number): string {
   const text = String(value);
-  return text.length > 16 ? `${text.slice(0, 15)}…` : text;
+  return text.length > 26 ? `${text.slice(0, 25)}…` : text;
 }
 
 function SeriesLegend({ items }: { items: Array<{ label: string; color: string }> }): React.ReactElement {
   return (
-    <ul className="mb-1 flex flex-wrap gap-x-3 gap-y-1 px-2 text-[11.5px] text-muted-foreground">
+    <ul className="mb-1 flex flex-wrap gap-x-3 gap-y-1 px-2 text-xs text-muted-foreground">
       {items.map((item) => (
         <li key={item.label} className="inline-flex items-center gap-1.5">
           <span className="size-2 rounded-[2px]" style={{ background: item.color }} />
@@ -49,10 +49,10 @@ export function ChartCard({
   className?: string;
 }): React.ReactElement {
   return (
-    <section className={cn("flex min-h-[300px] min-w-0 flex-col rounded-[10px] border bg-card", className)}>
+    <section className={cn("flex min-h-[300px] min-w-0 flex-col rounded-xl border bg-card", className)}>
       <div className="flex items-baseline justify-between gap-3 px-4 pt-4 pb-2">
-        <h3 className="text-[13.5px] font-semibold tracking-[-0.01em]">{title}</h3>
-        {hint ? <span className="text-[12px] tabular-nums text-muted-foreground">{hint}</span> : null}
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {hint ? <span className="text-xs tabular-nums text-muted-foreground">{hint}</span> : null}
       </div>
       <div className="min-h-0 flex-1 px-3 pb-4">{children}</div>
     </section>
@@ -66,7 +66,7 @@ function ChartTooltip({
 }: Partial<TooltipContentProps<number, string>>): React.ReactElement | null {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border bg-popover px-2.5 py-2 text-[12px] text-popover-foreground shadow-md">
+    <div className="rounded-lg border bg-popover px-2.5 py-2 text-sm text-popover-foreground shadow-md">
       {label ? <p className="mb-1 font-medium">{label}</p> : null}
       <ul className="grid gap-0.5">
         {payload.map((item) => (
@@ -181,7 +181,7 @@ export function HorizontalBarChart({
           <YAxis
             type="category"
             dataKey="name"
-            width={128}
+            width={156}
             tick={AXIS}
             tickLine={false}
             axisLine={false}
@@ -224,7 +224,7 @@ export function QuotaChart({
             <YAxis
               type="category"
               dataKey="name"
-              width={128}
+              width={156}
               tick={AXIS}
               tickLine={false}
               axisLine={false}

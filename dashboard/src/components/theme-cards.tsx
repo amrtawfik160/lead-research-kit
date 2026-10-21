@@ -2,8 +2,8 @@ import { CircleCheck, Moon, Sun } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { cn } from "@/lib/utils";
 
-const LIGHT = { bg: "#FBFAF8", s: "#F2F1EE", t: "#1D1C1A", b: "#E3E1DC", a: "#4B5BD6" };
-const DARK = { bg: "#1D1D1C", s: "#151514", t: "#ECEAE5", b: "#333230", a: "#8E9AF3" };
+const LIGHT = { bg: "#ffffff", s: "#fafafa", t: "#262626", b: "#e5e5e5", a: "#262626" };
+const DARK = { bg: "#171717", s: "#0a0a0a", t: "#f5f5f5", b: "#404040", a: "#f5f5f5" };
 
 function Preview({ c }: { c: typeof LIGHT }): React.ReactElement {
   return (
@@ -44,13 +44,13 @@ export function ThemeCards(): React.ReactElement {
             onClick={() => setTheme(value)}
             className={cn(
               "flex flex-col gap-2 rounded-[10px] border p-2 text-left transition-colors",
-              on ? "border-primary shadow-[0_0_0_3px_color-mix(in_srgb,var(--primary)_18%,transparent)]" : "hover:border-[#dad7d0] dark:hover:border-[#3a3936]",
+              on ? "border-primary shadow-[0_0_0_3px_color-mix(in_srgb,var(--primary)_18%,transparent)]" : "hover:border-input",
             )}
           >
             <div className="grid h-[84px] grid-cols-[30%_1fr] overflow-hidden rounded-[6px] border border-black/10">
               <Preview c={colors} />
             </div>
-            <span className="flex items-center gap-1.5 text-[13px] font-medium">
+            <span className="flex items-center gap-1.5 text-sm font-medium">
               <Icon className="size-3.5" />
               {label}
               {on ? <CircleCheck className="ms-auto size-4 text-primary" /> : null}

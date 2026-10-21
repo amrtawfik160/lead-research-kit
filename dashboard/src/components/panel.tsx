@@ -12,7 +12,7 @@ export function Panel({
   className?: string;
 }): React.ReactElement {
   return (
-    <section className={cn("overflow-hidden rounded-[10px] border bg-card", className)}>{children}</section>
+    <section className={cn("overflow-hidden rounded-xl border bg-card", className)}>{children}</section>
   );
 }
 
@@ -25,7 +25,7 @@ export function PanelHeader({
 }): React.ReactElement {
   return (
     <div className="flex items-center gap-2 px-4 pt-4 pb-3">
-      <h2 className="text-[13.5px] font-semibold tracking-[-0.01em]">{title}</h2>
+      <h2 className="text-sm font-semibold">{title}</h2>
       {actions ? <div className="ms-auto flex items-center gap-2">{actions}</div> : null}
     </div>
   );

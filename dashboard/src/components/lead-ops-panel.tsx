@@ -60,9 +60,9 @@ export function LeadOpsPanel({
 
   return (
     <div className="grid gap-3">
-      <h3 className="text-[13.5px] font-semibold">Outreach</h3>
-      <div className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-0 gap-y-1.5 text-[12.5px]">
-        <span className="text-[#57544e] dark:text-[#b5b2ab]">Stage</span>
+      <h3 className="text-sm font-semibold">Outreach</h3>
+      <div className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-0 gap-y-1.5 text-sm">
+        <span className="text-muted-foreground">Stage</span>
         <Select
           items={LEAD_STAGES}
           value={stage}
@@ -84,7 +84,7 @@ export function LeadOpsPanel({
             ))}
           </SelectPopup>
         </Select>
-        <span className="text-[#57544e] dark:text-[#b5b2ab]">Owner</span>
+        <span className="text-muted-foreground">Owner</span>
         <Input
           size="sm"
           value={owner}

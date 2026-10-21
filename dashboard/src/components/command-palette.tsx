@@ -121,7 +121,7 @@ export function CommandPalette({
             {(group: { value: string; items: CommandEntry[] }, index: number) => (
               <div key={group.value}>
                 <CommandGroup items={group.items}>
-                  <CommandGroupLabel className="px-2 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+                  <CommandGroupLabel className="px-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                     {group.value}
                   </CommandGroupLabel>
                   <CommandCollection>
@@ -139,7 +139,7 @@ export function CommandPalette({
             )}
           </CommandList>
         </Command>
-        <CommandFooter className="text-[11px] text-muted-foreground">
+        <CommandFooter className="text-xs text-muted-foreground">
           <KbdGroup>
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd>

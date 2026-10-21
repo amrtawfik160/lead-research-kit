@@ -61,7 +61,7 @@ function TableSkeleton(): React.ReactElement {
       </div>
       <Sk className="mb-2 h-8 w-full" />
       {Array.from({ length: 8 }, (_, index) => (
-        <div key={index} className="flex h-10 items-center gap-3 border-b border-[#f0eeea] dark:border-[#252523]">
+        <div key={index} className="flex h-10 items-center gap-3 border-b">
           <Sk className="h-3.5 w-3.5 rounded-full" />
           <Sk className="h-3 w-12" />
           <Sk className="h-3.5 w-[38%]" />

@@ -9,7 +9,7 @@ import { IssueList, type IssueItem } from "@/components/issue-list";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { api } from "@/lib/api";
-import { display } from "@/lib/format";
+import { display, humanName } from "@/lib/format";
 import { issueKey } from "@/lib/gr8r";
 import { leadFieldSections } from "@/lib/lead-fields";
 import { isVerifiedLead, LEAD_STAGES, leadSource, leadStage } from "@/lib/lead-ops";
@@ -21,7 +21,7 @@ function toIssue(row: LeadRow, index: number): IssueItem<LeadRow> {
     id: issueKey("LEA", index),
     title: display(row["Full Name"]),
     project: display(row.Company),
-    status: display(leadSource(row)),
+    status: humanName(leadSource(row)),
     priority: display(row.Tier || row.Confidence),
     due: display(row.City),
     avatar: display(row.Company),
@@ -89,7 +89,7 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
                 onChange={setSource}
                 options={[
                   { value: "all", label: "All sources" },
-                  ...sources.map((item) => ({ value: item, label: item })),
+                  ...sources.map((item) => ({ value: item, label: humanName(item) })),
                 ]}
               />
               <FilterSelect

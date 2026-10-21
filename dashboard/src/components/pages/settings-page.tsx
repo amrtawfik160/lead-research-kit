@@ -87,8 +87,8 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
           <Card>
           <CardPanel className="flex flex-col gap-4 p-4">
             <div>
-              <h2 className="text-[14.5px] font-semibold">Theme</h2>
-              <p className="mt-1 text-[12.5px] text-muted-foreground">Customize how Veinore looks on this device.</p>
+              <h2 className="font-heading text-lg font-semibold">Theme</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Customize how Veinore looks on this device.</p>
             </div>
             <ThemeCards />
           </CardPanel>

@@ -1,4 +1,4 @@
-import { titleCase } from "@/lib/format";
+import { humanName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const TONES = [
@@ -20,26 +20,24 @@ export function CountBar({
   if (!items.length) return null;
   const total = items.reduce((sum, [, value]) => sum + value, 0) || 1;
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
-      <div className="flex h-1.5 overflow-hidden rounded-full bg-muted">
-        {items.map(([label, value], index) => (
-          <div
-            key={label}
-            className={cn("h-full min-w-0.5 transition-[width]", TONES[index % TONES.length])}
-            style={{ width: `${(value / total) * 100}%` }}
-            title={`${titleCase(label)} ${value}`}
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        {items.map(([label, value], index) => (
-          <span key={label} className="inline-flex items-center gap-1.5">
-            <span className={cn("size-1.5 rounded-full", TONES[index % TONES.length])} />
-            {titleCase(label)}
-            <span className="tabular-nums text-foreground/80">{value}</span>
-          </span>
-        ))}
-      </div>
+    <div className={cn("grid gap-3", className)}>
+      {items.map(([label, value], index) => (
+        <div key={label} className="grid gap-1.5">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <span className={cn("size-2.5 shrink-0 rounded-full", TONES[index % TONES.length])} />
+              <span className="truncate">{humanName(label)}</span>
+            </span>
+            <span className="tabular-nums text-muted-foreground">{value}</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className={cn("h-full rounded-full", TONES[index % TONES.length])}
+              style={{ width: `${Math.max(6, (value / total) * 100)}%` }}
+            />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

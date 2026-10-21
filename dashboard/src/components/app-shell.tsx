@@ -9,6 +9,7 @@ import { EntityAvatar } from "@/components/entity-avatar";
 import { Mark } from "@/components/logo";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { useTheme } from "@/components/theme-provider";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu";
@@ -22,7 +23,6 @@ import {
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
@@ -57,26 +57,25 @@ function NavList({
           <SidebarMenuItem key={item.href}>
             <SidebarMenuButton
               isActive={active}
-              size="sm"
               tooltip={`${item.label} · ${item.shortcut}`}
               render={<Link href={item.href} />}
-              className="h-[30px] rounded-[6px] px-2 text-[13.5px] font-normal"
             >
-              <item.icon className="size-4" />
-              <span>{item.label}</span>
+              <item.icon />
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {count != null && count > 0 ? (
+                <Badge
+                  render={<div />}
+                  size="default"
+                  variant="secondary"
+                  className={cn(
+                    "ms-auto tabular-nums group-data-[collapsible=icon]:hidden",
+                    accent && "bg-info/12 text-info-foreground",
+                  )}
+                >
+                  {count}
+                </Badge>
+              ) : null}
             </SidebarMenuButton>
-            {count != null && count > 0 ? (
-              <SidebarMenuBadge
-                className={cn(
-                  "pointer-events-none text-[11px] font-normal tabular-nums",
-                  accent
-                    ? "grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 font-semibold text-primary-foreground"
-                    : "text-muted-foreground",
-                )}
-              >
-                {count}
-              </SidebarMenuBadge>
-            ) : null}
           </SidebarMenuItem>
         );
       })}
@@ -135,13 +134,13 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
           <div className="flex items-center gap-0.5">
             <Menu>
               <MenuTrigger
-                className="flex h-[32px] min-w-0 flex-1 items-center gap-2 rounded-[6px] px-1.5 text-left transition-colors hover:bg-sidebar-accent"
+                className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-left text-sm transition-colors hover:bg-sidebar-accent"
                 aria-label="Switch workspace"
               >
-                <span className="grid size-[22px] place-items-center overflow-hidden rounded-[6px] bg-black text-white">
+                <span className="grid size-6 place-items-center overflow-hidden rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
                   <Mark className="size-3.5" />
                 </span>
-                <span className="min-w-0 truncate text-[13.5px] font-semibold group-data-[collapsible=icon]:hidden">
+                <span className="min-w-0 truncate font-semibold group-data-[collapsible=icon]:hidden">
                   Veinore
                 </span>
                 <ChevronsUpDown className="ms-auto size-3.5 text-muted-foreground group-data-[collapsible=icon]:hidden" />
@@ -151,7 +150,7 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
                 <MenuItem onClick={() => router.push("/settings")}>Open settings</MenuItem>
               </MenuPopup>
             </Menu>
-            <SidebarTrigger className="size-[26px] group-data-[collapsible=icon]:hidden" />
+            <SidebarTrigger className="group-data-[collapsible=icon]:hidden" />
           </div>
         </SidebarHeader>
         <SidebarContent className="gap-0">
@@ -161,9 +160,7 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
             </SidebarGroupContent>
           </SidebarGroup>
           <SidebarGroup className="p-2 pt-1">
-            <SidebarGroupLabel className="h-6 px-2 text-[11px] font-semibold tracking-[0.06em] text-[#6b6760] uppercase dark:text-[#9a968f]">
-              Workspace
-            </SidebarGroupLabel>
+            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
             <SidebarGroupContent>
               <NavList items={WORKSPACE} pathname={pathname} counts={counts} />
             </SidebarGroupContent>
@@ -174,22 +171,22 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
             <SidebarMenuItem>
               <Menu>
                 <MenuTrigger
-                  className="flex h-[30px] w-full items-center gap-2 rounded-[6px] px-2 text-left text-[13.5px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground group-data-[collapsible=icon]:justify-center"
+                  className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:justify-center"
                   aria-label="Shortcuts"
                 >
-                  <CircleHelp className="size-4 text-[#8c8880]" />
+                  <CircleHelp className="size-4" />
                   <span className="group-data-[collapsible=icon]:hidden">Shortcuts</span>
                 </MenuTrigger>
                 <MenuPopup align="start" side="top" className="min-w-56">
                   <MenuItem onClick={openShortcuts}>
                     <Keyboard className="size-4" />
                     Keyboard shortcuts
-                    <span className="ms-auto text-[11px] text-muted-foreground">?</span>
+                    <Kbd className="ms-auto">?</Kbd>
                   </MenuItem>
                   <MenuItem onClick={openPalette}>
                     <Search className="size-4" />
                     Command menu
-                    <span className="ms-auto text-[11px] text-muted-foreground">⌘K</span>
+                    <Kbd className="ms-auto">⌘K</Kbd>
                   </MenuItem>
                 </MenuPopup>
               </Menu>
@@ -198,7 +195,7 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
           <NavList items={FOOTER_NAV} pathname={pathname} />
           <Menu>
             <MenuTrigger
-              className="flex h-9 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[13.5px] font-medium transition-colors hover:bg-sidebar-accent group-data-[collapsible=icon]:justify-center"
+              className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm font-medium transition-colors hover:bg-sidebar-accent group-data-[collapsible=icon]:justify-center"
               aria-label="Account menu"
             >
               <EntityAvatar name="Veinore" size={22} />
@@ -213,7 +210,7 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
               <MenuItem onClick={toggleTheme}>
                 {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
                 {theme === "dark" ? "Switch to light" : "Switch to dark"}
-                <span className="ms-auto text-[11px] text-muted-foreground">D</span>
+                <Kbd className="ms-auto">D</Kbd>
               </MenuItem>
             </MenuPopup>
           </Menu>
@@ -221,8 +218,8 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="min-w-0 bg-background">
-        <header className="flex h-[46px] shrink-0 items-center gap-1.5 border-b pr-3 pl-6">
-          <nav className="flex min-w-0 items-center gap-2 text-[12.5px] text-muted-foreground">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-6">
+          <nav className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
             <span className="font-medium text-foreground">{current?.label || "Veinore"}</span>
           </nav>
           <span className="flex-1" />
@@ -235,7 +232,7 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
           >
             <Search />
             <span className="min-w-0 flex-1 truncate text-left">Search leads…</span>
-            <Kbd className="h-4 min-w-0 px-1 text-[10px]">⌘K</Kbd>
+            <Kbd className="ms-auto">⌘K</Kbd>
           </Button>
           <Button
             size="icon-sm"
@@ -288,8 +285,8 @@ export function AppShell({ children }: { children: ReactNode }): React.ReactElem
       <SidebarProvider
         style={
           {
-            "--sidebar-width": "252px",
-            "--sidebar-width-icon": "52px",
+            "--sidebar-width": "16rem",
+            "--sidebar-width-icon": "3rem",
           } as CSSProperties
         }
       >

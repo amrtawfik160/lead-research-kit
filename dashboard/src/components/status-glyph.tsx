@@ -24,12 +24,12 @@ const ICONS = {
 } as const;
 
 const COLOR: Record<Tone, string> = {
-  todo: "text-[#7c7870] dark:text-[#a6a39c]",
-  progress: "text-[#c88a14] dark:text-[#d8a443]",
-  review: "text-[#7652c2] dark:text-[#a98deb]",
-  done: "text-[#2e8456] dark:text-[#5cba86]",
-  alert: "text-[#b23c30] dark:text-[#e57d70]",
-  backlog: "text-[#a29e96] dark:text-[#6f6c66]",
+  todo: "text-muted-foreground",
+  progress: "text-warning-foreground",
+  review: "text-info-foreground",
+  done: "text-success-foreground",
+  alert: "text-destructive-foreground",
+  backlog: "text-muted-foreground",
 };
 
 export function StatusGlyph({
@@ -58,8 +58,8 @@ export function PriorityGlyph({
   return (
     <span
       className={cn(
-        "inline-flex w-3.5 justify-center text-[11px] font-semibold leading-none",
-        urgent || high ? "text-[#b23c30] dark:text-[#e57d70]" : low ? "text-muted-foreground" : "text-[#8f5e0e] dark:text-[#d8a443]",
+        "inline-flex w-3.5 justify-center text-xs font-semibold leading-none",
+        urgent || high ? "text-destructive-foreground" : low ? "text-muted-foreground" : "text-warning-foreground",
         className,
       )}
       aria-hidden
@@ -77,7 +77,7 @@ export function QuietStatus({
   className?: string;
 }): React.ReactElement {
   return (
-    <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-[12.5px] text-[#57544e] dark:text-[#b5b2ab]", className)}>
+    <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground", className)}>
       <StatusGlyph value={value} />
       <span className="truncate">{display(value)}</span>
     </span>
