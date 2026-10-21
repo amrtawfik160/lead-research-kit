@@ -88,6 +88,40 @@ export type DailyReport = {
   files?: Record<string, string>;
 };
 
+export type LeadStage = "new" | "contacted" | "replied" | "qualified" | "disqualified";
+
+export type OverviewChartPoint = { date: string; delivered: number; target: number };
+export type SourceSlice = { name: string; count: number };
+export type QuotaRow = {
+  id: string;
+  pool: string;
+  remaining?: string;
+  remaining_units: number;
+  spent: string;
+  spent_units: number;
+  quota: string;
+  quota_units: number;
+};
+export type SpentRow = {
+  provider: string;
+  pool: string;
+  spent: string;
+  spent_units: number;
+};
+export type OverviewCharts = {
+  leads_per_day: OverviewChartPoint[];
+  verification: { verified: number; unverified: number; rate: number };
+  provider_quota: QuotaRow[];
+  sources: SourceSlice[];
+  budget_spent: SpentRow[];
+};
+export type DuplicateWarning = {
+  kind: "within_file" | "across_batches" | "history";
+  email: string;
+  name?: string;
+  also_in?: string;
+};
+
 export type Overview = {
   meta: Meta;
   status: Status;
@@ -96,6 +130,8 @@ export type Overview = {
   report: DailyReport | null;
   research_queue_count: number;
   advice: string[];
+  charts?: OverviewCharts;
+  duplicates?: DuplicateWarning[];
 };
 
 export type Contact = {
@@ -143,6 +179,28 @@ export type DailyPayload = {
   } | null;
   leads: LeadRow[];
   batches: DailyBatch[];
+  duplicates?: DuplicateWarning[];
+};
+
+export type LeadOpsRecord = {
+  stage?: LeadStage;
+  notes?: string;
+  owner?: string;
+  updated_at?: number;
+};
+
+export type BudgetView = {
+  budgets: Array<
+    Budget & {
+      spent?: string;
+      spent_units?: number;
+      quota?: string;
+      quota_units?: number;
+    }
+  >;
+  refills: Array<Record<string, unknown>>;
+  providers: ProviderRow[];
+  spent: SpentRow[];
 };
 
 export type Attempt = {

@@ -5,7 +5,7 @@ import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
-import { StatusBadge } from "@/components/status-badge";
+import { QuietStatus } from "@/components/status-glyph";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
@@ -84,7 +84,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                       key: "reason",
                       header: "Reason",
                       width: "10rem",
-                      render: (item) => <StatusBadge value={String(item.reason)} />,
+                      render: (item) => <QuietStatus value={String(item.reason)} />,
                     },
                     {
                       key: "added_at",
@@ -109,7 +109,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                       key: "outcome",
                       header: "Outcome",
                       width: "8rem",
-                      render: (item) => <StatusBadge value={String(item.outcome)} />,
+                      render: (item) => <QuietStatus value={String(item.outcome)} />,
                     },
                     { key: "email_source", header: "Email source", width: "10rem" },
                     { key: "batch", header: "Batch", width: "8rem" },
@@ -155,6 +155,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
         open={Boolean(row)}
         onOpenChange={(open) => !open && setRow(null)}
         title="History row"
+        issueId={display(row?.email || row?.domain || row?.id)}
         fields={Object.entries(row || {}).map(([label, value]) => ({ label, value: display(value) }))}
       />
     </>

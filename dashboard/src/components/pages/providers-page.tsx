@@ -6,7 +6,7 @@ import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
-import { StatusBadge } from "@/components/status-badge";
+import { QuietStatus } from "@/components/status-glyph";
 import { Switch } from "@/components/ui/switch";
 import { toastManager } from "@/components/ui/toast";
 import { api } from "@/lib/api";
@@ -79,7 +79,7 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
                   header: "Key",
                   width: "6.5rem",
                   value: (item) => (item.key_present ? "present" : "missing"),
-                  render: (item) => <StatusBadge value={item.key_present ? "present" : "missing"} />,
+                  render: (item) => <QuietStatus value={item.key_present ? "present" : "missing"} />,
                 },
                 {
                   key: "paused",
@@ -87,10 +87,7 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
                   width: "14rem",
                   value: (item) => (item.paused ? item.pause_reason || "paused" : "clear"),
                   render: (item) => (
-                    <StatusBadge
-                      value={item.paused ? item.pause_reason || "paused" : "clear"}
-                      fallback={item.paused ? "warning" : "secondary"}
-                    />
+                    <QuietStatus value={item.paused ? item.pause_reason || "paused" : "clear"} />
                   ),
                 },
                 {
@@ -122,6 +119,7 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
               onOpenChange={(open) => !open && setRow(null)}
               title={display(row?.id)}
               description={row?.auth_env.length ? `Env: ${row.auth_env.join(", ")}` : "No API key required"}
+              issueId={row?.id}
               sections={[
                 {
                   title: "Status",

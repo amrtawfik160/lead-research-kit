@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { DataTable } from "@/components/data-table";
+import { useMemo, useState } from "react";
 import { DetailSheet, FieldList } from "@/components/detail-sheet";
+import { IssueList, type IssueItem } from "@/components/issue-list";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
-import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -20,6 +19,21 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
   const [selected, setSelected] = useState<Contact | null>(null);
   const [detail, setDetail] = useState<ContactDetail | null>(null);
   const [reason, setReason] = useState("operator_hold");
+  const issues = useMemo<Array<IssueItem<Contact>>>(
+    () =>
+      (data?.contacts || []).map((row) => ({
+        id: row.id,
+        title: display(row.name),
+        project: display(row.company),
+        status: row.held ? "held" : row.qualified ? "qualified" : "open",
+        priority: display(row.source_channel),
+        due: display(row.title),
+        avatar: display(row.company || row.name),
+        group: display(row.source_channel),
+        raw: row,
+      })),
+    [data],
+  );
 
   async function open(contact: Contact) {
     setSelected(contact);
@@ -67,45 +81,29 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
       >
         {data ? (
           <PageBody className="flex min-h-0 flex-1 flex-col">
-            <DataTable
-              rows={data.contacts}
-              rowKey={(row) => row.id}
-              onRowClick={(row) => void open(row)}
-              selectedKey={selected?.id}
+            <IssueList
+              items={issues}
+              selectedId={selected?.id}
+              onSelect={(item) => {
+                if (!item) {
+                  setSelected(null);
+                  setDetail(null);
+                  return;
+                }
+                void open(item.raw);
+              }}
               emptyTitle="No contacts match"
               emptyDescription="Clear the filter or change grouping."
-              groupOptions={[
-                { value: "source_channel", label: "Channel" },
-                { value: "held", label: "Held" },
-                { value: "qualified", label: "Qualified" },
-              ]}
-              columns={[
-                { key: "name", header: "Name", width: "11rem" },
-                { key: "title", header: "Title", width: "11rem" },
-                { key: "company", header: "Company", width: "13rem" },
-                {
-                  key: "source_channel",
-                  header: "Channel",
-                  width: "7rem",
-                  render: (row) => <StatusBadge value={row.source_channel} />,
-                },
-                {
-                  key: "qualified",
-                  header: "Qualified",
-                  width: "6.5rem",
-                  value: (row) => (row.qualified ? "yes" : "no"),
-                  render: (row) => <StatusBadge value={row.qualified ? "yes" : "no"} />,
-                },
-                {
-                  key: "held",
-                  header: "Held",
-                  width: "6rem",
-                  value: (row) => (row.held ? "held" : "active"),
-                  render: (row) => <StatusBadge value={row.held ? "held" : "active"} />,
-                },
-                { key: "email", header: "Email", width: "14rem", mono: true },
-                { key: "evidence_count", header: "Evidence", width: "6rem", align: "right" },
-              ]}
+              searchPlaceholder="Filter contacts…"
+              searchLabel="Filter contacts"
+              filterAllLabel="All statuses"
+              columns={{
+                title: "Contact",
+                project: "Company",
+                status: "Status",
+                priority: "Channel",
+                due: "Title",
+              }}
             />
             <DetailSheet
               open={Boolean(selected)}
@@ -116,7 +114,8 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
                 }
               }}
               title={display(selected?.name)}
-              description={display(selected?.id)}
+              description={display(selected?.company)}
+              issueId={selected?.id}
               sections={[
                 {
                   title: "Identity",

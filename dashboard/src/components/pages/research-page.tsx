@@ -5,7 +5,7 @@ import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
-import { StatusBadge } from "@/components/status-badge";
+import { QuietStatus } from "@/components/status-glyph";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { display } from "@/lib/format";
@@ -48,7 +48,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                       key: "source_channel",
                       header: "Channel",
                       width: "7rem",
-                      render: (row) => <StatusBadge value={row.source_channel} />,
+                      render: (row) => <QuietStatus value={row.source_channel} />,
                     },
                     { key: "source_url", header: "Source" },
                   ]}
@@ -69,7 +69,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                       key: "classification",
                       header: "Class",
                       width: "10rem",
-                      render: (row) => <StatusBadge value={String(row.classification)} />,
+                      render: (row) => <QuietStatus value={String(row.classification)} />,
                     },
                     { key: "source_url", header: "Source", width: "16rem" },
                     { key: "excerpt", header: "Excerpt" },
@@ -91,7 +91,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                       key: "kind",
                       header: "Kind",
                       width: "12rem",
-                      render: (row) => <StatusBadge value={String(row.kind)} />,
+                      render: (row) => <QuietStatus value={String(row.kind)} />,
                     },
                     {
                       key: "identity_confirmed",
@@ -111,6 +111,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
         onOpenChange={(open) => !open && setContact(null)}
         title={display(contact?.name)}
         description="Needs public evidence before a primary email is stored."
+        issueId={contact?.id}
         sections={[
           {
             title: "Identity",
@@ -127,6 +128,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
         open={Boolean(record)}
         onOpenChange={(open) => !open && setRecord(null)}
         title={display(record?.email || record?.id)}
+        issueId={display(record?.id || record?.email)}
         fields={Object.entries(record || {}).map(([label, value]) => ({
           label,
           value: display(value),

@@ -1,17 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Inbox } from "lucide-react";
+import { Users } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardPanel } from "@/components/ui/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import { EmptyState } from "@/components/empty-state";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -168,15 +162,12 @@ export function QualityPage(): React.ReactElement {
               </Tabs>
             </div>
           ) : (
-            <Empty className="min-h-64 rounded-xl border py-10">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <Inbox />
-                </EmptyMedia>
-                <EmptyTitle className="text-base font-medium">Paste a list</EmptyTitle>
-                <EmptyDescription>Sample CSV is already loaded. Run Clean — nothing is sent to providers.</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
+            <EmptyState
+              className="min-h-64 rounded-[10px] border"
+              icon={Users}
+              title="Paste a list"
+              description="Sample CSV is already loaded. Run Clean — nothing is sent to providers."
+            />
           )}
         </div>
       </PageBody>

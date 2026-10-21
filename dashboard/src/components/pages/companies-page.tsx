@@ -5,7 +5,7 @@ import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
-import { StatusBadge } from "@/components/status-badge";
+import { QuietStatus } from "@/components/status-glyph";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { display, formatTime } from "@/lib/format";
@@ -51,7 +51,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                       key: "status",
                       header: "Status",
                       width: "7rem",
-                      render: (item) => <StatusBadge value={String(item.status || "uncrawled")} />,
+                      render: (item) => <QuietStatus value={String(item.status || "uncrawled")} />,
                     },
                     { key: "people", header: "People", width: "5rem", align: "right" },
                     { key: "emails", header: "Emails", width: "5rem", align: "right" },
@@ -77,7 +77,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                       key: "status",
                       header: "Status",
                       width: "7rem",
-                      render: (item) => <StatusBadge value={String(item.status)} />,
+                      render: (item) => <QuietStatus value={String(item.status)} />,
                     },
                     { key: "people", header: "People", width: "5rem", align: "right" },
                     { key: "emails", header: "Emails", width: "5rem", align: "right" },
@@ -99,7 +99,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                       key: "status",
                       header: "Status",
                       width: "7rem",
-                      render: (item) => <StatusBadge value={String(item.status)} />,
+                      render: (item) => <QuietStatus value={String(item.status)} />,
                     },
                     { key: "domain", header: "Domain", width: "14rem", mono: true },
                     {
@@ -135,6 +135,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
         open={Boolean(row)}
         onOpenChange={(open) => !open && setRow(null)}
         title={display(row?.domain || row?.key || row?.full_name)}
+        issueId={display(row?.domain || row?.key || row?.id)}
         fields={Object.entries(row || {}).map(([label, value]) => ({ label, value: display(value) }))}
       />
     </>

@@ -136,6 +136,84 @@ class SampleWorkspaceTests(unittest.TestCase):
         self.assertFalse(after['hunter']['key_present'])
         self.assertTrue(after['zerobounce']['key_present'] is False or after['zerobounce']['enabled'])
 
+    def test_overview_charts_use_workspace_batches(self):
+        charts = self.dash.overview()['charts']
+        dates = [row['date'] for row in charts['leads_per_day']]
+        self.assertIn('2026-10-20', dates)
+        self.assertIn('2026-10-19', dates)
+        self.assertGreaterEqual(charts['leads_per_day'][-1]['delivered'], 10)
+        self.assertGreaterEqual(charts['verification']['rate'], 0)
+        self.assertTrue(charts['sources'])
+        self.assertTrue(any(row['id'] == 'hunter' for row in charts['provider_quota']))
+        self.assertIn('budget_spent', charts)
+
+    def test_ops_sidecar_does_not_rewrite_leads_csv(self):
+        saved = self.dash.update_ops({
+            'key': 'jane@harborrealty.example',
+            'stage': 'replied',
+            'owner': 'A. Sample',
+            'notes': 'Follow up after the intro.',
+        })
+        self.assertEqual(saved['ops']['stage'], 'replied')
+        self.assertEqual((self.root / 'veinore-ops.json').stat().st_mode & 0o777, 0o600)
+        jane = next(row for row in self.dash.leads('2026-10-20')['leads'] if row.get('Email') == 'jane@harborrealty.example')
+        self.assertEqual(jane['Stage'], 'replied')
+        self.assertEqual(jane['Owner'], 'A. Sample')
+        csv_text = (self.root / 'daily' / '2026-10-20' / 'leads.csv').read_text(encoding='utf-8')
+        self.assertNotIn('Follow up after the intro.', csv_text)
+        self.assertNotIn('A. Sample', csv_text)
+        for header in HEADERS:
+            self.assertIn(header, jane)
+
+    def test_unknown_lead_stage_is_rejected(self):
+        with self.assertRaises(PolicyError) as caught:
+            self.dash.update_ops({'key': 'jane@harborrealty.example', 'stage': 'won'})
+        self.assertEqual(str(caught.exception), 'unknown_lead_stage')
+
+    def test_daily_run_defaults_to_preview(self):
+        report = self.dash.daily_run(target=3)
+        self.assertFalse(report['execute'])
+        self.assertEqual(report['target'], 3)
+        leads_path = str((report.get('files') or {}).get('leads') or '')
+        self.assertIn('-preview', leads_path)
+        preview_dir = self.root / 'daily' / (report['date'] + '-preview')
+        self.assertTrue(preview_dir.is_dir())
+
+    def test_daily_run_caps_target(self):
+        report = self.dash.daily_run(target=999)
+        self.assertEqual(report['target'], 200)
+        self.assertFalse(report['execute'])
+
+    def test_duplicate_warnings_across_batches(self):
+        other = self.root / 'daily' / '2026-10-18'
+        other.mkdir()
+        (other / 'report.json').write_text(json.dumps({
+            'date': '2026-10-18', 'execute': True, 'target': 1, 'delivered': 1,
+        }), encoding='utf-8')
+        (other / 'leads.csv').write_text(
+            'Full Name,Title,Company,Company Website,LinkedIn URL,Email\n'
+            'Jane Sample,Founder,Harbor Realty Group,harborrealty.example,,jane@harborrealty.example\n',
+            encoding='utf-8',
+        )
+        warnings = self.dash.daily('2026-10-20')['duplicates']
+        jane = [row for row in warnings if row['email'] == 'jane@harborrealty.example']
+        self.assertTrue(jane)
+        self.assertEqual(jane[0]['kind'], 'across_batches')
+        self.assertEqual(jane[0]['also_in'], '2026-10-18')
+
+    def test_budget_view_preserves_attested_pools(self):
+        view = self.dash.budget_view()
+        pools = {(row['provider'], row['pool']) for row in view['budgets']}
+        self.assertIn(('hunter', 'credits'), pools)
+        self.assertTrue(any(row.get('remaining') for row in view['budgets']))
+        zb = next((row for row in view['budgets'] if row['provider'] == 'zerobounce'), None)
+        self.assertIsNotNone(zb)
+        self.assertEqual(zb['spent'], '1')
+        self.assertLess(zb['spent_units'], 10_000_000)
+        charts = self.dash.overview()['charts']
+        spent = next(row for row in charts['budget_spent'] if row['provider'] == 'zerobounce')
+        self.assertEqual(spent['spent'], '1')
+
     def test_jobs_include_synthetic_verify(self):
         attempts = self.dash.jobs()['attempts']
         self.assertTrue(any(a['provider'] == 'zerobounce' and a['state'] == 'completed' for a in attempts))

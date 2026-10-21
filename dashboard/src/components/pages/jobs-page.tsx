@@ -5,7 +5,7 @@ import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
-import { StatusBadge } from "@/components/status-badge";
+import { QuietStatus } from "@/components/status-glyph";
 import { api } from "@/lib/api";
 import { display, formatTime } from "@/lib/format";
 import type { JobsPayload } from "@/lib/load";
@@ -56,14 +56,14 @@ export function JobsPage({ initial = null }: { initial?: JobsPayload | null }): 
                   key: "state",
                   header: "State",
                   width: "7rem",
-                  render: (item) => <StatusBadge value={item.state} />,
+                  render: (item) => <QuietStatus value={item.state} />,
                 },
                 { key: "email", header: "Email", width: "14rem", mono: true },
                 {
                   key: "assessment",
                   header: "Result",
                   width: "8rem",
-                  render: (item) => <StatusBadge value={item.assessment} />,
+                  render: (item) => <QuietStatus value={item.assessment} />,
                 },
                 {
                   key: "created_at",
@@ -78,6 +78,7 @@ export function JobsPage({ initial = null }: { initial?: JobsPayload | null }): 
               onOpenChange={(open) => !open && setRow(null)}
               title={row ? row.id : "Attempt"}
               description={row ? `${row.provider} · ${row.operation}` : undefined}
+              issueId={row?.id}
               sections={[
                 {
                   title: "Result",

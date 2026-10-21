@@ -42,6 +42,8 @@ export type FieldSection = {
   fields: Array<{ label: string; value: string }>;
 };
 
+const OPS_KEYS = new Set(["Stage", "Notes", "Owner", "ops_key", "ops_updated_at"]);
+
 function present(value: unknown): boolean {
   return value != null && value !== "";
 }
@@ -60,7 +62,7 @@ export function leadFieldSections(lead: LeadRow | null): FieldSection[] {
     if (fields.length) sections.push({ title: group.title, fields });
   }
   const rest = Object.entries(lead)
-    .filter(([key, value]) => !used.has(key) && present(value))
+    .filter(([key, value]) => !used.has(key) && !OPS_KEYS.has(key) && present(value))
     .map(([label, value]) => ({ label: titleCase(label), value: display(value) }));
   if (rest.length) sections.push({ title: "More", fields: rest });
   return sections;

@@ -12,15 +12,15 @@ Synthetic `example.org` / `.example` fixtures only. No contact database, API key
 
 ## Screenshots
 
-Synthetic sample workspace (light theme, GR8R-style chrome). No real people or keys.
+Synthetic sample workspace (light theme, paper chrome). No real people or keys.
 
 | Overview | Leads |
 |---|---|
 | ![Overview](docs/screenshots/overview.png) | ![Leads](docs/screenshots/leads-table.png) |
 
-| Lead detail | Daily report |
+| Lead detail | Daily |
 |---|---|
-| ![Lead detail](docs/screenshots/lead-detail.png) | ![Daily report](docs/screenshots/daily-report.png) |
+| ![Lead detail](docs/screenshots/lead-detail.png) | ![Daily](docs/screenshots/daily-report.png) |
 
 | Providers | Command palette |
 |---|---|
@@ -32,7 +32,7 @@ Synthetic sample workspace (light theme, GR8R-style chrome). No real people or k
 - **Evidence first** — source excerpts, person-match attestations, holds; guesses stay candidates until verified
 - **Exact budgets** — providers start disabled and zero; `budget confirm` is operator attestation of free allowance
 - **Dry by default** — network commands plan unless `--execute`; pauses stay until an explicit review
-- **Veinore dashboard** — local GR8R-style workspace UI (coss ui) over the same Store / History / daily files; keys never leave the process environment
+- **Veinore dashboard** — local workspace UI (coss ui) over the same Store / History / daily files; keys never leave the process environment
 
 It does **not** send email, probe SMTP, scrape private profiles, rotate identities, or prove ownership or consent.
 

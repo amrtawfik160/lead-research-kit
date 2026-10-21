@@ -1,5 +1,6 @@
 import type {
   Attempt,
+  BudgetView,
   Contact,
   DailyPayload,
   Meta,
@@ -30,6 +31,7 @@ export type ProvidersPayload = {
   budgets: Array<Record<string, unknown>>;
 };
 export type JobsPayload = { attempts: Attempt[] };
+export type BudgetPayload = BudgetView;
 export type HistoryPayload = {
   stats: Record<string, number>;
   delivered: Array<Record<string, unknown>>;

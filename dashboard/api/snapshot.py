@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import os
+import time
 from pathlib import Path
 
 from lead_research import __version__
@@ -12,6 +13,7 @@ from lead_research.configuration import default_config, load_config, save_config
 from lead_research.daily import History, render_report, today_iso
 from lead_research.intake import research_queue
 from lead_research.models import PolicyError
+from lead_research.policy import format_units, parse_units
 from lead_research.providers import PROVIDERS, get_provider
 from lead_research.quality import Target, clean_records, read_rows
 from lead_research.store import Store
@@ -22,6 +24,12 @@ DASHBOARD_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = DASHBOARD_ROOT / '.data'
 SAMPLE_DIR = DATA_DIR / 'sample-workspace'
 SETTINGS_PATH = DATA_DIR / 'settings.json'
+OPS_FILENAME = 'veinore-ops.json'
+LEAD_STAGES = ('new', 'contacted', 'replied', 'qualified', 'disqualified')
+MAX_DAILY_TARGET = 200
+OPS_NOTES_MAX = 4000
+OPS_OWNER_MAX = 80
+OPS_KEY_MAX = 240
 
 
 def env_workspace_locked():
@@ -188,7 +196,8 @@ class Dashboard:
         history = self._history_stats()
         batches = self.daily_list()
         latest = batches[0] if batches else None
-        report = self.daily(latest['date'])['report'] if latest else None
+        payload = self.daily(latest['date']) if latest else None
+        report = (payload or {}).get('report')
         research = self.research()
         return {
             'meta': self.meta(),
@@ -198,6 +207,8 @@ class Dashboard:
             'report': report,
             'research_queue_count': len(research['queue']),
             'advice': (report or {}).get('advice') or [],
+            'charts': self._charts(batches, report, (payload or {}).get('leads') or [], status),
+            'duplicates': (payload or {}).get('duplicates') or [],
         }
 
     def status(self):
@@ -323,14 +334,16 @@ class Dashboard:
         audit = None
         if (folder / 'audit.json').exists():
             audit = json.loads((folder / 'audit.json').read_text(encoding='utf-8'))
-        leads = []
-        details = folder / 'leads-details.csv'
-        leads_path = folder / 'leads.csv'
-        if details.exists():
-            leads = read_rows(details)
-        elif leads_path.exists():
-            leads = read_rows(leads_path)
-        return {'date': date, 'report': report, 'markdown': markdown, 'audit': audit, 'leads': leads, 'batches': batches}
+        leads = self._attach_ops(self._read_daily_leads(date))
+        return {
+            'date': date,
+            'report': report,
+            'markdown': markdown,
+            'audit': audit,
+            'leads': leads,
+            'batches': batches,
+            'duplicates': self._duplicate_warnings(leads, date),
+        }
 
     def leads(self, date=None):
         return self.daily(date)
@@ -419,22 +432,294 @@ class Dashboard:
             history.close()
 
     def preview_daily(self, target=50, sources=None):
+        return self.daily_run(target=target, execute=False, sources=sources, preview_cap=500)
+
+    def daily_run(self, target=20, execute=False, sources=None, preview_cap=None):
+        """Plan or write a daily file. Execute stays dry unless explicitly True.
+
+        Live execute is local-only: stored sites/prospects (`build`), no provider
+        transport, no MX DNS. Target is capped so the dashboard cannot launch a
+        large spend run.
+        """
         if not (self.workspace / 'providers.json').exists():
             raise PolicyError('run_init_first')
         from lead_research.daily import DEFAULT_SOURCES, OPTIONAL_SOURCES, run_daily
         store, config = self._store()
-        chosen = tuple(sources) if sources else ('build',)
-        allowed = set(DEFAULT_SOURCES) | set(OPTIONAL_SOURCES)
-        if set(chosen) - allowed:
-            raise PolicyError('unknown_daily_source')
+        execute = bool(execute)
+        cap = MAX_DAILY_TARGET if execute else (preview_cap or MAX_DAILY_TARGET)
+        try:
+            target_n = max(1, min(int(target), cap))
+        except (TypeError, ValueError):
+            raise PolicyError('invalid_daily_target') from None
+        if execute:
+            chosen = ('build',)
+        else:
+            chosen = tuple(sources) if sources else ('build',)
+            allowed = set(DEFAULT_SOURCES) | set(OPTIONAL_SOURCES)
+            if set(chosen) - allowed:
+                raise PolicyError('unknown_daily_source')
+            if 'build' not in chosen:
+                chosen = chosen + ('build',)
+
+        def _offline(_request):
+            raise PolicyError('dashboard_run_is_local_only')
+
         try:
             return run_daily(
-                self.workspace, store, config, target=max(1, min(int(target), 500)),
-                execute=False, sources=chosen + ('build',) if 'build' not in chosen else chosen,
-                max_domains=20, workers=1, record_source_names=(),
+                self.workspace, store, config, target=target_n,
+                execute=execute, sources=chosen, max_domains=20, workers=1,
+                record_source_names=(), mx_check=False,
+                transport=_offline if execute else None,
             )
         finally:
             store.close()
+
+    def ops(self):
+        return {'ops': self._load_ops(), 'stages': list(LEAD_STAGES)}
+
+    def update_ops(self, body):
+        if not isinstance(body, dict):
+            raise PolicyError('expected_object')
+        key = str(body.get('key') or '').strip().lower()
+        if not key:
+            raise PolicyError('ops_key_required')
+        if len(key) > OPS_KEY_MAX:
+            raise PolicyError('ops_key_too_long')
+        current = dict(self._load_ops().get(key) or {})
+        if 'stage' in body:
+            stage = str(body.get('stage') or '').strip().lower()
+            if stage not in LEAD_STAGES:
+                raise PolicyError('unknown_lead_stage')
+            current['stage'] = stage
+        if 'notes' in body:
+            notes = str(body.get('notes') or '')
+            if len(notes) > OPS_NOTES_MAX:
+                raise PolicyError('notes_too_long')
+            current['notes'] = notes
+        if 'owner' in body:
+            owner = str(body.get('owner') or '').strip()
+            if len(owner) > OPS_OWNER_MAX:
+                raise PolicyError('owner_too_long')
+            current['owner'] = owner
+        current.setdefault('stage', 'new')
+        current['updated_at'] = int(time.time())
+        data = self._load_ops()
+        data[key] = current
+        self._save_ops(data)
+        return {'key': key, 'ops': current}
+
+    def budget_view(self):
+        providers = self.providers() if (self.workspace / 'providers.json').exists() else {
+            'providers': [], 'refills': [], 'budgets': [],
+        }
+        spent = self._spent_units()
+        rows = []
+        for budget in providers.get('budgets') or []:
+            key = (budget.get('provider'), budget.get('pool'))
+            spent_units = spent.get(key, 0)
+            remaining_units = int(budget.get('remaining_units') or 0)
+            rows.append({
+                **budget,
+                'spent': format_units(spent_units),
+                'spent_units': spent_units,
+                'quota_units': remaining_units + spent_units,
+                'quota': format_units(remaining_units + spent_units),
+            })
+        return {
+            'budgets': rows,
+            'refills': providers.get('refills') or [],
+            'providers': providers.get('providers') or [],
+            'spent': [
+                {'provider': provider, 'pool': pool, 'spent': format_units(units), 'spent_units': units}
+                for (provider, pool), units in sorted(spent.items())
+            ],
+        }
+
+    def _ops_path(self):
+        return self.workspace / OPS_FILENAME
+
+    def _load_ops(self):
+        path = self._ops_path()
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _save_ops(self, data):
+        self.workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path = self._ops_path()
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+        os.chmod(path, 0o600)
+        return data
+
+    def _read_daily_leads(self, date):
+        folder = self.workspace / 'daily' / str(date)
+        details = folder / 'leads-details.csv'
+        leads_path = folder / 'leads.csv'
+        if details.exists():
+            return read_rows(details)
+        if leads_path.exists():
+            return read_rows(leads_path)
+        return []
+
+    def _attach_ops(self, leads):
+        ops = self._load_ops()
+        attached = []
+        for row in leads:
+            record = dict(row)
+            key = ops_key(record)
+            extra = ops.get(key) or {}
+            record['ops_key'] = key
+            record['Stage'] = extra.get('stage') or 'new'
+            record['Notes'] = extra.get('notes') or ''
+            record['Owner'] = extra.get('owner') or ''
+            if extra.get('updated_at') is not None:
+                record['ops_updated_at'] = extra.get('updated_at')
+            attached.append(record)
+        return attached
+
+    def _duplicate_warnings(self, leads, date):
+        seen = {}
+        ranked = {}
+        for row in leads:
+            email = _lead_email(row)
+            if not email:
+                continue
+            name = row.get('Full Name') or row.get('full_name')
+            if email in seen:
+                _keep_warning(ranked, {
+                    'kind': 'within_file',
+                    'email': email,
+                    'name': name,
+                    'also_in': date,
+                })
+            else:
+                seen[email] = name
+        other = {}
+        for batch in self.daily_list():
+            other_date = batch.get('date')
+            if other_date == date:
+                continue
+            for row in self._read_daily_leads(other_date):
+                email = _lead_email(row)
+                if email:
+                    other.setdefault(email, other_date)
+        for email, name in seen.items():
+            if email in other:
+                _keep_warning(ranked, {
+                    'kind': 'across_batches',
+                    'email': email,
+                    'name': name,
+                    'also_in': other[email],
+                })
+        history = self._history()
+        if history is not None:
+            try:
+                hist = {}
+                for row in history.db.execute(
+                    'SELECT email, batch FROM delivered WHERE email IS NOT NULL AND email != ""'
+                ):
+                    email = str(row['email'] or '').strip().lower()
+                    batch = str(row['batch'] or '')
+                    if email and batch != str(date or ''):
+                        hist.setdefault(email, batch)
+                for email, name in seen.items():
+                    if email in hist:
+                        _keep_warning(ranked, {
+                            'kind': 'history',
+                            'email': email,
+                            'name': name,
+                            'also_in': hist[email],
+                        })
+            finally:
+                history.close()
+        return list(ranked.values())
+
+    def _spent_units(self):
+        if not (self.workspace / 'providers.json').exists():
+            return {}
+        store, _config = self._store()
+        try:
+            spent = {}
+            for attempt in store.attempts():
+                if attempt.get('state') not in ('completed', 'reviewed'):
+                    continue
+                provider = attempt.get('provider')
+                for pool, amount in (attempt.get('charges') or {}).items():
+                    try:
+                        units = _ledger_units(amount)
+                    except (PolicyError, TypeError, ValueError):
+                        continue
+                    key = (provider, pool)
+                    spent[key] = spent.get(key, 0) + units
+            return spent
+        finally:
+            store.close()
+
+    def _charts(self, batches, report, leads, status):
+        days = []
+        for batch in sorted(batches, key=lambda row: str(row.get('date') or '')):
+            if not batch.get('execute'):
+                continue
+            days.append({
+                'date': batch.get('date'),
+                'delivered': int(batch.get('delivered') or 0),
+                'target': int(batch.get('target') or 0),
+            })
+        verified = 0
+        unverified = 0
+        sources = {}
+        for row in leads:
+            if _is_verified(row):
+                verified += 1
+            else:
+                unverified += 1
+            src = str(row.get('Email Source') or row.get('Source') or row.get('email_source') or 'unknown')
+            sources[src] = sources.get(src, 0) + 1
+        report_sources = (report or {}).get('delivered_by_source') or {}
+        if report_sources:
+            sources = {str(key): int(value) for key, value in report_sources.items()}
+        total = verified + unverified
+        spent = self._spent_units()
+        quota = []
+        for provider in (status.get('providers') or {}).values():
+            for budget in provider.get('budgets') or []:
+                remaining_units = int(budget.get('remaining_units') or 0)
+                spent_units = spent.get((provider.get('id'), budget.get('pool')), 0)
+                quota.append({
+                    'id': provider.get('id'),
+                    'pool': budget.get('pool'),
+                    'remaining': budget.get('remaining'),
+                    'remaining_units': remaining_units,
+                    'spent': format_units(spent_units),
+                    'spent_units': spent_units,
+                    'quota': format_units(remaining_units + spent_units),
+                    'quota_units': remaining_units + spent_units,
+                })
+        quota.sort(key=lambda row: (-int(row.get('quota_units') or 0), str(row.get('id'))))
+        budget_spent = [
+            {
+                'provider': provider,
+                'pool': pool,
+                'spent': format_units(units),
+                'spent_units': units,
+            }
+            for (provider, pool), units in sorted(spent.items(), key=lambda item: -item[1])
+        ]
+        return {
+            'leads_per_day': days[-14:],
+            'verification': {
+                'verified': verified,
+                'unverified': unverified,
+                'rate': round(100 * verified / total) if total else 0,
+            },
+            'provider_quota': quota[:8],
+            'sources': [{'name': name, 'count': count} for name, count in sorted(sources.items(), key=lambda item: -item[1])],
+            'budget_spent': budget_spent,
+        }
 
     def _store(self):
         cfg = self.workspace / 'providers.json'
@@ -520,3 +805,46 @@ def _public_attempt(attempt):
 
 def default_empty_config():
     return default_config()
+
+
+def ops_key(row):
+    email = _lead_email(row)
+    if email:
+        return email
+    name = str(row.get('Full Name') or row.get('full_name') or row.get('name') or '').strip().lower()
+    company = str(row.get('Company') or row.get('company') or '').strip().lower()
+    return f'{name}|{company}'
+
+
+def _ledger_units(amount):
+    """Store attempts keep charges as integer millionths already."""
+    if isinstance(amount, bool):
+        raise PolicyError('invalid_amount')
+    if isinstance(amount, int):
+        return amount
+    text = str(amount).strip()
+    if text.isdigit():
+        return int(text)
+    return parse_units(text)
+
+
+def _lead_email(row):
+    return str(row.get('Email') or row.get('email') or '').strip().lower()
+
+
+def _is_verified(row):
+    verification = str(row.get('Email Verification') or row.get('email_verification') or '').lower()
+    if verification in ('valid', 'verified', 'provider_valid'):
+        return True
+    risk = str(row.get('Email Risk') or row.get('email_risk') or '').lower()
+    return risk == 'low'
+
+
+_WARNING_RANK = {'within_file': 0, 'across_batches': 1, 'history': 2}
+
+
+def _keep_warning(ranked, warning):
+    email = warning['email']
+    current = ranked.get(email)
+    if current is None or _WARNING_RANK[warning['kind']] < _WARNING_RANK[current['kind']]:
+        ranked[email] = warning

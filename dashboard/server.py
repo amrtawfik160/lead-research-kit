@@ -126,6 +126,21 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(sources, str):
                 sources = [s.strip() for s in sources.split(',') if s.strip()]
             return self._json(dash.preview_daily(body.get('target') or 50, sources))
+        if method == 'POST' and path == '/api/daily/run':
+            sources = body.get('sources')
+            if isinstance(sources, str):
+                sources = [s.strip() for s in sources.split(',') if s.strip()]
+            return self._json(dash.daily_run(
+                body.get('target') or 20,
+                execute=bool(body.get('execute')),
+                sources=sources,
+            ))
+        if method == 'GET' and path == '/api/ops':
+            return self._json(dash.ops())
+        if method == 'POST' and path == '/api/ops':
+            return self._json(dash.update_ops(body))
+        if method == 'GET' and path == '/api/budget':
+            return self._json(dash.budget_view())
         raise PolicyError('unknown_route')
 
     def _body(self):

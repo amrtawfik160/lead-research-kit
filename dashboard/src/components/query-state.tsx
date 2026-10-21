@@ -1,17 +1,10 @@
 "use client";
 
-import { Inbox } from "lucide-react";
+import { Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { EmptyState } from "@/components/empty-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty";
-import { Skeleton } from "@/components/ui/skeleton";
 import { explainError } from "@/lib/format";
 
 export function useQuery<T>(
@@ -54,35 +47,58 @@ export function useQuery<T>(
   return { data, error, loading, reload: () => setTick((n) => n + 1) };
 }
 
+function Sk({ className }: { className: string }): React.ReactElement {
+  return <span className={`sk ${className}`} />;
+}
+
 function TableSkeleton(): React.ReactElement {
   return (
-    <div className="flex flex-col gap-3 p-4 sm:p-6">
-      <div className="flex items-center justify-between gap-3">
-        <Skeleton className="h-8 w-56" />
-        <Skeleton className="h-8 w-36" />
+    <div className="flex flex-col gap-0 px-6 py-4" aria-hidden>
+      <div className="mb-3 flex items-center gap-2">
+        <Sk className="h-[26px] w-48" />
+        <Sk className="h-[26px] w-16" />
+        <Sk className="h-[26px] w-16" />
       </div>
-      <div className="overflow-hidden rounded-lg border">
-        <Skeleton className="h-8 w-full rounded-none" />
-        {Array.from({ length: 8 }, (_, index) => (
-          <Skeleton key={index} className="mt-px h-9 w-full rounded-none opacity-80" />
-        ))}
-      </div>
+      <Sk className="mb-2 h-8 w-full" />
+      {Array.from({ length: 8 }, (_, index) => (
+        <div key={index} className="flex h-10 items-center gap-3 border-b border-[#f0eeea] dark:border-[#252523]">
+          <Sk className="h-3.5 w-3.5 rounded-full" />
+          <Sk className="h-3 w-12" />
+          <Sk className="h-3.5 w-[38%]" />
+          <span className="flex-1" />
+          <Sk className="h-3 w-20" />
+          <Sk className="h-3 w-16" />
+        </div>
+      ))}
     </div>
   );
 }
 
 function CardsSkeleton(): React.ReactElement {
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="mx-auto flex w-full max-w-[1160px] flex-col gap-4 px-6 pt-6" aria-hidden>
+      <div className="flex items-end justify-between">
+        <div className="flex flex-col gap-2">
+          <Sk className="h-7 w-56" />
+          <Sk className="h-3.5 w-80" />
+        </div>
+        <div className="flex gap-2">
+          <Sk className="h-[26px] w-20" />
+          <Sk className="h-[26px] w-24" />
+        </div>
+      </div>
+      <div className="grid grid-cols-4 overflow-hidden rounded-[10px] border">
         {Array.from({ length: 4 }, (_, index) => (
-          <Skeleton key={index} className="h-[5.5rem] w-full rounded-xl" />
+          <div key={index} className="flex flex-col gap-2 border-l px-4 py-3.5 first:border-l-0">
+            <Sk className="h-3 w-24" />
+            <Sk className="h-6 w-12" />
+            <Sk className="h-3 w-28" />
+          </div>
         ))}
       </div>
-      <Skeleton className="h-36 w-full rounded-xl" />
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Skeleton className="h-40 w-full rounded-xl" />
-        <Skeleton className="h-40 w-full rounded-xl" />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+        <Sk className="h-64 w-full rounded-[10px]" />
+        <Sk className="h-64 w-full rounded-[10px]" />
       </div>
     </div>
   );
@@ -92,7 +108,7 @@ export function QueryGate({
   loading,
   error,
   empty,
-  emptyTitle = "Nothing here yet",
+  emptyTitle = "No leads yet",
   emptyDescription = "Point the dashboard at a workspace or keep sample mode on.",
   skeleton = "table",
   children,
@@ -109,10 +125,10 @@ export function QueryGate({
     if (skeleton === "cards") return <CardsSkeleton />;
     if (skeleton === "form") {
       return (
-        <div className="flex max-w-xl flex-col gap-3 p-4 sm:p-6">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-24 w-full" />
-          <Skeleton className="h-10 w-48" />
+        <div className="flex max-w-xl flex-col gap-3 px-6 pt-4" aria-hidden>
+          <Sk className="h-16 w-full" />
+          <Sk className="h-24 w-full" />
+          <Sk className="h-10 w-48" />
         </div>
       );
     }
@@ -132,17 +148,7 @@ export function QueryGate({
     );
   }
   if (empty) {
-    return (
-      <Empty className="py-16">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <Inbox />
-          </EmptyMedia>
-          <EmptyTitle className="text-base font-medium">{emptyTitle}</EmptyTitle>
-          <EmptyDescription>{emptyDescription}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
+    return <EmptyState icon={Users} title={emptyTitle} description={emptyDescription} />;
   }
   return <>{children}</>;
 }

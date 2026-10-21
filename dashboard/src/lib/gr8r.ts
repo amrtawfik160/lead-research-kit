@@ -1,4 +1,4 @@
-/** Visual specs extracted from https://gr8r-taskmanagement.vercel.app/ (gr8rstudio/gr8r-studio). */
+/** Visual tokens only (paper chrome, type, motion). Copy and nav names are Veinore's. */
 
 export const GR8R = {
   light: {

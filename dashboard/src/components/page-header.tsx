@@ -13,7 +13,7 @@ export function PageHeader({
   actions?: ReactNode;
 }): React.ReactElement {
   return (
-    <div className="flex flex-wrap items-start gap-3 px-6 pt-7 pb-5">
+    <div className="flex flex-wrap items-start gap-3 px-6 pt-6 pb-4">
       <div className="min-w-0">
         <h1 className="font-heading text-[23px] font-semibold tracking-[-0.022em] leading-[1.2] text-balance">
           {title}

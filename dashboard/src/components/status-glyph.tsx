@@ -1,4 +1,5 @@
 import { Circle, CircleAlert, CircleCheck, CircleDashed, CircleDot } from "lucide-react";
+import { display } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 type Tone = "todo" | "progress" | "review" | "done" | "alert" | "backlog";
@@ -64,6 +65,21 @@ export function PriorityGlyph({
       aria-hidden
     >
       {urgent ? "!!" : high ? "↑" : low ? "↓" : "–"}
+    </span>
+  );
+}
+
+export function QuietStatus({
+  value,
+  className,
+}: {
+  value?: string | number | null;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-[12.5px] text-[#57544e] dark:text-[#b5b2ab]", className)}>
+      <StatusGlyph value={value} />
+      <span className="truncate">{display(value)}</span>
     </span>
   );
 }
