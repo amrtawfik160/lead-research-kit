@@ -4,7 +4,7 @@ import { useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
 import { ChartCard, HorizontalBarChart, QuotaChart } from "@/components/workspace-charts";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { api } from "@/lib/api";
 import { chartPool, display, humanName, humanPool } from "@/lib/format";
@@ -15,15 +15,15 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
   const [row, setRow] = useState<(BudgetPayload["budgets"][number]) | null>(null);
 
   return (
-    <>
+    <PageShell>
       <PageHeader
         title="Budget"
         description="Attested free pools, remaining units, and charges from completed local attempts. The dashboard never shows keys."
       />
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
-          <PageBody className="flex min-h-0 flex-1 flex-col">
-            <div className="grid gap-4 px-6 pb-4 md:grid-cols-2">
+          <PageBody>
+            <div className="grid gap-4 pb-4 md:grid-cols-2">
               <ChartCard title="Spent vs remaining">
                 <QuotaChart
                   rows={data.budgets.slice(0, 8).map((budget) => ({
@@ -79,6 +79,6 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
           </PageBody>
         ) : null}
       </QueryGate>
-    </>
+    </PageShell>
   );
 }

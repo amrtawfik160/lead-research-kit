@@ -91,14 +91,14 @@ export function DetailSheet({
         <SheetPanel className="px-6 pt-5 pb-8">
           <p className="mb-3 font-heading text-2xl font-semibold tracking-tight">{title}</p>
           <div className="flex flex-col">
-            {extra && extraFirst ? <div className="mb-[26px]">{extra}</div> : null}
+            {extra && extraFirst ? <div className="mb-6">{extra}</div> : null}
             {blocks.map((block, index) => (
-              <section key={block.title || `fields-${index}`} className={cn(index > 0 && "mt-[26px]")}>
+              <section key={block.title || `fields-${index}`} className={cn(index > 0 && "mt-6")}>
                 {block.title ? <h3 className="mb-2 text-sm font-semibold">{block.title}</h3> : null}
                 <PropertyGrid rows={block.fields} />
               </section>
             ))}
-            {extra && !extraFirst ? <div className="mt-[26px]">{extra}</div> : null}
+            {extra && !extraFirst ? <div className="mt-6">{extra}</div> : null}
           </div>
         </SheetPanel>
         {footer ? <SheetFooter className="px-6">{footer}</SheetFooter> : null}

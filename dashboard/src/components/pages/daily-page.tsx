@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/empty-state";
 import { EntityAvatar } from "@/components/entity-avatar";
 import { LabelChip } from "@/components/label-chip";
 import { ExportLeadsButton, LeadOpsPanel } from "@/components/lead-ops-panel";
-import { PageBody } from "@/components/page-header";
+import { PageHeader, PageShell, PageSplit, PageToolbar } from "@/components/page-header";
 import { ProgBar } from "@/components/prog-bar";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus } from "@/components/status-glyph";
@@ -81,155 +81,165 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
   }
 
   return (
-    <>
+    <PageShell>
+      <PageHeader
+        title="Daily"
+        description="Today's delivery, review queue, and the run report."
+        actions={
+          <>
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Switch
+                checked={reviewOnly}
+                onCheckedChange={(checked) => setReviewOnly(Boolean(checked))}
+                aria-label="Show leads that still need review"
+              />
+              Needs review
+            </label>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setSeen(new Set(rows.map((_, index) => issueKey("DAY", index))))}
+            >
+              <CheckCheck />
+              Mark reviewed
+            </Button>
+          </>
+        }
+      />
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
-          <PageBody className="flex min-h-0 flex-1 flex-col">
-            <div className="inbox-grid grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(22rem,28rem)_minmax(0,1fr)]">
-              <div className="flex min-h-0 flex-col border-r">
-                <div className="flex items-center gap-3 px-6 pt-6">
-                  <h1 className="font-heading text-2xl font-semibold tracking-tight">Daily</h1>
-                  <span className="flex-1" />
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Switch
-                      checked={reviewOnly}
-                      onCheckedChange={(checked) => setReviewOnly(Boolean(checked))}
-                      aria-label="Show leads that still need review"
-                    />
-                    Needs review
-                  </label>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setSeen(new Set(rows.map((_, index) => issueKey("DAY", index))))}
-                  >
-                    <CheckCheck />
-                    Mark reviewed
-                  </Button>
-                </div>
-                <div className="px-6 pt-4">
-                  <DailyRunControl onDone={reload} />
-                </div>
-                <div className="flex flex-wrap gap-2 px-6 py-4">
-                  {data.batches.map((batch) => {
-                    const selected = batch.date === data.date;
-                    return (
-                      <button
-                        key={batch.date}
-                        type="button"
-                        onClick={() => {
-                          setDate(batch.date);
-                          setLead(null);
-                        }}
-                        className={cn(
-                          "flex min-h-14 min-w-40 flex-col items-start justify-center gap-1 rounded-xl border px-3.5 py-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                          selected ? "border-foreground bg-muted" : "bg-background hover:bg-muted",
-                        )}
-                      >
-                        <span className="font-medium tabular-nums">{batch.date}</span>
-                        <span className="flex items-center gap-2">
-                          <span className="tabular-nums text-muted-foreground">
-                            {batch.delivered}/{batch.target} delivered
-                          </span>
-                          {batch.has_audit ? <Badge variant="success">Audited</Badge> : null}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <Tabs
-                  value={cat}
-                  onValueChange={(value) => {
-                    const next = value as Cat;
-                    setCat(next);
-                    if (next === "report") setLead(null);
-                  }}
-                  className="gap-0 border-b px-4"
-                >
-                  <TabsList variant="underline" size="sm">
-                    {(
-                      [
-                        ["all", "All"],
-                        ["website", "Website"],
-                        ["finder", "Finder"],
-                        ["review", "Review"],
-                        ["report", "Report"],
-                      ] as const
-                    ).map(([key, label]) => {
-                      const flagged = key === "report" ? 0 : countReview(key);
-                      return (
-                        <TabsTab key={key} value={key}>
-                          {label}
-                          {flagged ? (
-                            <Badge render={<span />} variant="secondary">
-                              {flagged}
-                            </Badge>
-                          ) : null}
-                        </TabsTab>
-                      );
-                    })}
-                  </TabsList>
-                </Tabs>
-                <DuplicateBanner items={data.duplicates} className="mx-6 mt-3" />
-                <div className="min-h-0 flex-1 overflow-auto">
-                  {cat === "report" ? (
-                    <ReportOutline data={data} />
-                  ) : visible.length === 0 ? (
-                    <EmptyState
-                      compact
-                      icon={Users}
-                      title="No leads in this view"
-                      description={
-                        reviewOnly
-                          ? "No leads still need review in this category."
-                          : "New website, finder, and review leads will show up here."
-                      }
-                    />
-                  ) : (
-                    visible.map((row) => {
-                      const index = rows.indexOf(row);
-                      const id = issueKey("DAY", index);
-                      const flagged = needsReview(row) && !seen.has(id);
-                      const selected = lead === row;
+          <>
+            <PageSplit
+              left={
+                <>
+                  <div className="pt-2">
+                    <DailyRunControl onDone={reload} />
+                  </div>
+                  <div className="flex flex-wrap gap-2 py-4">
+                    {data.batches.map((batch) => {
+                      const selected = batch.date === data.date;
                       return (
                         <button
-                          key={id}
+                          key={batch.date}
                           type="button"
-                          onClick={() => selectLead(row, index)}
+                          onClick={() => {
+                            setDate(batch.date);
+                            setLead(null);
+                          }}
                           className={cn(
-                            "relative flex min-h-12 w-full items-start gap-3 border-b px-6 py-3.5 text-left transition-colors",
-                            selected ? "bg-muted" : "hover:bg-muted/70",
+                            "flex min-h-14 min-w-40 flex-col items-start justify-center gap-1 rounded-xl border px-3.5 py-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                            selected ? "border-foreground bg-muted" : "bg-background hover:bg-muted",
                           )}
                         >
-                          {flagged ? (
-                            <span className="absolute top-[22px] left-1.5 size-1.5 rounded-full bg-primary" aria-label="Needs review" />
-                          ) : null}
-                          <EntityAvatar name={display(row["Full Name"])} size={22} />
-                          <div className="min-w-0 flex-1 text-sm leading-6">
-                            <div>
-                              <span className="issue-title font-semibold">{display(row["Full Name"])}</span>{" "}
-                              <span className="text-muted-foreground">{display(row.Title)}</span>
-                            </div>
-                            <div className="mt-0.5 truncate text-sm text-muted-foreground">
-                              {display(row.Company)} · {display(row.Email)}
-                            </div>
-                            <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                              <QuietStatus value={humanName(String(row.Source || ""))} />
-                              <span>·</span>
-                              <QuietStatus value={row.Stage || "new"} />
-                              <span>·</span>
-                              <span>{display(row.State)}</span>
-                            </div>
-                          </div>
+                          <span className="font-medium tabular-nums">{batch.date}</span>
+                          <span className="flex items-center gap-2">
+                            <span className="tabular-nums text-muted-foreground">
+                              {batch.delivered}/{batch.target} delivered
+                            </span>
+                            {batch.has_audit ? <Badge variant="success">Audited</Badge> : null}
+                          </span>
                         </button>
                       );
-                    })
-                  )}
-                </div>
-              </div>
-              <div className="flex min-h-0 flex-col overflow-auto">
-                {cat === "report" ? (
-                  <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
+                    })}
+                  </div>
+                  <PageToolbar>
+                    <Tabs
+                      value={cat}
+                      onValueChange={(value) => {
+                        const next = value as Cat;
+                        setCat(next);
+                        if (next === "report") setLead(null);
+                      }}
+                      className="min-w-0 flex-1 gap-0"
+                    >
+                      <TabsList variant="underline" size="sm">
+                        {(
+                          [
+                            ["all", "All"],
+                            ["website", "Website"],
+                            ["finder", "Finder"],
+                            ["review", "Review"],
+                            ["report", "Report"],
+                          ] as const
+                        ).map(([key, label]) => {
+                          const flagged = key === "report" ? 0 : countReview(key);
+                          return (
+                            <TabsTab key={key} value={key}>
+                              {label}
+                              {flagged ? (
+                                <Badge render={<span />} variant="secondary">
+                                  {flagged}
+                                </Badge>
+                              ) : null}
+                            </TabsTab>
+                          );
+                        })}
+                      </TabsList>
+                    </Tabs>
+                  </PageToolbar>
+                  <DuplicateBanner items={data.duplicates} className="mt-3" />
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    {cat === "report" ? (
+                      <ReportOutline data={data} />
+                    ) : visible.length === 0 ? (
+                      <EmptyState
+                        compact
+                        icon={Users}
+                        title="No leads in this view"
+                        description={
+                          reviewOnly
+                            ? "No leads still need review in this category."
+                            : "New website, finder, and review leads will show up here."
+                        }
+                      />
+                    ) : (
+                      visible.map((row) => {
+                        const index = rows.indexOf(row);
+                        const id = issueKey("DAY", index);
+                        const flagged = needsReview(row) && !seen.has(id);
+                        const selected = lead === row;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => selectLead(row, index)}
+                            className={cn(
+                              "relative flex min-h-12 w-full items-start gap-3 border-b py-3.5 text-left transition-colors",
+                              selected ? "bg-muted" : "hover:bg-muted/70",
+                            )}
+                          >
+                            {flagged ? (
+                              <span className="mt-2 size-1.5 shrink-0 rounded-full bg-primary" aria-label="Needs review" />
+                            ) : (
+                              <span className="mt-2 size-1.5 shrink-0" />
+                            )}
+                            <EntityAvatar name={display(row["Full Name"])} size={22} />
+                            <div className="min-w-0 flex-1 text-sm leading-6">
+                              <div>
+                                <span className="issue-title font-semibold">{display(row["Full Name"])}</span>{" "}
+                                <span className="text-muted-foreground">{display(row.Title)}</span>
+                              </div>
+                              <div className="mt-0.5 truncate text-sm text-muted-foreground">
+                                {display(row.Company)} · {display(row.Email)}
+                              </div>
+                              <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                                <QuietStatus value={humanName(String(row.Source || ""))} />
+                                <span>·</span>
+                                <QuietStatus value={row.Stage || "new"} />
+                                <span>·</span>
+                                <span>{display(row.State)}</span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
+              }
+              right={
+                cat === "report" ? (
+                  <div className="min-h-0 flex-1 overflow-auto py-6">
                     <ReportView data={data} />
                   </div>
                 ) : lead ? (
@@ -240,16 +250,16 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                     onOpen={() => setSheet(true)}
                   />
                 ) : (
-                  <div className="grid min-h-full place-items-center p-10">
+                  <div className="grid min-h-full place-items-center py-10">
                     <EmptyState
                       icon={Users}
                       title="Select a lead"
                       description="Read the delivered lead and open details without leaving Daily."
                     />
                   </div>
-                )}
-              </div>
-            </div>
+                )
+              }
+            />
             <DetailSheet
               open={sheet}
               onOpenChange={setSheet}
@@ -268,10 +278,10 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                 />
               }
             />
-          </PageBody>
+          </>
         ) : null}
       </QueryGate>
-    </>
+    </PageShell>
   );
 }
 
@@ -289,7 +299,7 @@ function LeadPreview({
   const email = leadEmail(row);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
+      <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b py-2">
         <Button size="icon-sm" variant="ghost" aria-label="Back" onClick={onBack}>
           <ArrowLeft />
         </Button>
@@ -319,7 +329,7 @@ function LeadPreview({
           Open details
         </Button>
       </div>
-      <div className="w-full max-w-[720px] px-6 py-6">
+      <div className="w-full max-w-3xl py-6">
         <h2 className="mb-3 font-heading text-2xl font-semibold tracking-tight">{display(row["Full Name"])}</h2>
         <div className="mb-5 flex flex-wrap items-center gap-2">
           <QuietStatus value={humanName(String(row.Source || ""))} />
@@ -387,7 +397,7 @@ function ReportOutline({ data }: { data: DailyPayload }): React.ReactElement {
   const budgets = Object.entries(data.report?.budgets_left || {});
   const score = data.audit?.score;
   return (
-    <div className="grid gap-6 px-6 py-5">
+    <div className="grid gap-6 py-5">
       <div>
         <p className="font-heading text-lg font-semibold">{data.date}</p>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">

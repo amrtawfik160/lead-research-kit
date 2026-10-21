@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus } from "@/components/status-glyph";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
@@ -18,7 +18,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
   const [record, setRecord] = useState<Record<string, unknown> | null>(null);
 
   return (
-    <>
+    <PageShell>
       <PageHeader
         title="Research"
         description="The CLI research-queue (max 40), plus recorded evidence and unlabeled candidates."
@@ -26,8 +26,8 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
       />
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
-          <PageBody className="flex min-h-0 flex-1 flex-col">
-            <Tabs defaultValue="queue" className="flex min-h-0 flex-1 flex-col px-6 pt-4">
+          <PageBody>
+            <Tabs defaultValue="queue" className="flex min-h-0 flex-1 flex-col pt-2">
               <TabsList variant="underline" size="sm">
                 <TabsTab value="queue">Queue {data.queue.length}</TabsTab>
                 <TabsTab value="evidence">Evidence {data.evidence.length}</TabsTab>
@@ -134,6 +134,6 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
           value: display(value),
         }))}
       />
-    </>
+    </PageShell>
   );
 }

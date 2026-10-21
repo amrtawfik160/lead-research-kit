@@ -218,7 +218,7 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="min-w-0 bg-background">
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-6">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-(--page-gutter)">
           <nav className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
             <span className="font-medium text-foreground">{current?.label || "Veinore"}</span>
           </nav>
@@ -227,7 +227,7 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
             size="sm"
             variant="outline"
             onClick={openPalette}
-            className="w-[220px] justify-start font-normal text-muted-foreground"
+            className="w-56 justify-start font-normal text-muted-foreground"
             aria-label="Search leads"
           >
             <Search />

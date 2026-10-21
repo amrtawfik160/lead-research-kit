@@ -6,7 +6,7 @@ import { FilterSelect } from "@/components/filter-select";
 import { DuplicateBanner } from "@/components/duplicate-banner";
 import { ExportLeadsButton, LeadOpsPanel } from "@/components/lead-ops-panel";
 import { IssueList, type IssueItem } from "@/components/issue-list";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell, PageToolbar } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { api } from "@/lib/api";
 import { display, humanName } from "@/lib/format";
@@ -56,7 +56,7 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
   }, [data]);
 
   return (
-    <>
+    <PageShell>
       <PageHeader
         title="Leads"
         description={`${rows.length} shown · filter by source, verification, date, or stage`}
@@ -70,8 +70,8 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
         emptyDescription="Run a daily execute, or open the sample workspace in Settings."
       >
         {data ? (
-          <PageBody className="flex min-h-0 flex-1 flex-col">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-6 py-3">
+          <PageBody>
+            <PageToolbar>
               <FilterSelect
                 label="Date"
                 ariaLabel="Filter leads by date"
@@ -110,8 +110,8 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
                 onChange={setStage}
                 options={[{ value: "all", label: "All stages" }, ...LEAD_STAGES]}
               />
-            </div>
-            <DuplicateBanner items={data.duplicates} className="mx-6 mt-3 mb-1" />
+            </PageToolbar>
+            <DuplicateBanner items={data.duplicates} className="mt-3 mb-1" />
             <IssueList
               items={issues}
               selectedId={selected?.id}
@@ -140,7 +140,7 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
           </PageBody>
         ) : null}
       </QueryGate>
-    </>
+    </PageShell>
   );
 }
 

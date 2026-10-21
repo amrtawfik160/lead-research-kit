@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus } from "@/components/status-glyph";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
@@ -16,7 +16,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
   const [row, setRow] = useState<Record<string, unknown> | null>(null);
 
   return (
-    <>
+    <PageShell>
       <PageHeader
         title="Companies"
         description="History domain backlog, crawl results, public-record firms, and stored prospects."
@@ -24,8 +24,8 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
       />
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
-          <PageBody className="flex min-h-0 flex-1 flex-col">
-            <Tabs defaultValue="domains" className="flex min-h-0 flex-1 flex-col px-6 pt-4">
+          <PageBody>
+            <Tabs defaultValue="domains" className="flex min-h-0 flex-1 flex-col pt-2">
               <TabsList variant="underline" size="sm">
                 <TabsTab value="domains">Domains {data.domains.length}</TabsTab>
                 <TabsTab value="sites">Crawls {data.sites.length}</TabsTab>
@@ -138,6 +138,6 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
         issueId={display(row?.domain || row?.key || row?.id)}
         fields={Object.entries(row || {}).map(([label, value]) => ({ label, value: display(value) }))}
       />
-    </>
+    </PageShell>
   );
 }

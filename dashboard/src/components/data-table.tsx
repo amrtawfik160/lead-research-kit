@@ -1,9 +1,10 @@
 "use client";
 
-import { ArrowUpDown, ChevronDown, ChevronUp, ChevronsUpDown, Filter, Search, Users } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronUp, ChevronsUpDown, Filter, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CellText } from "@/components/cell-text";
 import { EmptyState } from "@/components/empty-state";
+import { PageToolbar } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,7 +22,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Toolbar, ToolbarButton, ToolbarGroup, ToolbarSeparator } from "@/components/ui/toolbar";
 import { display, text } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +38,7 @@ export type Column<T> = {
 type SortState = { key: string; dir: "asc" | "desc" } | null;
 
 const PAGE = 25;
+const DEFAULT_MIN = "8rem";
 
 function isEmpty(value: unknown): boolean {
   return value == null || value === "";
@@ -55,6 +56,11 @@ function compareValues(a: unknown, b: unknown): number {
 function cellValue<T extends object>(row: T, column: Column<T> | undefined, key: string): unknown {
   if (column?.value) return column.value(row);
   return (row as Record<string, unknown>)[key];
+}
+
+function columnStyle(column: { width?: string }): React.CSSProperties {
+  const minWidth = column.width || DEFAULT_MIN;
+  return column.width ? { width: column.width, minWidth, maxWidth: column.width } : { minWidth };
 }
 
 export function DataTable<T extends object>({
@@ -170,77 +176,61 @@ export function DataTable<T extends object>({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <Toolbar className="h-auto w-full flex-wrap justify-between gap-2 border-b px-6 py-2.5">
-        <ToolbarGroup className="min-w-0 flex-1">
-          <div className="relative w-full max-w-xs">
-            <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setPage(0);
-              }}
-              placeholder="Filter…"
-              size="sm"
-              aria-label="Filter rows"
-              className="ps-7"
-            />
-          </div>
-        </ToolbarGroup>
+    <div data-slot="data-table" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <PageToolbar>
+        <Input
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setPage(0);
+          }}
+          placeholder="Filter…"
+          size="sm"
+          aria-label="Filter rows"
+          className="w-64"
+        />
         {groupOptions.length ? (
-          <>
-            <ToolbarSeparator />
-            <ToolbarGroup>
-              <Select
-                value={groupBy}
-                items={[
-                  { value: "none", label: "No grouping" },
-                  ...groupOptions.map((option) => ({ value: option.value, label: option.label })),
-                ]}
-                onValueChange={(value) => {
-                  setGroupBy(String(value || "none"));
-                  setPage(0);
-                }}
-              >
-                <SelectTrigger size="sm" className="min-w-36">
-                  <SelectValue placeholder="Group" />
-                </SelectTrigger>
-                <SelectPopup>
-                  <SelectItem value="none">No grouping</SelectItem>
-                  {groupOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            </ToolbarGroup>
-          </>
-        ) : null}
-        <ToolbarSeparator />
-        <ToolbarGroup>
-          <ToolbarButton render={<Button size="xs" variant="ghost" />}>
-            <Filter className="size-3.5" />
-            Filter
-          </ToolbarButton>
-          <ToolbarButton
-            render={<Button size="xs" variant="ghost" />}
-            onClick={() => columns[0] && toggleSort(columns[0].key)}
+          <Select
+            value={groupBy}
+            items={[
+              { value: "none", label: "No grouping" },
+              ...groupOptions.map((option) => ({ value: option.value, label: option.label })),
+            ]}
+            onValueChange={(value) => {
+              setGroupBy(String(value || "none"));
+              setPage(0);
+            }}
           >
-            <ArrowUpDown className="size-3.5" />
-            Sort
-          </ToolbarButton>
-          <span className="px-1 text-xs tabular-nums text-muted-foreground">
-            {filtered.length} {filtered.length === 1 ? "row" : "rows"}
-          </span>
-        </ToolbarGroup>
-      </Toolbar>
+                <SelectTrigger size="sm" className="w-auto min-w-36">
+              <SelectValue placeholder="Group" />
+            </SelectTrigger>
+            <SelectPopup>
+              <SelectItem value="none">No grouping</SelectItem>
+              {groupOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        ) : null}
+        <Button size="xs" variant="ghost">
+          <Filter className="size-3.5" />
+          Filter
+        </Button>
+        <Button size="xs" variant="ghost" onClick={() => columns[0] && toggleSort(columns[0].key)}>
+          <ArrowUpDown className="size-3.5" />
+          Sort
+        </Button>
+        <span className="ms-auto text-xs tabular-nums text-muted-foreground">
+          {filtered.length} {filtered.length === 1 ? "row" : "rows"}
+        </span>
+      </PageToolbar>
       {filtered.length === 0 ? (
         <EmptyState icon={Users} title={emptyTitle} description={emptyDescription} />
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
-          <Table>
+        <div data-slot="page-table" className="min-h-0 min-w-0 flex-1 overflow-auto">
+          <Table className="min-w-(--table-min-width) table-fixed">
             <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm">
               <TableRow className="hover:bg-transparent">
                 {columns.map((column) => {
@@ -248,21 +238,24 @@ export function DataTable<T extends object>({
                   return (
                     <TableHead
                       key={column.key}
-                      style={column.width ? { width: column.width, maxWidth: column.width } : undefined}
+                      style={columnStyle(column)}
                       aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"}
-                      className={cn("h-8 px-2 text-xs", column.align === "right" && "text-right")}
+                      className={cn(
+                        "h-8 overflow-hidden px-2.5 text-xs",
+                        column.align === "right" && "text-right",
+                      )}
                     >
                       <Button
                         size="xs"
                         variant="ghost"
                         className={cn(
-                          "-ms-1 h-6 px-1 text-xs font-medium text-muted-foreground hover:text-foreground",
-                          column.align === "right" && "ms-auto -me-1",
+                          "h-6 max-w-full px-1 text-xs font-medium text-muted-foreground hover:text-foreground",
+                          column.align === "right" && "ms-auto",
                         )}
                         onClick={() => toggleSort(column.key)}
                         aria-label={`Sort by ${column.header}`}
                       >
-                        {column.header}
+                        <span className="truncate">{column.header}</span>
                         {active === "asc" ? (
                           <ChevronUp />
                         ) : active === "desc" ? (
@@ -293,29 +286,24 @@ export function DataTable<T extends object>({
         </div>
       )}
       {pages > 1 ? (
-        <Toolbar className="h-auto w-full justify-between gap-2 rounded-none border-x-0 border-b-0 px-3 py-1.5">
-          <ToolbarGroup>
-            <span className="px-1 text-xs tabular-nums text-muted-foreground">
-              Page {current + 1} of {pages}
-            </span>
-          </ToolbarGroup>
-          <ToolbarGroup>
-            <ToolbarButton
-              render={<Button size="xs" variant="outline" />}
-              disabled={current === 0}
-              onClick={() => setPage((n) => Math.max(0, n - 1))}
-            >
+        <PageToolbar>
+          <span className="text-xs tabular-nums text-muted-foreground">
+            Page {current + 1} of {pages}
+          </span>
+          <span className="ms-auto flex items-center gap-2">
+            <Button size="xs" variant="outline" disabled={current === 0} onClick={() => setPage((n) => Math.max(0, n - 1))}>
               Prev
-            </ToolbarButton>
-            <ToolbarButton
-              render={<Button size="xs" variant="outline" />}
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
               disabled={current >= pages - 1}
               onClick={() => setPage((n) => n + 1)}
             >
               Next
-            </ToolbarButton>
-          </ToolbarGroup>
-        </Toolbar>
+            </Button>
+          </span>
+        </PageToolbar>
       ) : null}
     </div>
   );
@@ -340,10 +328,7 @@ function GroupRows<T extends object>({
     <>
       {group.key ? (
         <TableRow className="hover:bg-transparent">
-          <TableCell
-            colSpan={colSpan}
-            className="bg-transparent py-2 text-sm font-semibold text-foreground"
-          >
+          <TableCell colSpan={colSpan} className="bg-transparent py-2 text-sm font-semibold text-foreground">
             {group.key} · {group.total}
           </TableCell>
         </TableRow>
@@ -356,8 +341,7 @@ function GroupRows<T extends object>({
             data-state={selectedKey === key ? "selected" : undefined}
             tabIndex={onRowClick ? 0 : undefined}
             className={cn(
-              onRowClick &&
-                "cursor-pointer transition-colors focus-visible:bg-accent/60 focus-visible:outline-none",
+              onRowClick && "cursor-pointer transition-colors focus-visible:bg-accent/60 focus-visible:outline-none",
             )}
             onClick={onRowClick ? () => onRowClick(row) : undefined}
             onKeyDown={
@@ -374,16 +358,21 @@ function GroupRows<T extends object>({
             {columns.map((column) => (
               <TableCell
                 key={column.key}
-                style={column.width ? { width: column.width, maxWidth: column.width } : undefined}
-                className={cn("h-10 px-2 py-0 text-sm", column.align === "right" && "text-right")}
-              >
-                {column.render ? (
-                  column.render(row)
-                ) : (
-                  <span className={cn(column.key === columns[0]?.key && "issue-title")}>
-                    <CellText value={cellValue(row, column, column.key)} mono={column.mono} />
-                  </span>
+                style={columnStyle(column)}
+                className={cn(
+                  "h-10 min-w-0 overflow-hidden px-2.5 py-0 text-sm",
+                  column.align === "right" && "text-right",
                 )}
+              >
+                <div className="min-w-0 max-w-full overflow-hidden">
+                  {column.render ? (
+                    column.render(row)
+                  ) : (
+                    <span className={cn(column.key === columns[0]?.key && "issue-title")}>
+                      <CellText value={cellValue(row, column, column.key)} mono={column.mono} />
+                    </span>
+                  )}
+                </div>
               </TableCell>
             ))}
           </TableRow>

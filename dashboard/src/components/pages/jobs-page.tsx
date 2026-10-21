@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus } from "@/components/status-glyph";
 import { api } from "@/lib/api";
@@ -16,7 +16,7 @@ export function JobsPage({ initial = null }: { initial?: JobsPayload | null }): 
   const [row, setRow] = useState<Attempt | null>(null);
 
   return (
-    <>
+    <PageShell>
       <PageHeader
         title="Jobs"
         description="Ledger attempts. Pending rows resume with GET only — the dashboard never resubmits."
@@ -30,7 +30,7 @@ export function JobsPage({ initial = null }: { initial?: JobsPayload | null }): 
         emptyDescription="Dry-run or execute a job file on the CLI."
       >
         {data ? (
-          <PageBody className="flex min-h-0 flex-1 flex-col">
+          <PageBody>
             <DataTable
               rows={data.attempts}
               rowKey={(item) => item.id}
@@ -98,6 +98,6 @@ export function JobsPage({ initial = null }: { initial?: JobsPayload | null }): 
           </PageBody>
         ) : null}
       </QueryGate>
-    </>
+    </PageShell>
   );
 }

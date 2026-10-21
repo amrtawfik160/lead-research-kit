@@ -20,3 +20,46 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Scan public release inputs
         run: python scripts/release_check.py .
+      - name: Guard dashboard page gutters
+        run: python scripts/check_dashboard_layout.py
+
+  layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Guard dashboard page gutters
+        run: python scripts/check_dashboard_layout.py
+      - name: Install dashboard
+        working-directory: dashboard
+        run: npm ci
+      - name: Install Playwright Chromium
+        working-directory: dashboard
+        run: npx playwright install --with-deps chromium
+      - name: Build dashboard
+        working-directory: dashboard
+        run: npm run build
+      - name: Start sample dashboard
+        working-directory: dashboard
+        run: |
+          npm start > /tmp/veinore-dashboard.log 2>&1 &
+          echo $! > /tmp/veinore-dashboard.pid
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:3000/ >/dev/null && curl -sf http://127.0.0.1:8787/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "dashboard did not become ready" >&2
+          cat /tmp/veinore-dashboard.log >&2
+          exit 1
+      - name: Playwright layout contract
+        working-directory: dashboard
+        run: node scripts/layout_test.mjs

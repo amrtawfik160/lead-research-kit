@@ -1,10 +1,11 @@
 "use client";
 
-import { ArrowUpDown, ChevronDown, ChevronRight, Filter, Search, Users } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronRight, Filter, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { EntityAvatar } from "@/components/entity-avatar";
 import { LabelChip } from "@/components/label-chip";
+import { PageToolbar } from "@/components/page-shell";
 import { PriorityGlyph, QuietStatus, StatusGlyph } from "@/components/status-glyph";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -150,19 +151,16 @@ export function IssueList<T>({
   }, [activeId, cursor, flat, onSelect]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b px-6 py-2.5">
-        <div className="relative w-full max-w-[200px]">
-          <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={searchPlaceholder}
-            size="sm"
-            aria-label={searchLabel}
-            className="ps-7"
-          />
-        </div>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <PageToolbar>
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={searchPlaceholder}
+          size="sm"
+          aria-label={searchLabel}
+          className="w-64"
+        />
         <Menu>
           <MenuTrigger
             render={
@@ -201,12 +199,12 @@ export function IssueList<T>({
         <span className="ms-auto text-xs tabular-nums text-muted-foreground">
           {filtered.length} {filtered.length === 1 ? "row" : "rows"}
         </span>
-      </div>
+      </PageToolbar>
       {filtered.length === 0 ? (
         <EmptyState icon={Users} title={emptyTitle} description={emptyDescription} />
       ) : (
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className="grid grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b px-6 text-xs font-medium text-muted-foreground">
+        <div data-slot="page-table" className="min-h-0 min-w-0 flex-1 overflow-auto">
+          <div className="grid min-w-xl grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b text-xs font-medium text-muted-foreground">
             <div className="flex h-8 items-center">{columns.title}</div>
             <div className="flex h-8 items-center">{columns.project}</div>
             <div className="flex h-8 items-center">{columns.status}</div>
@@ -219,7 +217,7 @@ export function IssueList<T>({
                 <button
                   type="button"
                   onClick={() => setCollapsed((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
-                  className="mt-2.5 flex h-9 w-full items-center gap-2 border-b px-6 text-sm font-semibold"
+                  className="mt-2.5 flex h-9 w-full items-center gap-2 border-b text-sm font-semibold"
                 >
                   {collapsed[group.key] ? (
                     <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -243,7 +241,7 @@ export function IssueList<T>({
                           onSelect?.(item);
                         }}
                         className={cn(
-                          "grid min-h-11 w-full grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b px-6 text-left transition-colors duration-150",
+                          "grid min-h-11 w-full min-w-xl grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b text-left transition-colors duration-150",
                           selected ? "bg-muted" : "hover:bg-muted/70",
                         )}
                       >
@@ -264,7 +262,7 @@ export function IssueList<T>({
                         <div className="min-w-0">
                           <LabelChip value={item.project} />
                         </div>
-                        <div>
+                        <div className="min-w-0 overflow-hidden">
                           <QuietStatus value={item.status} />
                         </div>
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
