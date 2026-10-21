@@ -88,11 +88,39 @@ def missing_shell() -> list[str]:
     return missing
 
 
+def primitive_guards() -> list[str]:
+    findings: list[str] = []
+    issue_list = COMPONENTS / "issue-list.tsx"
+    if issue_list.is_file():
+        text = issue_list.read_text(encoding="utf-8")
+        if "line-through" in text:
+            findings.append("dashboard/src/components/issue-list.tsx: must not strike through lead/contact titles with line-through")
+        if "gap-x-" not in text:
+            findings.append("dashboard/src/components/issue-list.tsx: row grid must include horizontal column gap (gap-x-*)")
+        if 'data-slot="table-row"' not in text or 'data-slot="table-cell"' not in text:
+            findings.append("dashboard/src/components/issue-list.tsx: must expose data-slot=\"table-row\" and data-slot=\"table-cell\" for layout_test.mjs")
+
+    data_table = COMPONENTS / "data-table.tsx"
+    if data_table.is_file():
+        text = data_table.read_text(encoding="utf-8")
+        if "<MenuTrigger" not in text:
+            findings.append("dashboard/src/components/data-table.tsx: toolbar Filter/Sort buttons must use interactive <MenuTrigger>")
+
+    status_glyph = COMPONENTS / "status-glyph.tsx"
+    if status_glyph.is_file():
+        text = status_glyph.read_text(encoding="utf-8")
+        if "humanName(" not in text or "<CellText" not in text:
+            findings.append("dashboard/src/components/status-glyph.tsx: QuietStatus must format status tokens with humanName() and wrap text in <CellText>")
+
+    return findings
+
+
 def main() -> int:
     if not PRIMITIVE.is_file():
         print("page-shell primitive is missing", file=sys.stderr)
         return 1
     findings = missing_shell()
+    findings.extend(primitive_guards())
     for path in iter_targets():
         findings.extend(line_hits(path))
     if findings:

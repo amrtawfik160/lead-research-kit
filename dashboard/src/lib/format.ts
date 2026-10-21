@@ -76,6 +76,21 @@ const DISPLAY_NAMES: Record<string, string> = {
   hunter_finder: "Hunter finder",
   pattern_verified: "Pattern verified",
   published_name_based: "Published name",
+  public_web: "Public web",
+  provider_valid: "Provider valid",
+  provider_invalid: "Provider invalid",
+  sample_access_review_no_live_key: "Paused · no live key",
+  user_supplied_unattributed: "User supplied",
+  public_person_linked: "Public person linked",
+  synthetic_dashboard_sample: "Sample workspace",
+  do_not_contact: "Do not contact",
+  operator_hold: "Operator hold",
+  crawl4ai: "Crawl4AI",
+  fullenrich: "FullEnrich",
+  apollo: "Apollo",
+  brave: "Brave",
+  exa: "Exa",
+  tavily: "Tavily",
 };
 
 const CHART_POOLS: Record<string, string> = {

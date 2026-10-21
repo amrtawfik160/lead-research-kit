@@ -73,6 +73,19 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
       return true;
     }).length;
 
+  const countTab = (key: Cat) => {
+    if (key === "report") return 0;
+    if (key === "review") return countReview("review");
+    return rows.filter((row, index) => {
+      const id = issueKey("DAY", index);
+      const flagged = needsReview(row) && !seen.has(id);
+      if (reviewOnly && !flagged) return false;
+      if (key === "website") return sourceOf(row).includes("website");
+      if (key === "finder") return sourceOf(row).includes("finder");
+      return true;
+    }).length;
+  };
+
   function selectLead(row: LeadRow, index: number) {
     setLead(row);
     setSheet(false);
@@ -95,6 +108,7 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
               />
               Needs review
             </label>
+            <ExportLeadsButton rows={visible.length ? visible : rows} filename={`veinore-daily-${data?.date || "batch"}.csv`} />
             <Button
               size="sm"
               variant="outline"
@@ -162,13 +176,13 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                             ["report", "Report"],
                           ] as const
                         ).map(([key, label]) => {
-                          const flagged = key === "report" ? 0 : countReview(key);
+                          const count = countTab(key);
                           return (
                             <TabsTab key={key} value={key}>
                               {label}
-                              {flagged ? (
-                                <Badge render={<span />} variant="secondary">
-                                  {flagged}
+                              {count ? (
+                                <Badge render={<span />} variant={key === "review" ? "warning" : "secondary"}>
+                                  {count}
                                 </Badge>
                               ) : null}
                             </TabsTab>
@@ -204,7 +218,7 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                             type="button"
                             onClick={() => selectLead(row, index)}
                             className={cn(
-                              "relative flex min-h-12 w-full items-start gap-3 border-b py-3.5 text-left transition-colors",
+                              "relative flex min-h-12 w-full items-start gap-3 border-b px-2.5 py-3.5 text-left transition-colors",
                               selected ? "bg-muted" : "hover:bg-muted/70",
                             )}
                           >
@@ -248,6 +262,10 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                     issueId={issueKey("DAY", rows.indexOf(lead))}
                     onBack={() => setLead(null)}
                     onOpen={() => setSheet(true)}
+                    onSaved={(next) => {
+                      setLead(next);
+                      reload();
+                    }}
                   />
                 ) : (
                   <div className="grid min-h-full place-items-center py-10">
@@ -290,11 +308,13 @@ function LeadPreview({
   issueId,
   onBack,
   onOpen,
+  onSaved,
 }: {
   row: LeadRow;
   issueId: string;
   onBack: () => void;
   onOpen: () => void;
+  onSaved: (next: LeadRow) => void;
 }): React.ReactElement {
   const email = leadEmail(row);
   return (
@@ -329,20 +349,25 @@ function LeadPreview({
           Open details
         </Button>
       </div>
-      <div className="w-full max-w-3xl py-6">
-        <h2 className="mb-3 font-heading text-2xl font-semibold tracking-tight">{display(row["Full Name"])}</h2>
-        <div className="mb-5 flex flex-wrap items-center gap-2">
-          <QuietStatus value={humanName(String(row.Source || ""))} />
-          <QuietStatus value={row.Stage || "new"} />
-          <LabelChip value={row.Company} />
-          <QuietStatus value={row["Email Risk"]} />
-          <span className="text-sm text-muted-foreground">{display(row.City)}</span>
+      <div className="w-full max-w-3xl space-y-6 py-6">
+        <div>
+          <h2 className="mb-3 font-heading text-2xl font-semibold tracking-tight">{display(row["Full Name"])}</h2>
+          <div className="mb-5 flex flex-wrap items-center gap-2">
+            <QuietStatus value={humanName(String(row.Source || ""))} />
+            <QuietStatus value={row.Stage || "new"} />
+            <LabelChip value={row.Company} />
+            <QuietStatus value={row["Email Risk"]} />
+            <span className="text-sm text-muted-foreground">{display(row.City)}</span>
+          </div>
+          <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">About this lead</p>
+          <p className="text-base leading-7 text-muted-foreground">
+            {display(row.Title)} at {display(row.Company)}. Email {display(row.Email)} from {humanName(display(row.Source))}
+            {row["Email Risk Reason"] ? ` — ${humanName(display(row["Email Risk Reason"]))}` : "."}
+          </p>
         </div>
-        <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">About this lead</p>
-        <p className="text-base leading-7 text-muted-foreground">
-          {display(row.Title)} at {display(row.Company)}. Email {display(row.Email)} from {humanName(display(row.Source))}
-          {row["Email Risk Reason"] ? ` — ${humanName(display(row["Email Risk Reason"]))}` : "."}
-        </p>
+        <div className="rounded-xl border bg-card p-4">
+          <LeadOpsPanel row={row} onSaved={onSaved} />
+        </div>
       </div>
     </div>
   );

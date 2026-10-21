@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowUpDown, ChevronDown, ChevronRight, Filter, Users } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronRight, Filter, Users, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { CellText } from "@/components/cell-text";
 import { EmptyState } from "@/components/empty-state";
 import { EntityAvatar } from "@/components/entity-avatar";
 import { LabelChip } from "@/components/label-chip";
@@ -10,12 +11,14 @@ import { PriorityGlyph, QuietStatus, StatusGlyph } from "@/components/status-gly
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu";
-import { display, titleCase } from "@/lib/format";
+import { display, humanName, titleCase } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export type IssueItem<T> = {
   id: string;
   title: string;
+  subtitle?: string;
+  leadGlyph?: string;
   project?: string;
   status?: string;
   priority?: string;
@@ -41,6 +44,9 @@ const LEAD_COLUMNS: IssueColumns = {
   priority: "Tier",
   due: "City",
 };
+
+const ROW_GRID =
+  "grid min-w-xl grid-cols-[minmax(0,1.5fr)_13rem_9rem_7rem_7.5rem] items-center gap-x-5 border-b";
 
 export function IssueList<T>({
   items,
@@ -71,7 +77,7 @@ export function IssueList<T>({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [cursor, setCursor] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [sortKey, setSortKey] = useState<"manual" | "title" | "status" | "due">("manual");
+  const [sortKey, setSortKey] = useState<"manual" | "title" | "project" | "status" | "priority" | "due">("manual");
   const activeId = selectedId || cursor;
 
   const filtered = useMemo(() => {
@@ -82,7 +88,7 @@ export function IssueList<T>({
     }
     if (needle) {
       rows = rows.filter((item) =>
-        [item.id, item.title, item.project, item.status, item.priority, item.due, item.group]
+        [item.id, item.title, item.subtitle, item.project, item.status, item.priority, item.due, item.group]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
@@ -91,8 +97,12 @@ export function IssueList<T>({
     }
     if (sortKey === "title") {
       rows = [...rows].sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sortKey === "project") {
+      rows = [...rows].sort((a, b) => display(a.project).localeCompare(display(b.project)));
     } else if (sortKey === "status") {
       rows = [...rows].sort((a, b) => display(a.status).localeCompare(display(b.status)));
+    } else if (sortKey === "priority") {
+      rows = [...rows].sort((a, b) => display(a.priority).localeCompare(display(b.priority)));
     } else if (sortKey === "due") {
       rows = [...rows].sort((a, b) => display(a.due).localeCompare(display(b.due)));
     }
@@ -150,6 +160,15 @@ export function IssueList<T>({
     return () => document.removeEventListener("keydown", onKey);
   }, [activeId, cursor, flat, onSelect]);
 
+  const sortLabels: Record<typeof sortKey, string> = {
+    manual: "",
+    title: columns.title,
+    project: columns.project,
+    status: columns.status,
+    priority: columns.priority,
+    due: columns.due,
+  };
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <PageToolbar>
@@ -162,40 +181,51 @@ export function IssueList<T>({
           className="w-64"
         />
         <Menu>
-          <MenuTrigger
-            render={
-              <Button size="sm" variant="ghost" />
-            }
-          >
+          <MenuTrigger render={<Button size="sm" variant="ghost" />}>
             <Filter className="size-3.5" />
             Filter
-            {statusFilter !== "all" ? <span className="text-muted-foreground">{titleCase(statusFilter)}</span> : null}
+            {statusFilter !== "all" ? <span className="text-muted-foreground">{humanName(statusFilter)}</span> : null}
+            <ChevronDown className="size-3 opacity-60" />
           </MenuTrigger>
           <MenuPopup align="start" className="min-w-40">
             <MenuItem onClick={() => setStatusFilter("all")}>{filterAllLabel}</MenuItem>
             {statuses.map((status) => (
               <MenuItem key={status} onClick={() => setStatusFilter(status)}>
-                {titleCase(status)}
+                {humanName(status)}
               </MenuItem>
             ))}
           </MenuPopup>
         </Menu>
         <Menu>
-          <MenuTrigger
-            render={
-              <Button size="sm" variant="ghost" />
-            }
-          >
+          <MenuTrigger render={<Button size="sm" variant="ghost" />}>
             <ArrowUpDown className="size-3.5" />
             Sort
+            {sortKey !== "manual" ? <span className="text-muted-foreground">{sortLabels[sortKey]}</span> : null}
+            <ChevronDown className="size-3 opacity-60" />
           </MenuTrigger>
           <MenuPopup align="start" className="min-w-40">
-            <MenuItem onClick={() => setSortKey("manual")}>Manual</MenuItem>
+            <MenuItem onClick={() => setSortKey("manual")}>Default order</MenuItem>
             <MenuItem onClick={() => setSortKey("title")}>{columns.title}</MenuItem>
+            <MenuItem onClick={() => setSortKey("project")}>{columns.project}</MenuItem>
             <MenuItem onClick={() => setSortKey("status")}>{columns.status}</MenuItem>
+            <MenuItem onClick={() => setSortKey("priority")}>{columns.priority}</MenuItem>
             <MenuItem onClick={() => setSortKey("due")}>{columns.due}</MenuItem>
           </MenuPopup>
         </Menu>
+        {query || statusFilter !== "all" || sortKey !== "manual" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setQuery("");
+              setStatusFilter("all");
+              setSortKey("manual");
+            }}
+          >
+            <X className="size-3.5" />
+            Reset
+          </Button>
+        ) : null}
         <span className="ms-auto text-xs tabular-nums text-muted-foreground">
           {filtered.length} {filtered.length === 1 ? "row" : "rows"}
         </span>
@@ -204,12 +234,12 @@ export function IssueList<T>({
         <EmptyState icon={Users} title={emptyTitle} description={emptyDescription} />
       ) : (
         <div data-slot="page-table" className="min-h-0 min-w-0 flex-1 overflow-auto">
-          <div className="grid min-w-xl grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b text-xs font-medium text-muted-foreground">
-            <div className="flex h-8 items-center">{columns.title}</div>
-            <div className="flex h-8 items-center">{columns.project}</div>
-            <div className="flex h-8 items-center">{columns.status}</div>
-            <div className="flex h-8 items-center">{columns.priority}</div>
-            <div className="flex h-8 items-center">{columns.due}</div>
+          <div data-slot="table-row" className={cn(ROW_GRID, "text-xs font-medium text-muted-foreground")}>
+            <div data-slot="table-cell" className="flex h-8 min-w-0 items-center overflow-hidden">{columns.title}</div>
+            <div data-slot="table-cell" className="flex h-8 min-w-0 items-center overflow-hidden">{columns.project}</div>
+            <div data-slot="table-cell" className="flex h-8 min-w-0 items-center overflow-hidden">{columns.status}</div>
+            <div data-slot="table-cell" className="flex h-8 min-w-0 items-center overflow-hidden">{columns.priority}</div>
+            <div data-slot="table-cell" className="flex h-8 min-w-0 items-center overflow-hidden">{columns.due}</div>
           </div>
           {groups.map((group) => (
             <div key={group.key || "all"}>
@@ -232,45 +262,49 @@ export function IssueList<T>({
                 ? null
                 : group.rows.map((item) => {
                     const selected = activeId === item.id;
+                    const priorityText = item.priority ? humanName(display(item.priority)) : "—";
                     return (
                       <button
                         key={item.id}
                         type="button"
+                        data-slot="table-row"
                         onClick={() => {
                           setCursor(item.id);
                           onSelect?.(item);
                         }}
                         className={cn(
-                          "grid min-h-11 w-full min-w-xl grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b text-left transition-colors duration-150",
+                          ROW_GRID,
+                          "min-h-11 w-full text-left transition-colors duration-150 focus-visible:bg-accent/60 focus-visible:outline-none",
                           selected ? "bg-muted" : "hover:bg-muted/70",
                         )}
                       >
-                        <div className="flex min-w-0 items-center gap-2">
-                          <StatusGlyph value={item.status || item.priority} />
+                        <div data-slot="table-cell" className="flex min-w-0 items-center gap-2 overflow-hidden">
+                          <StatusGlyph value={item.leadGlyph || item.status || item.priority} />
                           {hideIds ? null : (
                             <span className="shrink-0 font-mono text-xs text-muted-foreground">{item.id}</span>
                           )}
-                          <span
-                            className={cn(
-                              "issue-title truncate text-sm",
-                              item.done && "text-muted-foreground line-through",
-                            )}
-                          >
-                            {item.title}
-                          </span>
+                          <CellText
+                            value={item.title}
+                            className={cn("issue-title text-sm", item.done && "text-muted-foreground")}
+                          />
+                          {item.subtitle ? (
+                            <span className="hidden shrink-0 text-xs text-muted-foreground xl:inline">
+                              · {item.subtitle}
+                            </span>
+                          ) : null}
                         </div>
-                        <div className="min-w-0">
+                        <div data-slot="table-cell" className="min-w-0 overflow-hidden">
                           <LabelChip value={item.project} />
                         </div>
-                        <div className="min-w-0 overflow-hidden">
+                        <div data-slot="table-cell" className="min-w-0 overflow-hidden">
                           <QuietStatus value={item.status} />
                         </div>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <div data-slot="table-cell" className="flex min-w-0 items-center gap-1.5 overflow-hidden text-xs text-muted-foreground">
                           <PriorityGlyph value={item.priority} />
-                          <span className="truncate">{display(item.priority)}</span>
+                          <CellText value={priorityText} className="text-xs text-muted-foreground" />
                         </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate text-xs text-muted-foreground">{display(item.due)}</span>
+                        <div data-slot="table-cell" className="flex min-w-0 items-center justify-between gap-2 overflow-hidden">
+                          <CellText value={display(item.due)} className="text-xs text-muted-foreground" />
                           <EntityAvatar name={item.avatar || item.project || item.title} size={18} />
                         </div>
                       </button>

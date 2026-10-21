@@ -8,7 +8,7 @@ import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus } from "@/components/status-glyph";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { display, formatTime } from "@/lib/format";
+import { display, formatTime, humanName } from "@/lib/format";
 import type { CompaniesPayload } from "@/lib/load";
 
 export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload | null }): React.ReactElement {
@@ -37,6 +37,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                   rows={data.domains}
                   rowKey={(item) => String(item.domain)}
                   onRowClick={setRow}
+                  exportFilename="veinore-domains.csv"
                   emptyTitle="No domains yet"
                   emptyDescription="Discover companies on the CLI, then they land here."
                   groupOptions={[
@@ -46,15 +47,15 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                   columns={[
                     { key: "domain", header: "Domain", width: "14rem", mono: true },
                     { key: "company", header: "Company", width: "14rem" },
-                    { key: "source", header: "Source", width: "8rem" },
+                    { key: "source", header: "Source", width: "9rem", value: (item) => humanName(String(item.source || "")) },
                     {
                       key: "status",
                       header: "Status",
-                      width: "7rem",
+                      width: "8rem",
                       render: (item) => <QuietStatus value={String(item.status || "uncrawled")} />,
                     },
-                    { key: "people", header: "People", width: "5rem", align: "right" },
-                    { key: "emails", header: "Emails", width: "5rem", align: "right" },
+                    { key: "people", header: "People", width: "6.5rem", align: "right" },
+                    { key: "emails", header: "Emails", width: "6.5rem", align: "right" },
                     {
                       key: "last_crawled",
                       header: "Crawled",
@@ -69,6 +70,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                   rows={data.sites}
                   rowKey={(item) => String(item.domain)}
                   onRowClick={setRow}
+                  exportFilename="veinore-crawls.csv"
                   emptyTitle="No crawls stored"
                   emptyDescription="Run crawl --execute to fill this tab."
                   columns={[
@@ -76,11 +78,11 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                     {
                       key: "status",
                       header: "Status",
-                      width: "7rem",
+                      width: "8rem",
                       render: (item) => <QuietStatus value={String(item.status)} />,
                     },
-                    { key: "people", header: "People", width: "5rem", align: "right" },
-                    { key: "emails", header: "Emails", width: "5rem", align: "right" },
+                    { key: "people", header: "People", width: "6.5rem", align: "right" },
+                    { key: "emails", header: "Emails", width: "6.5rem", align: "right" },
                     { key: "homepage_url", header: "Homepage" },
                   ]}
                 />
@@ -90,6 +92,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                   rows={data.firms}
                   rowKey={(item) => String(item.key)}
                   onRowClick={setRow}
+                  exportFilename="veinore-firms.csv"
                   emptyTitle="No public-record firms"
                   emptyDescription="Record sources add firms here after a daily run."
                   groupOptions={[{ value: "status", label: "Status" }]}
@@ -98,7 +101,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                     {
                       key: "status",
                       header: "Status",
-                      width: "7rem",
+                      width: "8rem",
                       render: (item) => <QuietStatus value={String(item.status)} />,
                     },
                     { key: "domain", header: "Domain", width: "14rem", mono: true },
@@ -116,6 +119,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                   rows={data.prospects}
                   rowKey={(item) => `${item.full_name}-${item.company_website || item.company}`}
                   onRowClick={setRow}
+                  exportFilename="veinore-prospects.csv"
                   emptyTitle="No stored prospects"
                   emptyDescription="Collect or import prospects to see them here."
                   columns={[

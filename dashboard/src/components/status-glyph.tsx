@@ -1,16 +1,42 @@
 import { Circle, CircleAlert, CircleCheck, CircleDashed, CircleDot } from "lucide-react";
-import { display } from "@/lib/format";
+import { CellText } from "@/components/cell-text";
+import { display, humanName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 type Tone = "todo" | "progress" | "review" | "done" | "alert" | "backlog";
 
 function toneOf(value?: string | null): Tone {
-  const raw = (value || "").toLowerCase();
-  if (/done|valid|low|confirmed|enabled|clear|active|completed|a\b|intact/.test(raw)) return "done";
-  if (/progress|medium|partial|pending|uncertain|finder|b\b/.test(raw)) return "progress";
-  if (/review|paused|quota|catch|affiliation/.test(raw)) return "review";
-  if (/held|fail|high|reject|broken|invalid|error|overdue|risk/.test(raw)) return "alert";
-  if (/backlog|unknown|skip|off|preview/.test(raw)) return "backlog";
+  const raw = (value || "").toLowerCase().trim();
+  if (!raw || raw === "—") return "backlog";
+  if (
+    /done|valid|verified|deliverable|low|confirmed|enabled|clear|active|completed|succeeded|present|ok\b|qualified|replied|resolved|clean|free|a\b|intact|website_published|website published|pattern_verified|pattern verified/.test(
+      raw,
+    )
+  ) {
+    return "done";
+  }
+  if (
+    /progress|running|medium|partial|pending|uncertain|finder|contacted|linkedin|public_web|public web|directory|cached|in_progress|warm|b\b/.test(
+      raw,
+    )
+  ) {
+    return "progress";
+  }
+  if (
+    /review|paused|quota|catch|affiliation|sample|unverified|user_supplied|user supplied/.test(
+      raw,
+    )
+  ) {
+    return "review";
+  }
+  if (
+    /held|hold|fail|failed|high|reject|rejected|broken|invalid|error|overdue|risk|unreachable|bounced|disqualified|do_not_contact|do not contact|exhausted|blocked/.test(
+      raw,
+    )
+  ) {
+    return "alert";
+  }
+  if (/backlog|unknown|skip|skipped|off|preview|none|missing|uncrawled/.test(raw)) return "backlog";
   return "todo";
 }
 
@@ -41,7 +67,13 @@ export function StatusGlyph({
 }): React.ReactElement {
   const tone = toneOf(value == null ? "" : String(value));
   const Icon = ICONS[tone];
-  return <Icon className={cn("size-3.5 shrink-0", COLOR[tone], className)} />;
+  return (
+    <Icon
+      data-slot="status-glyph"
+      data-tone={tone}
+      className={cn("size-3.5 shrink-0", COLOR[tone], className)}
+    />
+  );
 }
 
 export function PriorityGlyph({
@@ -76,10 +108,15 @@ export function QuietStatus({
   value?: string | number | null;
   className?: string;
 }): React.ReactElement {
+  const raw = display(value);
+  const shown = raw === "—" ? raw : humanName(raw);
   return (
-    <span className={cn("inline-flex min-w-0 max-w-full items-center gap-1.5 text-sm text-muted-foreground", className)}>
+    <span
+      data-slot="quiet-status"
+      className={cn("inline-flex min-w-0 max-w-full items-center gap-1.5 text-sm text-muted-foreground", className)}
+    >
       <StatusGlyph value={value} />
-      <span className="min-w-0 truncate">{display(value)}</span>
+      <CellText value={shown} className="min-w-0 text-sm text-muted-foreground" />
     </span>
   );
 }

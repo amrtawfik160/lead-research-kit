@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowUpDown, ChevronDown, ChevronUp, ChevronsUpDown, Filter, Users } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronUp, ChevronsUpDown, Download, Filter, Users, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CellText } from "@/components/cell-text";
 import { EmptyState } from "@/components/empty-state";
 import { PageToolbar } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "@/components/ui/menu";
 import {
   Select,
   SelectItem,
@@ -22,7 +23,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { display, text } from "@/lib/format";
+import { toastManager } from "@/components/ui/toast";
+import { display, humanName, text } from "@/lib/format";
+import { downloadCsv } from "@/lib/lead-ops";
 import { cn } from "@/lib/utils";
 
 export type Column<T> = {
@@ -63,6 +66,20 @@ function columnStyle(column: { width?: string }): React.CSSProperties {
   return column.width ? { width: column.width, minWidth, maxWidth: column.width } : { minWidth };
 }
 
+function csvEscape(value: unknown): string {
+  const str = text(value);
+  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
+function rowsToCsv<T extends object>(rows: T[], columns: Array<Column<T>>): string {
+  const headers = columns.map((column) => csvEscape(column.header)).join(",");
+  const lines = rows.map((row) =>
+    columns.map((column) => csvEscape(cellValue(row, column, column.key))).join(","),
+  );
+  return `${[headers, ...lines].join("\n")}\n`;
+}
+
 export function DataTable<T extends object>({
   rows,
   columns,
@@ -72,6 +89,7 @@ export function DataTable<T extends object>({
   selectedKey,
   rowKey,
   defaultSort = null,
+  exportFilename,
   emptyTitle = "No rows",
   emptyDescription = "Nothing matches the current filters.",
 }: {
@@ -83,25 +101,51 @@ export function DataTable<T extends object>({
   selectedKey?: string;
   rowKey: (row: T) => string;
   defaultSort?: SortState;
+  exportFilename?: string;
   emptyTitle?: string;
   emptyDescription?: string;
 }): React.ReactElement {
   const [query, setQuery] = useState("");
   const [groupBy, setGroupBy] = useState("none");
+  const [columnFilter, setColumnFilter] = useState<{ key: string; value: string; label: string } | null>(null);
   const [sort, setSort] = useState<SortState>(defaultSort);
   const [page, setPage] = useState(0);
 
+  const filterFacets = useMemo(() => {
+    const facets: Array<{ key: string; header: string; values: string[] }> = [];
+    for (const column of columns) {
+      const distinct = [
+        ...new Set(
+          rows
+            .map((row) => text(cellValue(row, column, column.key)).trim())
+            .filter((val) => val.length > 0 && val.length <= 40),
+        ),
+      ];
+      if (distinct.length >= 2 && distinct.length <= 10) {
+        facets.push({ key: column.key, header: column.header, values: distinct.slice(0, 8) });
+      }
+    }
+    return facets.slice(0, 3);
+  }, [columns, rows]);
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return rows;
-    return rows.filter((row) => {
+    let result = rows;
+    if (columnFilter) {
+      const col = columns.find((item) => item.key === columnFilter.key);
+      result = result.filter(
+        (row) => text(cellValue(row, col, columnFilter.key)).trim().toLowerCase() === columnFilter.value.toLowerCase(),
+      );
+    }
+    if (!needle) return result;
+    return result.filter((row) => {
       const keys = searchKeys || columns.map((column) => column.key);
       return keys.some((key) => {
         const column = columns.find((item) => item.key === key);
         return text(cellValue(row, column, key)).toLowerCase().includes(needle);
       });
     });
-  }, [columns, query, rows, searchKeys]);
+  }, [columnFilter, columns, query, rows, searchKeys]);
 
   const sorted = useMemo(() => {
     if (!sort) return filtered;
@@ -125,7 +169,8 @@ export function DataTable<T extends object>({
     const buckets = new Map<string, T[]>();
     for (const row of sorted) {
       const column = columns.find((item) => item.key === groupBy);
-      const label = display(cellValue(row, column, groupBy));
+      const raw = display(cellValue(row, column, groupBy));
+      const label = raw === "—" ? raw : humanName(raw);
       buckets.set(label, [...(buckets.get(label) || []), row]);
     }
     return [...buckets.entries()]
@@ -175,6 +220,8 @@ export function DataTable<T extends object>({
     setPage(0);
   }
 
+  const activeSortHeader = sort ? columns.find((col) => col.key === sort.key)?.header : null;
+
   return (
     <div data-slot="data-table" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <PageToolbar>
@@ -201,7 +248,7 @@ export function DataTable<T extends object>({
               setPage(0);
             }}
           >
-                <SelectTrigger size="sm" className="w-auto min-w-36">
+            <SelectTrigger size="sm" className="w-auto min-w-36">
               <SelectValue placeholder="Group" />
             </SelectTrigger>
             <SelectPopup>
@@ -214,14 +261,100 @@ export function DataTable<T extends object>({
             </SelectPopup>
           </Select>
         ) : null}
-        <Button size="xs" variant="ghost">
-          <Filter className="size-3.5" />
-          Filter
-        </Button>
-        <Button size="xs" variant="ghost" onClick={() => columns[0] && toggleSort(columns[0].key)}>
-          <ArrowUpDown className="size-3.5" />
-          Sort
-        </Button>
+        <Menu>
+          <MenuTrigger render={<Button size="sm" variant="ghost" />}>
+            <Filter className="size-3.5" />
+            Filter
+            {columnFilter ? <span className="text-muted-foreground">{columnFilter.label}</span> : null}
+            <ChevronDown className="size-3 opacity-60" />
+          </MenuTrigger>
+          <MenuPopup align="start" className="min-w-44">
+            <MenuItem
+              onClick={() => {
+                setColumnFilter(null);
+                setPage(0);
+              }}
+            >
+              All rows
+            </MenuItem>
+            {filterFacets.flatMap((facet) =>
+              facet.values.map((val) => {
+                const label = `${facet.header}: ${humanName(val)}`;
+                return (
+                  <MenuItem
+                    key={`${facet.key}:${val}`}
+                    onClick={() => {
+                      setColumnFilter({ key: facet.key, value: val, label: humanName(val) });
+                      setPage(0);
+                    }}
+                  >
+                    {label}
+                  </MenuItem>
+                );
+              }),
+            )}
+          </MenuPopup>
+        </Menu>
+        <Menu>
+          <MenuTrigger render={<Button size="sm" variant="ghost" />}>
+            <ArrowUpDown className="size-3.5" />
+            Sort
+            {activeSortHeader ? (
+              <span className="text-muted-foreground">
+                {activeSortHeader} {sort?.dir === "asc" ? "↑" : "↓"}
+              </span>
+            ) : null}
+            <ChevronDown className="size-3 opacity-60" />
+          </MenuTrigger>
+          <MenuPopup align="start" className="min-w-40">
+            <MenuItem
+              onClick={() => {
+                setSort(null);
+                setPage(0);
+              }}
+            >
+              Default order
+            </MenuItem>
+            {columns.map((column) => (
+              <MenuItem key={column.key} onClick={() => toggleSort(column.key)}>
+                {column.header}
+              </MenuItem>
+            ))}
+          </MenuPopup>
+        </Menu>
+        {query || columnFilter || groupBy !== "none" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setQuery("");
+              setColumnFilter(null);
+              setGroupBy("none");
+              setPage(0);
+            }}
+          >
+            <X className="size-3.5" />
+            Reset
+          </Button>
+        ) : null}
+        {exportFilename ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!sorted.length}
+            onClick={() => {
+              downloadCsv(exportFilename, rowsToCsv(sorted, columns));
+              toastManager.add({
+                type: "success",
+                title: "CSV exported",
+                description: `${sorted.length} rows`,
+              });
+            }}
+          >
+            <Download className="size-3.5" />
+            Export CSV
+          </Button>
+        ) : null}
         <span className="ms-auto text-xs tabular-nums text-muted-foreground">
           {filtered.length} {filtered.length === 1 ? "row" : "rows"}
         </span>
@@ -241,7 +374,7 @@ export function DataTable<T extends object>({
                       style={columnStyle(column)}
                       aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"}
                       className={cn(
-                        "h-8 overflow-hidden px-2.5 text-xs",
+                        "h-8 overflow-hidden px-3 text-xs",
                         column.align === "right" && "text-right",
                       )}
                     >
@@ -360,7 +493,7 @@ function GroupRows<T extends object>({
                 key={column.key}
                 style={columnStyle(column)}
                 className={cn(
-                  "h-10 min-w-0 overflow-hidden px-2.5 py-0 text-sm",
+                  "h-10 min-w-0 overflow-hidden px-3 py-0 text-sm",
                   column.align === "right" && "text-right",
                 )}
               >

@@ -105,6 +105,14 @@ export function QualityPage(): React.ReactElement {
             Keep non-decision-makers
             <Switch checked={keepOthers} onCheckedChange={setKeepOthers} />
           </label>
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            <Button size="sm" onClick={() => void run()} disabled={busy || !csv.trim()}>
+              {busy ? "Cleaning…" : "Clean list"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setCsv(SAMPLE_CSV)} disabled={busy}>
+              Reset sample
+            </Button>
+          </div>
         </CardPanel>
         </Card>
         <div className="min-w-0">
@@ -134,13 +142,14 @@ export function QualityPage(): React.ReactElement {
                   <DataTable
                     rows={result.clean}
                     rowKey={(row) => `${row.full_name}-${row.email}`}
+                    exportFilename="veinore-clean-leads.csv"
                     columns={[
                       { key: "full_name", header: "Name", width: "11rem" },
                       { key: "title", header: "Title", width: "11rem" },
                       { key: "company", header: "Company", width: "13rem" },
                       { key: "email", header: "Email", width: "14rem", mono: true },
-                      { key: "tier", header: "Tier", width: "4.5rem", render: (row) => <StatusBadge value={String(row.tier)} /> },
-                      { key: "score", header: "Score", width: "5rem", align: "right" },
+                      { key: "tier", header: "Tier", width: "5.5rem", render: (row) => <StatusBadge value={String(row.tier)} /> },
+                      { key: "score", header: "Score", width: "6rem", align: "right" },
                     ]}
                   />
                 </TabsPanel>
@@ -148,6 +157,7 @@ export function QualityPage(): React.ReactElement {
                   <DataTable
                     rows={result.review}
                     rowKey={(row) => `${row.full_name}-${row.email}-review`}
+                    exportFilename="veinore-review-leads.csv"
                     columns={[
                       { key: "full_name", header: "Name" },
                       { key: "title", header: "Title" },
@@ -160,6 +170,7 @@ export function QualityPage(): React.ReactElement {
                   <DataTable
                     rows={result.rejected}
                     rowKey={(row) => `${row.full_name}-${row.email}-rej`}
+                    exportFilename="veinore-rejected-leads.csv"
                     columns={[
                       { key: "full_name", header: "Name" },
                       { key: "reject_reasons", header: "Reasons" },

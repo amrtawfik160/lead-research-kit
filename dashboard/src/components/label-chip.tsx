@@ -1,5 +1,6 @@
+import { CellText } from "@/components/cell-text";
 import { labelColor } from "@/lib/gr8r";
-import { titleCase } from "@/lib/format";
+import { humanName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export function LabelChip({
@@ -14,12 +15,12 @@ export function LabelChip({
   return (
     <span
       className={cn(
-        "inline-flex max-w-full items-center gap-1.5 truncate text-sm text-muted-foreground",
+        "inline-flex max-w-full min-w-0 items-center gap-1.5 truncate text-sm text-muted-foreground",
         className,
       )}
     >
       <span className="size-2 shrink-0 rounded-[3px]" style={{ background: color }} />
-      <span className="truncate">{raw === "—" ? raw : titleCase(raw)}</span>
+      <CellText value={raw === "—" ? raw : humanName(raw)} className="min-w-0 text-sm text-muted-foreground" />
     </span>
   );
 }
