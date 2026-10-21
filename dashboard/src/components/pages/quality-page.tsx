@@ -13,7 +13,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toastManager } from "@/components/ui/toast";
 import { DataTable } from "@/components/data-table";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import type { CleanResult } from "@/lib/types";
@@ -63,7 +63,7 @@ export function QualityPage(): React.ReactElement {
   }
 
   return (
-    <>
+    <PageShell>
       <PageHeader
         title="Quality"
         description="Runs the offline quality engine (clean / review / rejected). Nothing is sent to providers."
@@ -74,7 +74,7 @@ export function QualityPage(): React.ReactElement {
           </Button>
         }
       />
-      <PageBody className="grid gap-4 px-6 pb-16 lg:grid-cols-[minmax(0,22rem)_1fr]">
+      <PageBody className="grid gap-4 pb-16 lg:grid-cols-[var(--page-form)_minmax(0,1fr)]">
         <Card>
         <CardPanel className="flex flex-col gap-4 p-4">
           <Field>
@@ -171,7 +171,7 @@ export function QualityPage(): React.ReactElement {
             </div>
           ) : (
             <EmptyState
-              className="min-h-64 rounded-[10px] border"
+              className="min-h-64 rounded-lg border"
               icon={Users}
               title="Paste a list"
               description="Sample CSV is already loaded. Run Clean — nothing is sent to providers."
@@ -179,6 +179,6 @@ export function QualityPage(): React.ReactElement {
           )}
         </div>
       </PageBody>
-    </>
+    </PageShell>
   );
 }

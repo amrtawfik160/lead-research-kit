@@ -77,9 +77,9 @@ export function QuietStatus({
   className?: string;
 }): React.ReactElement {
   return (
-    <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground", className)}>
+    <span className={cn("inline-flex min-w-0 max-w-full items-center gap-1.5 text-sm text-muted-foreground", className)}>
       <StatusGlyph value={value} />
-      <span className="truncate">{display(value)}</span>
+      <span className="min-w-0 truncate">{display(value)}</span>
     </span>
   );
 }

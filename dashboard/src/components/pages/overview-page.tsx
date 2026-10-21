@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/empty-state";
 import { EntityAvatar } from "@/components/entity-avatar";
 import { LabelChip } from "@/components/label-chip";
 import { ChartCard, HorizontalBarChart, LeadsPerDayChart, QuotaChart, VerificationChart } from "@/components/workspace-charts";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { Panel, PanelHeader, SegTabs } from "@/components/panel";
 import { ProgBar } from "@/components/prog-bar";
 import { QueryGate, useQuery } from "@/components/query-state";
@@ -52,10 +52,10 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
   };
 
   return (
-    <>
+    <PageShell width="wide">
       <QueryGate loading={loading} error={error} empty={!data} skeleton="cards">
         {data ? (
-          <PageBody className="mx-auto w-full max-w-[1160px] pb-16">
+          <PageBody className="gap-4 pb-16">
             <PageHeader
               title={`${greeting()}`}
               description={`${longDate()} · Lead deliveries and provider quota across this workspace.`}
@@ -73,7 +73,6 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                 </>
               }
             />
-            <div className="flex flex-col gap-4 px-6">
             <DuplicateBanner items={data.duplicates} className="mb-0" />
             <div className="grid grid-cols-2 overflow-hidden rounded-xl border sm:grid-cols-4">
               <Stat
@@ -193,7 +192,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                     }
                   />
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[560px] text-sm">
+                    <table className="w-full min-w-xl text-sm">
                       <thead>
                         <tr className="border-t text-left text-xs font-medium text-muted-foreground">
                           <th className="px-4 py-2 font-medium">Provider</th>
@@ -296,11 +295,10 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                 </Panel>
               </div>
             </div>
-            </div>
           </PageBody>
         ) : null}
       </QueryGate>
-    </>
+    </PageShell>
   );
 }
 
@@ -327,7 +325,7 @@ function MiniLead({ row }: { row: LeadRow }): React.ReactElement {
     >
       <StatusGlyph value={row["Email Risk"]} />
       <span className="issue-title min-w-0 flex-1 truncate">{display(row["Full Name"])}</span>
-      <LabelChip value={row.Company} className="hidden max-w-[140px] sm:inline-flex" />
+      <LabelChip value={row.Company} className="hidden max-w-36 sm:inline-flex" />
       <QuietStatus value={row.Stage || "new"} />
       <PriorityGlyph value={row.Tier} />
       <span className="w-14 truncate text-right text-xs text-muted-foreground">{display(row.City)}</span>

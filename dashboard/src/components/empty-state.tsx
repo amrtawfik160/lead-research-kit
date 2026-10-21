@@ -27,7 +27,7 @@ export function EmptyState({
         </EmptyMedia>
         <EmptyTitle className={compact ? "text-base font-semibold" : undefined}>{title}</EmptyTitle>
         {description ? (
-          <EmptyDescription className="max-w-[360px]">{description}</EmptyDescription>
+          <EmptyDescription className="max-w-sm">{description}</EmptyDescription>
         ) : null}
       </EmptyHeader>
     </Empty>

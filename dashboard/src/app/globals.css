@@ -104,6 +104,12 @@
 
 :root {
   color-scheme: light;
+  --page-gutter: 1.5rem;
+  --page-max-wide: 72rem;
+  --page-max-narrow: 42rem;
+  --page-pane: 28rem;
+  --page-form: 22rem;
+  --table-min-width: 60rem;
   --radius: 0.625rem;
   --background: var(--color-white);
   --foreground: var(--color-neutral-800);

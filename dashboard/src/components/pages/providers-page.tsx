@@ -4,7 +4,7 @@ import { useState } from "react";
 import { CellText } from "@/components/cell-text";
 import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus } from "@/components/status-glyph";
 import { Switch } from "@/components/ui/switch";
@@ -37,7 +37,7 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
   }
 
   return (
-    <>
+    <PageShell>
       <PageHeader
         title="Providers"
         description="Enabled flags, attested free pools, and whether the required env var is present. Values are never shown."
@@ -45,7 +45,7 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
       />
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
-          <PageBody className="flex min-h-0 flex-1 flex-col">
+          <PageBody>
             <DataTable
               rows={data.providers}
               rowKey={(item) => item.id}
@@ -140,6 +140,6 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
           </PageBody>
         ) : null}
       </QueryGate>
-    </>
+    </PageShell>
   );
 }

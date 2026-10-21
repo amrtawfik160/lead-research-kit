@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus } from "@/components/status-glyph";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,7 +25,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
   }));
 
   return (
-    <>
+    <PageShell>
       <PageHeader
         title="History"
         description="Delivered keys, suppressions, outreach outcomes, distrusted guess patterns, and source quality."
@@ -33,14 +33,14 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
       />
       <QueryGate loading={loading} error={error} empty={!data} skeleton="cards">
         {data ? (
-          <PageBody className="flex min-h-0 flex-1 flex-col">
-            <div className="grid gap-4 px-6 sm:grid-cols-4">
+          <PageBody>
+            <div className="grid gap-4 sm:grid-cols-4">
               <Mini label="Delivered keys" value={data.stats.delivered_keys} />
               <Mini label="Suppressed" value={data.stats.suppressed} />
               <Mini label="Outcomes" value={data.stats.outcomes} />
               <Mini label="Distrusted patterns" value={data.stats.patterns_distrusted} />
             </div>
-            <Tabs defaultValue="delivered" className="flex min-h-0 flex-1 flex-col px-6 pt-4">
+            <Tabs defaultValue="delivered" className="flex min-h-0 flex-1 flex-col pt-2">
               <TabsList variant="underline" size="sm">
                 <TabsTab value="delivered">Delivered</TabsTab>
                 <TabsTab value="suppressed">Suppressed</TabsTab>
@@ -158,7 +158,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
         issueId={display(row?.email || row?.domain || row?.id)}
         fields={Object.entries(row || {}).map(([label, value]) => ({ label, value: display(value) }))}
       />
-    </>
+    </PageShell>
   );
 }
 

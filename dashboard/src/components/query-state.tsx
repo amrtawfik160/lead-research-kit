@@ -53,7 +53,7 @@ function Sk({ className }: { className: string }): React.ReactElement {
 
 function TableSkeleton(): React.ReactElement {
   return (
-    <div className="flex flex-col gap-0 px-6 py-4" aria-hidden>
+    <div className="flex flex-col gap-0 py-4" aria-hidden>
       <div className="mb-3 flex items-center gap-2">
         <Sk className="h-7 w-48" />
         <Sk className="h-7 w-16" />
@@ -64,7 +64,7 @@ function TableSkeleton(): React.ReactElement {
         <div key={index} className="flex h-10 items-center gap-3 border-b">
           <Sk className="h-3.5 w-3.5 rounded-full" />
           <Sk className="h-3 w-12" />
-          <Sk className="h-3.5 w-[38%]" />
+          <Sk className="h-3.5 w-2/5" />
           <span className="flex-1" />
           <Sk className="h-3 w-20" />
           <Sk className="h-3 w-16" />
@@ -76,7 +76,7 @@ function TableSkeleton(): React.ReactElement {
 
 function CardsSkeleton(): React.ReactElement {
   return (
-    <div className="mx-auto flex w-full max-w-[1160px] flex-col gap-4 px-6 pt-6" aria-hidden>
+    <div className="flex w-full flex-col gap-4 pt-6" aria-hidden>
       <div className="flex items-end justify-between">
         <div className="flex flex-col gap-2">
           <Sk className="h-7 w-56" />
@@ -87,7 +87,7 @@ function CardsSkeleton(): React.ReactElement {
           <Sk className="h-7 w-24" />
         </div>
       </div>
-      <div className="grid grid-cols-4 overflow-hidden rounded-[10px] border">
+      <div className="grid grid-cols-4 overflow-hidden rounded-lg border">
         {Array.from({ length: 4 }, (_, index) => (
           <div key={index} className="flex flex-col gap-2 border-l px-4 py-3.5 first:border-l-0">
             <Sk className="h-3 w-24" />
@@ -97,8 +97,8 @@ function CardsSkeleton(): React.ReactElement {
         ))}
       </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-        <Sk className="h-64 w-full rounded-[10px]" />
-        <Sk className="h-64 w-full rounded-[10px]" />
+        <Sk className="h-64 w-full rounded-lg" />
+        <Sk className="h-64 w-full rounded-lg" />
       </div>
     </div>
   );
@@ -125,7 +125,7 @@ export function QueryGate({
     if (skeleton === "cards") return <CardsSkeleton />;
     if (skeleton === "form") {
       return (
-        <div className="flex max-w-xl flex-col gap-3 px-6 pt-4" aria-hidden>
+        <div className="flex max-w-xl flex-col gap-3 pt-4" aria-hidden>
           <Sk className="h-16 w-full" />
           <Sk className="h-24 w-full" />
           <Sk className="h-10 w-48" />
@@ -136,7 +136,7 @@ export function QueryGate({
   }
   if (error) {
     return (
-      <div className="p-6">
+      <div className="py-6">
         <Alert variant="error">
           <AlertTitle>Could not read the workspace</AlertTitle>
           <AlertDescription>{explainError(error)}</AlertDescription>

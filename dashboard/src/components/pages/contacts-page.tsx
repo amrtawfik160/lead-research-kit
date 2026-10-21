@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { DetailSheet, FieldList } from "@/components/detail-sheet";
 import { IssueList, type IssueItem } from "@/components/issue-list";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -66,7 +66,7 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
   }
 
   return (
-    <>
+    <PageShell>
       <PageHeader
         title="Contacts"
         description="Imported workspace records. Holds stay held; LinkedIn channel is preserved."
@@ -80,7 +80,7 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
         emptyDescription="Import a list on the CLI, or rebuild the sample workspace."
       >
         {data ? (
-          <PageBody className="flex min-h-0 flex-1 flex-col">
+          <PageBody>
             <IssueList
               items={issues}
               selectedId={selected?.id}
@@ -188,6 +188,6 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
           </PageBody>
         ) : null}
       </QueryGate>
-    </>
+    </PageShell>
   );
 }

@@ -8,7 +8,7 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { toastManager } from "@/components/ui/toast";
-import { PageBody, PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { Card, CardPanel } from "@/components/ui/card";
 import { ThemeCards } from "@/components/theme-cards";
@@ -75,7 +75,7 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
   const locked = Boolean(data?.env_locked);
 
   return (
-    <>
+    <PageShell width="narrow">
       <PageHeader
         title="Settings"
         description="Point Veinore at a private workspace, or use the synthetic sample. API keys stay in the environment."
@@ -83,7 +83,7 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
       />
       <QueryGate loading={loading} error={error} empty={!data} skeleton="form">
         {data ? (
-          <PageBody className="flex max-w-2xl flex-col gap-4 px-6 pb-16">
+          <PageBody className="gap-4 pb-16">
           <Card>
           <CardPanel className="flex flex-col gap-4 p-4">
             <div>
@@ -186,6 +186,6 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
           </PageBody>
         ) : null}
       </QueryGate>
-    </>
+    </PageShell>
   );
 }
