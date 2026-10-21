@@ -151,7 +151,7 @@ export function IssueList<T>({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-1.5 border-b px-6 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b px-6 py-2.5">
         <div className="relative w-full max-w-[200px]">
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -160,13 +160,13 @@ export function IssueList<T>({
             placeholder={searchPlaceholder}
             size="sm"
             aria-label={searchLabel}
-            className="h-[26px] ps-7"
+            className="ps-7"
           />
         </div>
         <Menu>
           <MenuTrigger
             render={
-              <Button size="sm" variant="ghost" className="h-[26px] rounded-[6px] px-2 text-[12px] font-medium" />
+              <Button size="sm" variant="ghost" />
             }
           >
             <Filter className="size-3.5" />
@@ -185,7 +185,7 @@ export function IssueList<T>({
         <Menu>
           <MenuTrigger
             render={
-              <Button size="sm" variant="ghost" className="h-[26px] rounded-[6px] px-2 text-[12px] font-medium" />
+              <Button size="sm" variant="ghost" />
             }
           >
             <ArrowUpDown className="size-3.5" />

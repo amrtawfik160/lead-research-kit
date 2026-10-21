@@ -34,13 +34,13 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
       <QueryGate loading={loading} error={error} empty={!data} skeleton="cards">
         {data ? (
           <PageBody className="flex min-h-0 flex-1 flex-col">
-            <div className="grid gap-3 px-4 pt-4 sm:grid-cols-4 sm:px-6">
+            <div className="grid gap-4 px-6 sm:grid-cols-4">
               <Mini label="Delivered keys" value={data.stats.delivered_keys} />
               <Mini label="Suppressed" value={data.stats.suppressed} />
               <Mini label="Outcomes" value={data.stats.outcomes} />
               <Mini label="Distrusted patterns" value={data.stats.patterns_distrusted} />
             </div>
-            <Tabs defaultValue="delivered" className="flex min-h-0 flex-1 flex-col px-4 py-3 sm:px-6">
+            <Tabs defaultValue="delivered" className="flex min-h-0 flex-1 flex-col px-6 pt-4">
               <TabsList variant="underline" size="sm">
                 <TabsTab value="delivered">Delivered</TabsTab>
                 <TabsTab value="suppressed">Suppressed</TabsTab>
@@ -48,7 +48,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                 <TabsTab value="patterns">Patterns</TabsTab>
                 <TabsTab value="sources">Sources</TabsTab>
               </TabsList>
-              <TabsPanel value="delivered" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="delivered" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.delivered}
                   rowKey={(item) =>
@@ -71,7 +71,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                   ]}
                 />
               </TabsPanel>
-              <TabsPanel value="suppressed" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="suppressed" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.suppressed}
                   rowKey={(item) => String(item.key)}
@@ -95,7 +95,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                   ]}
                 />
               </TabsPanel>
-              <TabsPanel value="outcomes" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="outcomes" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.outcomes}
                   rowKey={(item) => `${item.key}-${item.outcome}`}
@@ -116,7 +116,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                   ]}
                 />
               </TabsPanel>
-              <TabsPanel value="patterns" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="patterns" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={patterns}
                   rowKey={(item) => String(item.domain)}
@@ -130,7 +130,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                   ]}
                 />
               </TabsPanel>
-              <TabsPanel value="sources" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="sources" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={sources}
                   rowKey={(item) => String(item.source)}

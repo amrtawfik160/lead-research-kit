@@ -226,15 +226,17 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
             <span className="font-medium text-foreground">{current?.label || "Veinore"}</span>
           </nav>
           <span className="flex-1" />
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="outline"
             onClick={openPalette}
-            className="flex h-[26px] w-[220px] items-center gap-2 rounded-[6px] border bg-[#f7f6f3] px-2.5 text-[12.5px] text-muted-foreground transition-colors hover:border-[#dad7d0] hover:text-foreground dark:bg-[#181817]"
+            className="w-[220px] justify-start font-normal text-muted-foreground"
+            aria-label="Search leads"
           >
-            <Search className="size-3.5 shrink-0" />
+            <Search />
             <span className="min-w-0 flex-1 truncate text-left">Search leads…</span>
             <Kbd className="h-4 min-w-0 px-1 text-[10px]">⌘K</Kbd>
-          </button>
+          </Button>
           <Button
             size="icon-sm"
             variant="ghost"
@@ -248,10 +250,10 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
             ) : null}
           </Button>
           <Menu>
-            <MenuTrigger className="inline-flex h-[26px] items-center gap-1 rounded-[6px] border border-[#dad7d0] bg-background px-2 text-[12px] font-medium shadow-[0_1px_2px_rgba(28,25,20,0.05)] transition-colors hover:bg-[#f6f5f2] dark:border-[#3a3936] dark:hover:bg-[#252524]">
-              <Plus className="size-3.5" />
+            <MenuTrigger render={<Button size="sm" variant="outline" />}>
+              <Plus />
               New
-              <ChevronDown className="size-3" />
+              <ChevronDown />
             </MenuTrigger>
             <MenuPopup align="end" className="min-w-40">
               <MenuItem onClick={() => router.push("/daily")}>Open daily</MenuItem>

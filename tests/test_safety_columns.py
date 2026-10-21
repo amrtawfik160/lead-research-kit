@@ -109,6 +109,21 @@ class LocationSourceConfidenceTests(unittest.TestCase):
         self.assertEqual(row[6:], ['Austin', 'TX', 'brokerage', 'website', 'high' if r['tier'] == 'A' else 'medium'])
         self.assertEqual(len(quality.HEADERS), 6)  # the clean command's contract is unchanged
 
+    def test_clean_output_keeps_work_email_without_kind_stamp(self):
+        row = quality.output_row({
+            'full_name': 'Jane Doe',
+            'title': 'Owner',
+            'company': 'Harbor Realty',
+            'company_website': 'harbor.test',
+            'linkedin_url': '',
+            'email': 'jane@harbor.test',
+        })
+        self.assertEqual(row[5], 'jane@harbor.test')
+        personal = quality.output_row({'full_name': 'Jane Doe', 'email': 'jane@' + 'gmail.com'})
+        self.assertEqual(personal[5], '')
+        role = quality.output_row({'full_name': 'Jane Doe', 'email': 'info@harbor.test'})
+        self.assertEqual(role[5], '')
+
     def test_selection_prefers_low_risk(self):
         low_b = {'email': 'a@x.test', 'email_risk': 'low', 'tier': 'B', 'score': 60}
         med_a = {'email': 'b@x.test', 'email_risk': 'medium', 'tier': 'A', 'score': 95}

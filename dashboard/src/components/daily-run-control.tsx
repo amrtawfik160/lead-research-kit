@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { NumberField, NumberFieldDecrement, NumberFieldGroup, NumberFieldIncrement, NumberFieldInput } from "@/components/ui/number-field";
 import { toastManager } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { explainError } from "@/lib/format";
@@ -55,27 +55,29 @@ export function DailyRunControl({
     }
   }
 
+  const count = Number(target);
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <Input
+    <div className="flex flex-wrap items-center gap-2">
+      <NumberField
         size="sm"
-        inputMode="numeric"
-        value={target}
+        min={1}
+        max={200}
+        step={1}
+        value={Number.isFinite(count) && count > 0 ? count : null}
         disabled={busy}
-        onChange={(event) => setTarget(event.target.value.replace(/[^\d]/g, "").slice(0, 3))}
-        aria-label="Daily lead target"
-        className="h-[26px] w-14 px-2 text-center tabular-nums"
-      />
-      <Button size="sm" className="h-[26px] rounded-[6px] text-[12px]" disabled={busy} onClick={() => void run(false)}>
+        onValueChange={(value) => setTarget(value == null ? "" : String(Math.round(value)))}
+        className="w-32"
+      >
+        <NumberFieldGroup>
+          <NumberFieldDecrement aria-label="Decrease daily target" />
+          <NumberFieldInput aria-label="Daily lead target" />
+          <NumberFieldIncrement aria-label="Increase daily target" />
+        </NumberFieldGroup>
+      </NumberField>
+      <Button size="sm" disabled={busy} onClick={() => void run(false)}>
         {busy ? "Running…" : "Preview daily"}
       </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-[26px] rounded-[6px] text-[12px]"
-        disabled={busy}
-        onClick={() => void run(true)}
-      >
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => void run(true)}>
         Run locally
       </Button>
     </div>

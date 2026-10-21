@@ -1,4 +1,7 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 
 export function Panel({
@@ -21,9 +24,9 @@ export function PanelHeader({
   actions?: ReactNode;
 }): React.ReactElement {
   return (
-    <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+    <div className="flex items-center gap-2 px-4 pt-4 pb-3">
       <h2 className="text-[13.5px] font-semibold tracking-[-0.01em]">{title}</h2>
-      {actions ? <div className="ms-auto flex items-center gap-1">{actions}</div> : null}
+      {actions ? <div className="ms-auto flex items-center gap-2">{actions}</div> : null}
     </div>
   );
 }
@@ -38,28 +41,22 @@ export function SegTabs<T extends string>({
   items: Array<{ value: T; label: string; count?: number }>;
 }): React.ReactElement {
   return (
-    <div className="inline-flex gap-0.5 rounded-[6px] bg-[#eeede9] p-0.5 dark:bg-[#2d2d2b]">
-      {items.map((item) => {
-        const on = item.value === value;
-        return (
-          <button
-            key={item.value}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            onClick={() => onChange(item.value)}
-            className={cn(
-              "inline-flex h-6 items-center gap-1 rounded-[5px] px-2 text-[12px] font-medium transition-colors",
-              on
-                ? "bg-background text-foreground shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_1px_var(--border)]"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {item.label}
-            {item.count != null ? <span className="text-[#8c8880]">{item.count}</span> : null}
-          </button>
-        );
-      })}
-    </div>
+    <ToggleGroup
+      size="sm"
+      variant="outline"
+      aria-label={items.map((item) => item.label).join(", ")}
+      value={[value]}
+      onValueChange={(next) => {
+        const picked = next.find((item) => item !== value) ?? next[0];
+        if (picked) onChange(picked as T);
+      }}
+    >
+      {items.map((item) => (
+        <ToggleGroupItem key={item.value} value={item.value}>
+          {item.label}
+          {item.count != null ? <span className="text-muted-foreground">{item.count}</span> : null}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
   );
 }

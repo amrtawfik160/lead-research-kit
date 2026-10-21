@@ -22,7 +22,7 @@ export function PageHeader({
           <p className="mt-1 max-w-2xl text-[13.5px] leading-5 text-[#57544e] dark:text-[#b5b2ab]">{description}</p>
         ) : null}
       </div>
-      {actions ? <div className="ms-auto flex flex-wrap items-center gap-1.5">{actions}</div> : null}
+      {actions ? <div className="ms-auto flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }

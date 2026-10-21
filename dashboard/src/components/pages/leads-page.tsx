@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { DetailSheet } from "@/components/detail-sheet";
+import { FilterSelect } from "@/components/filter-select";
 import { DuplicateBanner } from "@/components/duplicate-banner";
 import { ExportLeadsButton, LeadOpsPanel } from "@/components/lead-ops-panel";
 import { IssueList, type IssueItem } from "@/components/issue-list";
@@ -70,67 +71,45 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
       >
         {data ? (
           <PageBody className="flex min-h-0 flex-1 flex-col">
-            <div className="flex flex-wrap items-center gap-1.5 border-b px-6 py-2">
-              <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                Date
-                <select
-                  className="h-[26px] rounded-[6px] border bg-background px-2 text-[12px] text-foreground"
-                  value={date || data.date}
-                  onChange={(event) => setDate(event.target.value)}
-                  aria-label="Filter leads by date"
-                >
-                  {(data.batches || []).map((batch) => (
-                    <option key={batch.date} value={batch.date}>
-                      {batch.date} · {batch.delivered}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                Source
-                <select
-                  className="h-[26px] rounded-[6px] border bg-background px-2 text-[12px] text-foreground"
-                  value={source}
-                  onChange={(event) => setSource(event.target.value)}
-                  aria-label="Filter leads by source"
-                >
-                  <option value="all">All sources</option>
-                  {sources.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                Verified
-                <select
-                  className="h-[26px] rounded-[6px] border bg-background px-2 text-[12px] text-foreground"
-                  value={verified}
-                  onChange={(event) => setVerified(event.target.value)}
-                  aria-label="Filter leads by verification"
-                >
-                  <option value="all">All verification</option>
-                  <option value="verified">Verified</option>
-                  <option value="unverified">Unverified</option>
-                </select>
-              </label>
-              <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                Stage
-                <select
-                  className="h-[26px] rounded-[6px] border bg-background px-2 text-[12px] text-foreground"
-                  value={stage}
-                  onChange={(event) => setStage(event.target.value)}
-                  aria-label="Filter leads by stage"
-                >
-                  <option value="all">All stages</option>
-                  {LEAD_STAGES.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-6 py-3">
+              <FilterSelect
+                label="Date"
+                ariaLabel="Filter leads by date"
+                value={date || data.date}
+                onChange={setDate}
+                options={(data.batches || []).map((batch) => ({
+                  value: batch.date,
+                  label: `${batch.date} · ${batch.delivered}`,
+                }))}
+              />
+              <FilterSelect
+                label="Source"
+                ariaLabel="Filter leads by source"
+                value={source}
+                onChange={setSource}
+                options={[
+                  { value: "all", label: "All sources" },
+                  ...sources.map((item) => ({ value: item, label: item })),
+                ]}
+              />
+              <FilterSelect
+                label="Verified"
+                ariaLabel="Filter leads by verification"
+                value={verified}
+                onChange={setVerified}
+                options={[
+                  { value: "all", label: "All verification" },
+                  { value: "verified", label: "Verified" },
+                  { value: "unverified", label: "Unverified" },
+                ]}
+              />
+              <FilterSelect
+                label="Stage"
+                ariaLabel="Filter leads by stage"
+                value={stage}
+                onChange={setStage}
+                options={[{ value: "all", label: "All stages" }, ...LEAD_STAGES]}
+              />
             </div>
             <DuplicateBanner items={data.duplicates} className="mx-6 mt-3 mb-1" />
             <IssueList

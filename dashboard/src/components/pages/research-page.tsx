@@ -27,13 +27,13 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
           <PageBody className="flex min-h-0 flex-1 flex-col">
-            <Tabs defaultValue="queue" className="flex min-h-0 flex-1 flex-col px-4 py-3 sm:px-6">
+            <Tabs defaultValue="queue" className="flex min-h-0 flex-1 flex-col px-6 pt-4">
               <TabsList variant="underline" size="sm">
                 <TabsTab value="queue">Queue {data.queue.length}</TabsTab>
                 <TabsTab value="evidence">Evidence {data.evidence.length}</TabsTab>
                 <TabsTab value="candidates">Candidates {data.candidates.length}</TabsTab>
               </TabsList>
-              <TabsPanel value="queue" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="queue" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.queue}
                   rowKey={(row) => row.id}
@@ -54,7 +54,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                   ]}
                 />
               </TabsPanel>
-              <TabsPanel value="evidence" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="evidence" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.evidence}
                   rowKey={(row) => String(row.id)}
@@ -76,7 +76,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                   ]}
                 />
               </TabsPanel>
-              <TabsPanel value="candidates" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="candidates" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.candidates}
                   rowKey={(row) => String(row.id)}

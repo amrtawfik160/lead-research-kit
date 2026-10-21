@@ -25,14 +25,14 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
           <PageBody className="flex min-h-0 flex-1 flex-col">
-            <Tabs defaultValue="domains" className="flex min-h-0 flex-1 flex-col px-4 py-3 sm:px-6">
+            <Tabs defaultValue="domains" className="flex min-h-0 flex-1 flex-col px-6 pt-4">
               <TabsList variant="underline" size="sm">
                 <TabsTab value="domains">Domains {data.domains.length}</TabsTab>
                 <TabsTab value="sites">Crawls {data.sites.length}</TabsTab>
                 <TabsTab value="firms">Firms {data.firms.length}</TabsTab>
                 <TabsTab value="prospects">Prospects {data.prospects.length}</TabsTab>
               </TabsList>
-              <TabsPanel value="domains" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="domains" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.domains}
                   rowKey={(item) => String(item.domain)}
@@ -64,7 +64,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                   ]}
                 />
               </TabsPanel>
-              <TabsPanel value="sites" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="sites" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.sites}
                   rowKey={(item) => String(item.domain)}
@@ -85,7 +85,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                   ]}
                 />
               </TabsPanel>
-              <TabsPanel value="firms" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="firms" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.firms}
                   rowKey={(item) => String(item.key)}
@@ -111,7 +111,7 @@ export function CompaniesPage({ initial = null }: { initial?: CompaniesPayload |
                   ]}
                 />
               </TabsPanel>
-              <TabsPanel value="prospects" className="min-h-0 flex-1 pt-3">
+              <TabsPanel value="prospects" className="min-h-0 flex-1 pt-4">
                 <DataTable
                   rows={data.prospects}
                   rowKey={(item) => `${item.full_name}-${item.company_website || item.company}`}

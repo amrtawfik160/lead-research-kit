@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toastManager } from "@/components/ui/toast";
 import { api } from "@/lib/api";
@@ -62,23 +63,27 @@ export function LeadOpsPanel({
       <h3 className="text-[13.5px] font-semibold">Outreach</h3>
       <div className="grid grid-cols-[112px_minmax(0,1fr)] items-center gap-x-0 gap-y-1.5 text-[12.5px]">
         <span className="text-[#57544e] dark:text-[#b5b2ab]">Stage</span>
-        <select
-          className="h-[26px] w-full rounded-[6px] border bg-background px-2 text-[12.5px]"
+        <Select
+          items={LEAD_STAGES}
           value={stage}
           disabled={busy}
-          aria-label="Lead stage"
-          onChange={(event) => {
-            const next = event.target.value as LeadStage;
+          onValueChange={(value) => {
+            const next = String(value) as LeadStage;
             setStage(next);
             void save({ stage: next });
           }}
         >
-          {LEAD_STAGES.map((item) => (
-            <option key={item.value} value={item.value}>
-              {item.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger size="sm" aria-label="Lead stage" className="w-full min-w-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            {LEAD_STAGES.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
         <span className="text-[#57544e] dark:text-[#b5b2ab]">Owner</span>
         <Input
           size="sm"
@@ -86,7 +91,6 @@ export function LeadOpsPanel({
           disabled={busy}
           placeholder="Who owns this lead"
           aria-label="Lead owner"
-          className="h-[26px]"
           onChange={(event) => setOwner(event.target.value)}
           onBlur={() => void save({ owner })}
         />
@@ -104,11 +108,10 @@ export function LeadOpsPanel({
           onBlur={() => void save({ notes })}
         />
       </Field>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
           variant="outline"
-          className="h-[26px] text-[12px]"
           disabled={!email}
           onClick={() => {
             void copyText(email).then((ok) => {
@@ -139,7 +142,6 @@ export function ExportLeadsButton({
     <Button
       size="sm"
       variant="outline"
-      className="h-[26px] rounded-[6px] text-[12px]"
       disabled={!rows.length}
       onClick={() => {
         downloadCsv(filename, leadsToCsv(rows));

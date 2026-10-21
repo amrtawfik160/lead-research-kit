@@ -171,7 +171,7 @@ export function DataTable<T extends object>({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Toolbar className="h-auto w-full flex-wrap justify-between gap-2 border-b px-6 py-2">
+      <Toolbar className="h-auto w-full flex-wrap justify-between gap-2 border-b px-6 py-2.5">
         <ToolbarGroup className="min-w-0 flex-1">
           <div className="relative w-full max-w-xs">
             <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -220,12 +220,12 @@ export function DataTable<T extends object>({
         ) : null}
         <ToolbarSeparator />
         <ToolbarGroup>
-          <ToolbarButton render={<Button size="xs" variant="ghost" className="h-[26px] text-[12px]" />}>
+          <ToolbarButton render={<Button size="xs" variant="ghost" />}>
             <Filter className="size-3.5" />
             Filter
           </ToolbarButton>
           <ToolbarButton
-            render={<Button size="xs" variant="ghost" className="h-[26px] text-[12px]" />}
+            render={<Button size="xs" variant="ghost" />}
             onClick={() => columns[0] && toggleSort(columns[0].key)}
           >
             <ArrowUpDown className="size-3.5" />

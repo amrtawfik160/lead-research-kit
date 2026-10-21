@@ -19,6 +19,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTab } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { display } from "@/lib/format";
 import { issueKey } from "@/lib/gr8r";
@@ -86,7 +87,7 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
           <PageBody className="flex min-h-0 flex-1 flex-col">
             <div className="inbox-grid grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
               <div className="flex min-h-0 flex-col border-r">
-                <div className="flex items-center gap-2 px-6 pt-4">
+                <div className="flex items-center gap-2 px-6 pt-5">
                   <h1 className="text-[19px] font-semibold tracking-[-0.015em]">Daily</h1>
                   <span className="flex-1" />
                   <label className="flex items-center gap-1.5 text-[12px] text-[#57544e] dark:text-[#b5b2ab]">
@@ -106,74 +107,65 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                     <CheckCheck />
                   </Button>
                 </div>
-                <div className="px-6 pt-2">
+                <div className="px-6 pt-3">
                   <DailyRunControl onDone={reload} />
                 </div>
-                <div className="flex flex-wrap gap-1.5 px-6 pt-3 pb-1">
+                <div className="flex flex-wrap gap-2 px-6 py-3">
                   {data.batches.map((batch) => {
                     const selected = batch.date === data.date;
                     return (
-                      <button
+                      <Button
                         key={batch.date}
-                        type="button"
+                        size="xs"
+                        variant={selected ? "default" : "outline"}
                         onClick={() => {
                           setDate(batch.date);
                           setLead(null);
                         }}
-                        className={cn(
-                          "inline-flex h-[26px] items-center gap-1.5 rounded-[6px] border px-2 text-[12px] transition-colors",
-                          selected
-                            ? "border-transparent bg-primary text-primary-foreground"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                        )}
                       >
                         <span className="font-medium tabular-nums">{batch.date}</span>
                         <span className="tabular-nums">
                           {batch.delivered}/{batch.target}
                         </span>
                         {batch.has_audit ? (
-                          <Badge size="sm" variant="success">
+                          <Badge size="sm" variant={selected ? "secondary" : "success"}>
                             audit
                           </Badge>
                         ) : null}
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>
-                <div className="flex flex-wrap gap-1 border-b px-4" role="tablist">
-                  {(
-                    [
-                      ["all", "All"],
-                      ["website", "Website"],
-                      ["finder", "Finder"],
-                      ["review", "Review"],
-                      ["report", "Report"],
-                    ] as const
-                  ).map(([key, label]) => {
-                    const flagged = key === "report" ? 0 : countReview(key);
-                    const on = cat === key;
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        role="tab"
-                        aria-selected={on}
-                        onClick={() => {
-                          setCat(key);
-                          if (key === "report") setLead(null);
-                        }}
-                        className={cn(
-                          "inline-flex h-8 items-center gap-1.5 border-b-2 px-2 text-[12.5px]",
-                          on ? "border-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {label}
-                        {flagged ? <span className="text-[11px] text-muted-foreground">{flagged}</span> : null}
-                      </button>
-                    );
-                  })}
-                </div>
-                <DuplicateBanner items={data.duplicates} className="mx-4 mt-3" />
+                <Tabs
+                  value={cat}
+                  onValueChange={(value) => {
+                    const next = value as Cat;
+                    setCat(next);
+                    if (next === "report") setLead(null);
+                  }}
+                  className="gap-0 border-b px-4"
+                >
+                  <TabsList variant="underline" size="sm">
+                    {(
+                      [
+                        ["all", "All"],
+                        ["website", "Website"],
+                        ["finder", "Finder"],
+                        ["review", "Review"],
+                        ["report", "Report"],
+                      ] as const
+                    ).map(([key, label]) => {
+                      const flagged = key === "report" ? 0 : countReview(key);
+                      return (
+                        <TabsTab key={key} value={key}>
+                          {label}
+                          {flagged ? <span className="text-[11px] text-muted-foreground">{flagged}</span> : null}
+                        </TabsTab>
+                      );
+                    })}
+                  </TabsList>
+                </Tabs>
+                <DuplicateBanner items={data.duplicates} className="mx-6 mt-3" />
                 <div className="min-h-0 flex-1 overflow-auto">
                   {cat === "report" ? (
                     <p className="px-6 py-3 text-[12.5px] text-muted-foreground">
@@ -294,7 +286,7 @@ function LeadPreview({
   const email = leadEmail(row);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-[46px] shrink-0 items-center gap-2 border-b px-4">
+      <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
         <Button size="icon-sm" variant="ghost" aria-label="Back" onClick={onBack}>
           <ArrowLeft />
         </Button>
@@ -306,7 +298,6 @@ function LeadPreview({
         <Button
           size="sm"
           variant="outline"
-          className="h-[26px] text-[12px]"
           disabled={!email}
           onClick={() => {
             void copyText(email).then((ok) => {
@@ -320,7 +311,7 @@ function LeadPreview({
         >
           Copy email
         </Button>
-        <Button size="sm" variant="outline" className="h-[26px] text-[12px]" onClick={onOpen}>
+        <Button size="sm" variant="outline" onClick={onOpen}>
           <PanelRightOpen className="size-3.5" />
           Open details
         </Button>

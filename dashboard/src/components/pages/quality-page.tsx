@@ -18,6 +18,12 @@ import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import type { CleanResult } from "@/lib/types";
 
+const TIERS = [
+  { value: "A", label: "A" },
+  { value: "B", label: "B" },
+  { value: "C", label: "C" },
+];
+
 const SAMPLE_CSV = `Full Name,Title,Company,Company Website,LinkedIn URL,Email
 Jane Sample,Founder & CEO,Harbor Realty Group,harborrealty.example,https://www.linkedin.com/in/jane-sample/,jane@harborrealty.example
 Not A Person LLC,Agent,Random Association,association.example,,info@example.org
@@ -78,14 +84,16 @@ export function QualityPage(): React.ReactElement {
           </Field>
           <Field>
             <FieldLabel>Minimum tier for clean</FieldLabel>
-            <Select value={minTier} onValueChange={(value) => setMinTier(String(value))}>
-              <SelectTrigger size="sm">
+            <Select items={TIERS} value={minTier} onValueChange={(value) => setMinTier(String(value ?? "B"))}>
+              <SelectTrigger size="sm" aria-label="Minimum tier for clean">
                 <SelectValue />
               </SelectTrigger>
               <SelectPopup>
-                <SelectItem value="A">A</SelectItem>
-                <SelectItem value="B">B</SelectItem>
-                <SelectItem value="C">C</SelectItem>
+                {TIERS.map((tier) => (
+                  <SelectItem key={tier.value} value={tier.value}>
+                    {tier.label}
+                  </SelectItem>
+                ))}
               </SelectPopup>
             </Select>
           </Field>

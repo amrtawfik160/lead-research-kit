@@ -55,9 +55,9 @@ function TableSkeleton(): React.ReactElement {
   return (
     <div className="flex flex-col gap-0 px-6 py-4" aria-hidden>
       <div className="mb-3 flex items-center gap-2">
-        <Sk className="h-[26px] w-48" />
-        <Sk className="h-[26px] w-16" />
-        <Sk className="h-[26px] w-16" />
+        <Sk className="h-7 w-48" />
+        <Sk className="h-7 w-16" />
+        <Sk className="h-7 w-16" />
       </div>
       <Sk className="mb-2 h-8 w-full" />
       {Array.from({ length: 8 }, (_, index) => (
@@ -83,8 +83,8 @@ function CardsSkeleton(): React.ReactElement {
           <Sk className="h-3.5 w-80" />
         </div>
         <div className="flex gap-2">
-          <Sk className="h-[26px] w-20" />
-          <Sk className="h-[26px] w-24" />
+          <Sk className="h-7 w-20" />
+          <Sk className="h-7 w-24" />
         </div>
       </div>
       <div className="grid grid-cols-4 overflow-hidden rounded-[10px] border">
