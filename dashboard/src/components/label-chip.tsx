@@ -10,11 +10,11 @@ export function LabelChip({
   className?: string;
 }): React.ReactElement {
   const raw = value == null || value === "" ? "—" : String(value);
-  const color = raw === "—" ? "#8a867e" : labelColor(raw);
+  const color = raw === "—" ? "var(--muted-foreground)" : labelColor(raw);
   return (
     <span
       className={cn(
-        "inline-flex max-w-full items-center gap-1.5 truncate text-[12px] text-muted-foreground",
+        "inline-flex max-w-full items-center gap-1.5 truncate text-sm text-muted-foreground",
         className,
       )}
     >

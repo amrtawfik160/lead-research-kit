@@ -10,7 +10,7 @@ import { QuietStatus } from "@/components/status-glyph";
 import { Switch } from "@/components/ui/switch";
 import { toastManager } from "@/components/ui/toast";
 import { api } from "@/lib/api";
-import { display, explainError } from "@/lib/format";
+import { display, explainError, humanName } from "@/lib/format";
 import type { ProvidersPayload } from "@/lib/load";
 import type { ProviderRow } from "@/lib/types";
 
@@ -60,7 +60,7 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
                 { value: "key_present", label: "Key present" },
               ]}
               columns={[
-                { key: "id", header: "Provider", width: "11rem", mono: true },
+                { key: "id", header: "Provider", width: "11rem", value: (item) => humanName(item.id) },
                 {
                   key: "enabled",
                   header: "Enabled",
@@ -105,10 +105,11 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
                     <CellText
                       value={
                         item.budgets.length
-                          ? item.budgets.map((budget) => `${budget.pool}=${budget.remaining}`).join(" · ")
+                          ? item.budgets
+                              .map((budget) => `${humanName(budget.pool)} ${budget.remaining}`)
+                              .join(" · ")
                           : "—"
                       }
-                      mono
                     />
                   ),
                 },
@@ -117,7 +118,7 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
             <DetailSheet
               open={Boolean(row)}
               onOpenChange={(open) => !open && setRow(null)}
-              title={display(row?.id)}
+              title={row ? humanName(row.id) : "Provider"}
               description={row?.auth_env.length ? `Env: ${row.auth_env.join(", ")}` : "No API key required"}
               issueId={row?.id}
               sections={[

@@ -198,7 +198,7 @@ export function IssueList<T>({
             <MenuItem onClick={() => setSortKey("due")}>{columns.due}</MenuItem>
           </MenuPopup>
         </Menu>
-        <span className="ms-auto text-[11px] tabular-nums text-muted-foreground">
+        <span className="ms-auto text-xs tabular-nums text-muted-foreground">
           {filtered.length} {filtered.length === 1 ? "row" : "rows"}
         </span>
       </div>
@@ -206,7 +206,7 @@ export function IssueList<T>({
         <EmptyState icon={Users} title={emptyTitle} description={emptyDescription} />
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
-          <div className="grid grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b px-6 text-[12px] font-medium text-muted-foreground">
+          <div className="grid grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b px-6 text-xs font-medium text-muted-foreground">
             <div className="flex h-8 items-center">{columns.title}</div>
             <div className="flex h-8 items-center">{columns.project}</div>
             <div className="flex h-8 items-center">{columns.status}</div>
@@ -219,7 +219,7 @@ export function IssueList<T>({
                 <button
                   type="button"
                   onClick={() => setCollapsed((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
-                  className="mt-2.5 flex h-9 w-full items-center gap-2 border-b px-6 text-[12.5px] font-semibold"
+                  className="mt-2.5 flex h-9 w-full items-center gap-2 border-b px-6 text-sm font-semibold"
                 >
                   {collapsed[group.key] ? (
                     <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -243,18 +243,18 @@ export function IssueList<T>({
                           onSelect?.(item);
                         }}
                         className={cn(
-                          "grid min-h-10 w-full grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b border-[#f0eeea] px-6 text-left transition-colors duration-150 dark:border-[#252523]",
-                          selected ? "bg-[color-mix(in_srgb,var(--primary)_10%,transparent)]" : "hover:bg-[#f6f5f2] dark:hover:bg-[#252524]",
+                          "grid min-h-11 w-full grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b px-6 text-left transition-colors duration-150",
+                          selected ? "bg-muted" : "hover:bg-muted/70",
                         )}
                       >
                         <div className="flex min-w-0 items-center gap-2">
                           <StatusGlyph value={item.status || item.priority} />
                           {hideIds ? null : (
-                            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{item.id}</span>
+                            <span className="shrink-0 font-mono text-xs text-muted-foreground">{item.id}</span>
                           )}
                           <span
                             className={cn(
-                              "issue-title truncate text-[13.5px]",
+                              "issue-title truncate text-sm",
                               item.done && "text-muted-foreground line-through",
                             )}
                           >
@@ -267,12 +267,12 @@ export function IssueList<T>({
                         <div>
                           <QuietStatus value={item.status} />
                         </div>
-                        <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                           <PriorityGlyph value={item.priority} />
                           <span className="truncate">{display(item.priority)}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate text-[12px] text-muted-foreground">{display(item.due)}</span>
+                          <span className="truncate text-xs text-muted-foreground">{display(item.due)}</span>
                           <EntityAvatar name={item.avatar || item.project || item.title} size={18} />
                         </div>
                       </button>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeft, CheckCheck, PanelRightOpen, Users } from "lucide-react";
+import { ArrowLeft, CheckCheck, FileText, PanelRightOpen, Users } from "lucide-react";
 import { CountBar } from "@/components/count-bar";
 import { DailyRunControl } from "@/components/daily-run-control";
 import { DetailSheet } from "@/components/detail-sheet";
@@ -11,17 +11,17 @@ import { EntityAvatar } from "@/components/entity-avatar";
 import { LabelChip } from "@/components/label-chip";
 import { ExportLeadsButton, LeadOpsPanel } from "@/components/lead-ops-panel";
 import { PageBody } from "@/components/page-header";
-import { Panel, PanelHeader } from "@/components/panel";
 import { ProgBar } from "@/components/prog-bar";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus } from "@/components/status-glyph";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTab } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { display } from "@/lib/format";
+import { display, humanName, humanPool } from "@/lib/format";
 import { issueKey } from "@/lib/gr8r";
 import { leadFieldSections } from "@/lib/lead-fields";
 import { copyText, leadEmail, leadSource } from "@/lib/lead-ops";
@@ -85,54 +85,55 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
           <PageBody className="flex min-h-0 flex-1 flex-col">
-            <div className="inbox-grid grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+            <div className="inbox-grid grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(22rem,28rem)_minmax(0,1fr)]">
               <div className="flex min-h-0 flex-col border-r">
-                <div className="flex items-center gap-2 px-6 pt-5">
-                  <h1 className="text-[19px] font-semibold tracking-[-0.015em]">Daily</h1>
+                <div className="flex items-center gap-3 px-6 pt-6">
+                  <h1 className="font-heading text-2xl font-semibold tracking-tight">Daily</h1>
                   <span className="flex-1" />
-                  <label className="flex items-center gap-1.5 text-[12px] text-[#57544e] dark:text-[#b5b2ab]">
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Switch
                       checked={reviewOnly}
                       onCheckedChange={(checked) => setReviewOnly(Boolean(checked))}
-                      aria-label="Needs review only"
+                      aria-label="Show leads that still need review"
                     />
-                    Review
+                    Needs review
                   </label>
                   <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Clear review marks"
+                    size="sm"
+                    variant="outline"
                     onClick={() => setSeen(new Set(rows.map((_, index) => issueKey("DAY", index))))}
                   >
                     <CheckCheck />
+                    Mark reviewed
                   </Button>
                 </div>
-                <div className="px-6 pt-3">
+                <div className="px-6 pt-4">
                   <DailyRunControl onDone={reload} />
                 </div>
-                <div className="flex flex-wrap gap-2 px-6 py-3">
+                <div className="flex flex-wrap gap-2 px-6 py-4">
                   {data.batches.map((batch) => {
                     const selected = batch.date === data.date;
                     return (
-                      <Button
+                      <button
                         key={batch.date}
-                        size="xs"
-                        variant={selected ? "default" : "outline"}
+                        type="button"
                         onClick={() => {
                           setDate(batch.date);
                           setLead(null);
                         }}
+                        className={cn(
+                          "flex min-h-14 min-w-40 flex-col items-start justify-center gap-1 rounded-xl border px-3.5 py-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                          selected ? "border-foreground bg-muted" : "bg-background hover:bg-muted",
+                        )}
                       >
                         <span className="font-medium tabular-nums">{batch.date}</span>
-                        <span className="tabular-nums">
-                          {batch.delivered}/{batch.target}
+                        <span className="flex items-center gap-2">
+                          <span className="tabular-nums text-muted-foreground">
+                            {batch.delivered}/{batch.target} delivered
+                          </span>
+                          {batch.has_audit ? <Badge variant="success">Audited</Badge> : null}
                         </span>
-                        {batch.has_audit ? (
-                          <Badge size="sm" variant={selected ? "secondary" : "success"}>
-                            audit
-                          </Badge>
-                        ) : null}
-                      </Button>
+                      </button>
                     );
                   })}
                 </div>
@@ -159,7 +160,11 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                       return (
                         <TabsTab key={key} value={key}>
                           {label}
-                          {flagged ? <span className="text-[11px] text-muted-foreground">{flagged}</span> : null}
+                          {flagged ? (
+                            <Badge render={<span />} variant="secondary">
+                              {flagged}
+                            </Badge>
+                          ) : null}
                         </TabsTab>
                       );
                     })}
@@ -168,9 +173,7 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                 <DuplicateBanner items={data.duplicates} className="mx-6 mt-3" />
                 <div className="min-h-0 flex-1 overflow-auto">
                   {cat === "report" ? (
-                    <p className="px-6 py-3 text-[12.5px] text-muted-foreground">
-                      Dated delivery folders: leads.csv, details, report, and optional spot-check.
-                    </p>
+                    <ReportOutline data={data} />
                   ) : visible.length === 0 ? (
                     <EmptyState
                       compact
@@ -194,24 +197,24 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                           type="button"
                           onClick={() => selectLead(row, index)}
                           className={cn(
-                            "relative flex min-h-10 w-full items-start gap-2.5 border-b border-[#f0eeea] px-6 py-3 text-left transition-colors dark:border-[#252523]",
-                            selected ? "bg-[#f6f5f2] dark:bg-[#252524]" : "hover:bg-[#f6f5f2] dark:hover:bg-[#252524]",
+                            "relative flex min-h-12 w-full items-start gap-3 border-b px-6 py-3.5 text-left transition-colors",
+                            selected ? "bg-muted" : "hover:bg-muted/70",
                           )}
                         >
                           {flagged ? (
                             <span className="absolute top-[22px] left-1.5 size-1.5 rounded-full bg-primary" aria-label="Needs review" />
                           ) : null}
                           <EntityAvatar name={display(row["Full Name"])} size={22} />
-                          <div className="min-w-0 flex-1 text-[13px] leading-[1.45]">
+                          <div className="min-w-0 flex-1 text-sm leading-6">
                             <div>
                               <span className="issue-title font-semibold">{display(row["Full Name"])}</span>{" "}
                               <span className="text-muted-foreground">{display(row.Title)}</span>
                             </div>
-                            <div className="mt-0.5 truncate text-[12.5px] text-muted-foreground">
+                            <div className="mt-0.5 truncate text-sm text-muted-foreground">
                               {display(row.Company)} · {display(row.Email)}
                             </div>
-                            <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-[#6b6760]">
-                              <QuietStatus value={row.Source} />
+                            <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                              <QuietStatus value={humanName(String(row.Source || ""))} />
                               <span>·</span>
                               <QuietStatus value={row.Stage || "new"} />
                               <span>·</span>
@@ -226,7 +229,7 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
               </div>
               <div className="flex min-h-0 flex-col overflow-auto">
                 {cat === "report" ? (
-                  <div className="px-6 pt-6">
+                  <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
                     <ReportView data={data} />
                   </div>
                 ) : lead ? (
@@ -290,9 +293,9 @@ function LeadPreview({
         <Button size="icon-sm" variant="ghost" aria-label="Back" onClick={onBack}>
           <ArrowLeft />
         </Button>
-        <span className="size-1.5 rounded-[3px] bg-[#3570c4]" />
-        <span className="truncate text-[12.5px] text-muted-foreground">{display(row.Company)}</span>
-        <span className="font-mono text-[11.5px] text-muted-foreground">{issueId}</span>
+        <span className="size-1.5 rounded-sm bg-info" />
+        <span className="truncate text-sm text-muted-foreground">{display(row.Company)}</span>
+        <span className="font-mono text-xs text-muted-foreground">{issueId}</span>
         <span className="flex-1" />
         <ExportLeadsButton rows={[row]} filename="veinore-lead.csv" />
         <Button
@@ -317,94 +320,247 @@ function LeadPreview({
         </Button>
       </div>
       <div className="w-full max-w-[720px] px-6 py-6">
-        <h2 className="mb-2.5 text-[19px] font-semibold tracking-[-0.015em]">{display(row["Full Name"])}</h2>
-        <div className="mb-4 flex flex-wrap items-center gap-1">
-          <QuietStatus value={row.Source} />
+        <h2 className="mb-3 font-heading text-2xl font-semibold tracking-tight">{display(row["Full Name"])}</h2>
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <QuietStatus value={humanName(String(row.Source || ""))} />
           <QuietStatus value={row.Stage || "new"} />
           <LabelChip value={row.Company} />
           <QuietStatus value={row["Email Risk"]} />
-          <span className="text-[12.5px] text-muted-foreground">{display(row.City)}</span>
+          <span className="text-sm text-muted-foreground">{display(row.City)}</span>
         </div>
-        <p className="mb-1 text-[11px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">About this lead</p>
-        <p className="text-[13.5px] leading-6 text-[#57544e] dark:text-[#b5b2ab]">
-          {display(row.Title)} at {display(row.Company)}. Email {display(row.Email)} from {display(row.Source)}
-          {row["Email Risk Reason"] ? ` — ${display(row["Email Risk Reason"])}` : "."}
+        <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">About this lead</p>
+        <p className="text-base leading-7 text-muted-foreground">
+          {display(row.Title)} at {display(row.Company)}. Email {display(row.Email)} from {humanName(display(row.Source))}
+          {row["Email Risk Reason"] ? ` — ${humanName(display(row["Email Risk Reason"]))}` : "."}
         </p>
       </div>
     </div>
   );
 }
 
+function reportSummary(data: DailyPayload): { delivered: number; target: number; pct: number; added: string } {
+  const report = data.report || {};
+  const delivered = Number(report.delivered ?? data.leads.length);
+  const target = Number(report.target ?? 0);
+  return {
+    delivered,
+    target,
+    pct: target ? Math.min(100, Math.round((delivered / target) * 100)) : 0,
+    added:
+      report.this_run != null
+        ? `This run added ${report.this_run}. ${report.prior_delivered ?? 0} were already on file.`
+        : report.execute
+          ? "Executed delivery"
+          : "Preview only",
+  };
+}
+
+function OutlineRows({
+  title,
+  items,
+}: {
+  title: string;
+  items: Array<[string, string | number]>;
+}): React.ReactElement | null {
+  if (!items.length) return null;
+  return (
+    <section className="grid gap-2">
+      <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{title}</h3>
+      <ul className="grid gap-2 text-sm">
+        {items.map(([name, value]) => (
+          <li key={name} className="flex justify-between gap-3">
+            <span className="min-w-0 truncate text-muted-foreground">
+              {name.includes(".") ? humanPool(name) : humanName(name)}
+            </span>
+            <span className="tabular-nums">{value}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ReportOutline({ data }: { data: DailyPayload }): React.ReactElement {
+  const { delivered, target, pct, added } = reportSummary(data);
+  const sources = Object.entries(data.report?.delivered_by_source || {}).filter(([, value]) => Number(value) > 0);
+  const risks = Object.entries(data.report?.delivered_by_risk || {}).filter(([, value]) => Number(value) > 0);
+  const budgets = Object.entries(data.report?.budgets_left || {});
+  const score = data.audit?.score;
+  return (
+    <div className="grid gap-6 px-6 py-5">
+      <div>
+        <p className="font-heading text-lg font-semibold">{data.date}</p>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          {delivered} of {target || "—"} delivered. {added}
+        </p>
+      </div>
+      <div className="flex items-center gap-3">
+        <ProgBar value={pct} />
+        <span className="text-sm tabular-nums text-muted-foreground">{pct}%</span>
+      </div>
+      <OutlineRows title="Sources" items={sources} />
+      <OutlineRows title="Email risk" items={risks} />
+      {score ? (
+        <OutlineRows
+          title="Spot-check"
+          items={[
+            ["Confirmed", `${score.confirmed_pct}%`],
+            ["Partial", `${score.partial_pct}%`],
+            ["Failed", `${score.failed_pct}%`],
+            ["Sampled", `${data.audit?.sampled ?? 0} of ${data.leads.length}`],
+          ]}
+        />
+      ) : (
+        <p className="text-sm text-muted-foreground">No audit file for this day.</p>
+      )}
+      <OutlineRows title="Budgets left" items={budgets} />
+    </div>
+  );
+}
+
 function ReportView({ data }: { data: DailyPayload }): React.ReactElement {
   const report = data.report || {};
-  const delivered = report.delivered ?? data.leads.length;
-  const target = report.target ?? 0;
-  const pct = target ? Math.min(100, Math.round((delivered / target) * 100)) : 0;
+  const { delivered, target, pct, added } = reportSummary(data);
+  const budgets = Object.entries(report.budgets_left || {});
+  const maxLeft = Math.max(
+    1,
+    ...budgets.map(([, left]) => {
+      const parsed = Number(left);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }),
+  );
   return (
-    <div className="grid max-w-4xl gap-3 pb-10">
-      <Panel>
-        <PanelHeader title={`Leads ${data.date}: ${delivered} of ${target || "—"} delivered`} />
-        <div className="px-4 pb-4">
-          <p className="mb-3 text-[12.5px] text-muted-foreground">
-            {report.this_run != null
-              ? `This run added ${report.this_run} (already on file today: ${report.prior_delivered ?? 0}).`
-              : report.execute
-                ? "Executed delivery"
-                : "Preview only"}
-          </p>
-          <span className="flex items-center gap-2">
+    <div className="grid w-full gap-4 pb-16">
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            Leads {data.date}: {delivered} of {target || "—"} delivered
+          </CardTitle>
+          <CardDescription>{added}</CardDescription>
+        </CardHeader>
+        <CardPanel className="grid gap-4">
+          <div className="flex items-center gap-3">
             <ProgBar value={pct} />
-            <span className="text-[11.5px] tabular-nums text-muted-foreground">{pct}%</span>
-          </span>
-        </div>
-      </Panel>
-      <div className="grid gap-3 md:grid-cols-2">
-        <Panel>
-          <PanelHeader title="Email sources" />
-          <div className="px-4 pb-4">
+            <span className="text-sm tabular-nums text-muted-foreground">{pct}%</span>
+          </div>
+          {report.advice?.length ? (
+            <ul className="grid gap-2 text-sm text-muted-foreground">
+              {report.advice.map((tip) => (
+                <li key={tip}>{tip}</li>
+              ))}
+            </ul>
+          ) : null}
+        </CardPanel>
+      </Card>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Email sources</CardTitle>
+            <CardDescription>Where delivered addresses came from.</CardDescription>
+          </CardHeader>
+          <CardPanel>
             <CountBar counts={report.delivered_by_source} />
-          </div>
-        </Panel>
-        <Panel>
-          <PanelHeader title="Email risk" />
-          <div className="px-4 pb-4">
+          </CardPanel>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Email risk</CardTitle>
+            <CardDescription>Verifier risk mix for this delivery.</CardDescription>
+          </CardHeader>
+          <CardPanel>
             <CountBar counts={report.delivered_by_risk} />
-          </div>
-        </Panel>
+          </CardPanel>
+        </Card>
       </div>
-      {report.budgets_left ? (
-        <Panel>
-          <PanelHeader title="Budgets left" />
-          <ul className="grid gap-1.5 px-4 pb-4 text-[13px] sm:grid-cols-2">
-            {Object.entries(report.budgets_left).map(([name, left]) => (
-              <li key={name} className="flex justify-between gap-3">
-                <span className="truncate text-muted-foreground">{name}</span>
-                <span className="font-mono tabular-nums">{left}</span>
-              </li>
-            ))}
-          </ul>
-        </Panel>
+      <div className="grid gap-4 sm:grid-cols-3">
+        {data.audit ? (
+          <>
+            <ScoreCard label="Confirmed" value={data.audit.score?.confirmed_pct} tone="ok" />
+            <ScoreCard label="Partial" value={data.audit.score?.partial_pct} tone="warn" />
+            <ScoreCard label="Failed" value={data.audit.score?.failed_pct} tone="bad" />
+          </>
+        ) : (
+          <Card className="sm:col-span-3">
+            <CardHeader>
+              <CardTitle>No audit yet</CardTitle>
+              <CardDescription>Run `daily audit --sample 20` on the CLI to score this delivery.</CardDescription>
+            </CardHeader>
+          </Card>
+        )}
+      </div>
+      {budgets.length ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Budgets left</CardTitle>
+            <CardDescription>Remaining attested units after this run.</CardDescription>
+          </CardHeader>
+          <CardPanel>
+            <ul className="grid gap-4 sm:grid-cols-2">
+              {budgets.map(([name, left]) => {
+                const parsed = Number(left);
+                const value = Number.isFinite(parsed) ? parsed : 0;
+                return (
+                  <li key={name} className="grid gap-2">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="min-w-0 truncate">{humanPool(name)}</span>
+                      <span className="tabular-nums text-muted-foreground">{left}</span>
+                    </div>
+                    <ProgBar value={Math.round((value / maxLeft) * 100)} />
+                  </li>
+                );
+              })}
+            </ul>
+          </CardPanel>
+        </Card>
+      ) : null}
+      {report.delivered_by_company_type &&
+      Object.values(report.delivered_by_company_type).some((value) => Number(value) > 0) ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Company type</CardTitle>
+            <CardDescription>How delivered companies were classified.</CardDescription>
+          </CardHeader>
+          <CardPanel>
+            <CountBar counts={report.delivered_by_company_type} />
+          </CardPanel>
+        </Card>
       ) : null}
       {data.audit ? (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <ScoreCard label="Confirmed" value={data.audit.score?.confirmed_pct} tone="ok" />
-          <ScoreCard label="Partial" value={data.audit.score?.partial_pct} tone="warn" />
-          <ScoreCard label="Failed" value={data.audit.score?.failed_pct} tone="bad" />
-        </div>
-      ) : (
-        <p className="text-[12.5px] text-muted-foreground">No audit.json. Run `daily audit --sample 20`.</p>
-      )}
-      {data.audit ? (
-        <Alert variant="info">
-          <AlertTitle>Spot-check</AlertTitle>
-          <AlertDescription>
-            {data.audit.sampled} sampled of {data.leads.length} delivered leads.
-          </AlertDescription>
-        </Alert>
+        <Card>
+          <CardHeader>
+            <CardTitle>Spot-check</CardTitle>
+            <CardDescription>
+              {data.audit.sampled} sampled of {data.leads.length} delivered leads.
+            </CardDescription>
+          </CardHeader>
+          <CardPanel>
+            {data.audit.top_reasons && Object.keys(data.audit.top_reasons).length ? (
+              <CountBar counts={data.audit.top_reasons} />
+            ) : (
+              <p className="text-sm text-muted-foreground">No sample reasons were recorded for this audit.</p>
+            )}
+          </CardPanel>
+        </Card>
       ) : null}
-      <pre className="max-w-3xl whitespace-pre-wrap rounded-[10px] border bg-card p-4 font-mono text-[11px] leading-5 text-muted-foreground">
-        {data.markdown || "No report.md"}
-      </pre>
+      <Card>
+        <Collapsible>
+          <CardHeader>
+            <CardTitle>Raw report</CardTitle>
+            <CardDescription>The markdown written beside this delivery folder.</CardDescription>
+          </CardHeader>
+          <CardPanel>
+            <CollapsibleTrigger render={<Button size="sm" variant="outline" />}>
+              <FileText />
+              View raw report
+            </CollapsibleTrigger>
+            <CollapsiblePanel>
+              <pre className="mt-4 whitespace-pre-wrap font-mono text-sm leading-6 text-muted-foreground">
+                {data.markdown || "No report.md"}
+              </pre>
+            </CollapsiblePanel>
+          </CardPanel>
+        </Collapsible>
+      </Card>
     </div>
   );
 }
@@ -419,20 +575,26 @@ function ScoreCard({
   tone: "ok" | "warn" | "bad";
 }): React.ReactElement {
   return (
-    <Panel>
-      <div className="px-4 py-3">
-        <p className="text-[12.5px] text-muted-foreground">{label}</p>
-        <p
+    <Card className="h-full">
+      <CardHeader>
+        <CardDescription>{label}</CardDescription>
+        <CardTitle
           className={cn(
-            "text-xl font-semibold tabular-nums",
+            "text-3xl tabular-nums",
             tone === "ok" && "text-success-foreground",
             tone === "warn" && "text-warning-foreground",
             tone === "bad" && "text-destructive-foreground",
           )}
         >
           {value ?? 0}%
-        </p>
-      </div>
-    </Panel>
+        </CardTitle>
+      </CardHeader>
+      <CardPanel>
+        <ProgBar
+          value={value ?? 0}
+          tone={tone === "ok" ? "ok" : tone === "bad" ? "bad" : undefined}
+        />
+      </CardPanel>
+    </Card>
   );
 }

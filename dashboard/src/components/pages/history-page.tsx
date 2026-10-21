@@ -166,7 +166,7 @@ function Mini({ label, value }: { label: string; value?: number }): React.ReactE
   return (
     <Card>
       <CardHeader className="gap-1.5 px-4 py-3">
-        <CardDescription className="text-[12px]">{label}</CardDescription>
+        <CardDescription>{label}</CardDescription>
         <CardTitle className="text-xl font-medium tabular-nums">{value ?? 0}</CardTitle>
       </CardHeader>
     </Card>

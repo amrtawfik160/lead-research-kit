@@ -51,8 +51,61 @@ export function explainError(raw: string): string {
   return text || "request_failed";
 }
 
+const DISPLAY_NAMES: Record<string, string> = {
+  reoon: "Reoon",
+  hunter: "Hunter",
+  jina: "Jina",
+  jinja: "Jina",
+  hackernews: "Hacker News",
+  osm: "OSM",
+  serper: "Serper",
+  zerobounce: "ZeroBounce",
+  firecrawl: "Firecrawl",
+  credits: "Credits",
+  discover_requests: "Discover requests",
+  searches: "Searches",
+  queries: "Queries",
+  reads: "Reads",
+  signal_requests: "Signal requests",
+  find_ops: "Find ops",
+  verify_ops: "Verify ops",
+  scrape_credits: "Scrape credits",
+  validation_credits: "Validation credits",
+  website_published: "Website published",
+  public_record: "Public record",
+  hunter_finder: "Hunter finder",
+  pattern_verified: "Pattern verified",
+  published_name_based: "Published name",
+};
+
+const CHART_POOLS: Record<string, string> = {
+  discover_requests: "Discover",
+  signal_requests: "Signals",
+  find_ops: "Find",
+  verify_ops: "Verify",
+  scrape_credits: "Scrape",
+  validation_credits: "Validation",
+};
+
 export function titleCase(value: string): string {
   return value
-    .replace(/[_-]+/g, " ")
+    .replace(/[._-]+/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+export function humanName(value: string): string {
+  const key = String(value || "").trim();
+  if (!key) return "";
+  return DISPLAY_NAMES[key.toLowerCase()] || titleCase(key);
+}
+
+export function humanPool(value: string): string {
+  const [provider, ...rest] = String(value || "").split(".");
+  return [humanName(provider), humanName(rest.join("."))].filter(Boolean).join(" · ");
+}
+
+export function chartPool(value: string): string {
+  const [provider, ...rest] = String(value || "").split(".");
+  const pool = rest.join(".");
+  return [humanName(provider), CHART_POOLS[pool] || humanName(pool)].filter(Boolean).join(" · ");
 }

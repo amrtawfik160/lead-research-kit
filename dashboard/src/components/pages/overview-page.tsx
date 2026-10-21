@@ -15,7 +15,7 @@ import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus, PriorityGlyph, StatusGlyph } from "@/components/status-glyph";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { display } from "@/lib/format";
+import { chartPool, display, humanName } from "@/lib/format";
 import { greeting, longDate } from "@/lib/gr8r";
 import { isVerifiedLead } from "@/lib/lead-ops";
 import type { LeadRow, Overview } from "@/lib/types";
@@ -75,7 +75,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
             />
             <div className="flex flex-col gap-4 px-6">
             <DuplicateBanner items={data.duplicates} className="mb-0" />
-            <div className="grid grid-cols-2 overflow-hidden rounded-[10px] border sm:grid-cols-4">
+            <div className="grid grid-cols-2 overflow-hidden rounded-xl border sm:grid-cols-4">
               <Stat
                 href="/daily"
                 icon={Users}
@@ -120,7 +120,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
               <ChartCard className="lg:col-span-2" title="Lead sources">
                 <HorizontalBarChart
                   rows={(charts?.sources || []).slice(0, 6).map((row) => ({
-                    label: row.name.replace(/_/g, " "),
+                    label: humanName(row.name),
                     value: row.count,
                   }))}
                   emptyTitle="No source mix"
@@ -130,7 +130,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
               <ChartCard className="lg:col-span-2" title="Provider quota">
                 <QuotaChart
                   rows={(charts?.provider_quota || []).slice(0, 6).map((row) => ({
-                    label: `${row.id} ${String(row.pool).replace(/_/g, " ")}`,
+                    label: chartPool(`${row.id}.${row.pool}`),
                     remaining: displayUnits(row.remaining),
                     spent: displayUnits(row.spent),
                   }))}
@@ -139,7 +139,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
               <ChartCard className="lg:col-span-2" title="Budget spent" hint={charts?.budget_spent.length ? `${charts.budget_spent.length} pools` : "none"}>
                 <HorizontalBarChart
                   rows={(charts?.budget_spent || []).slice(0, 6).map((row) => ({
-                    label: `${row.provider} ${String(row.pool).replace(/_/g, " ")}`,
+                    label: chartPool(`${row.provider}.${row.pool}`),
                     value: displayUnits(row.spent),
                   }))}
                   emptyTitle="No provider spend"
@@ -193,9 +193,9 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                     }
                   />
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[560px] text-[13px]">
+                    <table className="w-full min-w-[560px] text-sm">
                       <thead>
-                        <tr className="border-t text-left text-[12px] font-medium text-muted-foreground">
+                        <tr className="border-t text-left text-xs font-medium text-muted-foreground">
                           <th className="px-4 py-2 font-medium">Provider</th>
                           <th className="py-2 font-medium">Status</th>
                           <th className="py-2 font-medium">Free quota</th>
@@ -223,10 +223,10 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                                       value={pct}
                                       tone={provider.paused ? "bad" : provider.enabled && provider.key_present ? "ok" : undefined}
                                     />
-                                    <span className="w-8 text-[11.5px] tabular-nums text-muted-foreground">{pct}%</span>
+                                    <span className="w-8 text-xs tabular-nums text-muted-foreground">{pct}%</span>
                                   </span>
                                 </td>
-                                <td className="px-4 py-2.5 text-right font-mono text-[12px] tabular-nums text-muted-foreground">
+                                <td className="px-4 py-2.5 text-right font-mono text-xs tabular-nums text-muted-foreground">
                                   {pools || "—"}
                                 </td>
                               </tr>
@@ -250,8 +250,8 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                   />
                   <div className="px-4 pb-3">
                     <DeadlineGroup label="This run" count={data.report?.this_run} />
-                    <div className="flex h-[30px] items-center gap-2 text-[13px]">
-                      <span className="size-2 rounded-[3px] bg-[#3570c4]" />
+                    <div className="flex min-h-8 items-center gap-2 text-sm">
+                      <span className="size-2 rounded-sm bg-info" />
                       <span className="issue-title min-w-0 flex-1 truncate">{data.latest_daily?.date || "No daily file"}</span>
                       <span className="tabular-nums text-muted-foreground">
                         {delivered}/{target || "—"}
@@ -259,8 +259,8 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                     </div>
                     <DeadlineGroup label="Advice" count={data.advice.length} />
                     {data.advice.slice(0, 4).map((tip) => (
-                      <div key={tip} className="flex min-h-[30px] items-center gap-2 text-[13px]">
-                        <span className="size-2 rounded-[3px] bg-[#8f5e0e]" />
+                      <div key={tip} className="flex min-h-8 items-center gap-2 text-sm">
+                        <span className="size-2 rounded-sm bg-warning" />
                         <span className="min-w-0 flex-1 truncate">{tip}</span>
                       </div>
                     ))}
@@ -277,14 +277,14 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                   />
                   <div className="px-4 pb-3">
                     {data.status.unresolved_attempts.length === 0 ? (
-                      <p className="py-2 text-[12.5px] text-muted-foreground">
+                      <p className="py-2 text-sm text-muted-foreground">
                         No unresolved attempts. Resume is only for saved GET-pollable jobs.
                       </p>
                     ) : (
                       data.status.unresolved_attempts.map((attempt) => (
                         <div key={attempt.id} className="flex min-h-10 items-center gap-2.5 border-t first:border-t-0">
                           <EntityAvatar name={attempt.provider} size={22} />
-                          <div className="min-w-0 flex-1 text-[13px]">
+                          <div className="min-w-0 flex-1 text-sm">
                             <span className="font-medium">{attempt.provider}</span>{" "}
                             <span className="text-muted-foreground">{attempt.operation}</span>
                           </div>
@@ -312,7 +312,7 @@ function displayUnits(value?: string | number | null): number {
 
 function DeadlineGroup({ label, count }: { label: string; count?: number }): React.ReactElement {
   return (
-    <div className="mb-1 mt-1 flex items-center gap-1.5 text-[11.5px] font-semibold text-[#57544e] dark:text-[#b5b2ab]">
+    <div className="mb-1 mt-1 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
       {label}
       <span className="font-medium text-muted-foreground">{count ?? 0}</span>
     </div>
@@ -323,14 +323,14 @@ function MiniLead({ row }: { row: LeadRow }): React.ReactElement {
   return (
     <Link
       href="/leads"
-      className="flex min-h-10 items-center gap-2.5 border-t px-4 text-[13.5px] transition-colors hover:bg-[#f6f5f2] dark:hover:bg-[#252524]"
+      className="flex min-h-10 items-center gap-2.5 border-t px-4 text-sm transition-colors hover:bg-muted"
     >
       <StatusGlyph value={row["Email Risk"]} />
       <span className="issue-title min-w-0 flex-1 truncate">{display(row["Full Name"])}</span>
       <LabelChip value={row.Company} className="hidden max-w-[140px] sm:inline-flex" />
       <QuietStatus value={row.Stage || "new"} />
       <PriorityGlyph value={row.Tier} />
-      <span className="w-14 truncate text-right text-[12px] text-muted-foreground">{display(row.City)}</span>
+      <span className="w-14 truncate text-right text-xs text-muted-foreground">{display(row.City)}</span>
     </Link>
   );
 }
@@ -353,22 +353,22 @@ function Stat({
   return (
     <Link
       href={href}
-      className="flex flex-col gap-2 border-l px-4 py-4 first:border-l-0 transition-colors hover:bg-[#f6f5f2] dark:hover:bg-[#252524] sm:first:border-l-0"
+      className="flex flex-col gap-2 border-l px-4 py-4 first:border-l-0 transition-colors hover:bg-muted sm:first:border-l-0"
     >
-      <span className="inline-flex items-center gap-1.5 text-[12.5px] text-[#57544e] dark:text-[#b5b2ab]">
+      <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
         <Icon className="size-3.5" />
         {label}
       </span>
       <span
         className={cn(
-          "text-[22px] font-semibold tracking-[-0.02em] tabular-nums leading-none",
+          "text-2xl font-semibold tracking-tight tabular-nums leading-none",
           tone === "ok" && "text-success-foreground",
           tone === "bad" && "text-destructive-foreground",
         )}
       >
         {value}
       </span>
-      <span className={cn("text-[12px] text-muted-foreground", tone === "ok" && "text-success-foreground", tone === "bad" && "text-destructive-foreground")}>
+      <span className={cn("text-sm text-muted-foreground", tone === "ok" && "text-success-foreground", tone === "bad" && "text-destructive-foreground")}>
         {hint}
       </span>
     </Link>

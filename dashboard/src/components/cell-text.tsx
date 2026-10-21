@@ -14,7 +14,7 @@ export function CellText({
   mono?: boolean;
 }): React.ReactElement {
   const shown = display(value);
-  const classes = cn("block min-w-0 truncate", mono && "font-mono text-[12px]", className);
+  const classes = cn("block min-w-0 truncate", mono && "font-mono text-xs", className);
   if (shown === "—" || shown.length <= 28) {
     return <span className={classes}>{shown}</span>;
   }

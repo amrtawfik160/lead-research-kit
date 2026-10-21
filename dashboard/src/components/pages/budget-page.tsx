@@ -7,7 +7,7 @@ import { ChartCard, HorizontalBarChart, QuotaChart } from "@/components/workspac
 import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { api } from "@/lib/api";
-import { display } from "@/lib/format";
+import { chartPool, display, humanName, humanPool } from "@/lib/format";
 import type { BudgetPayload } from "@/lib/load";
 
 export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null }): React.ReactElement {
@@ -27,7 +27,7 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
               <ChartCard title="Spent vs remaining">
                 <QuotaChart
                   rows={data.budgets.slice(0, 8).map((budget) => ({
-                    label: `${budget.provider} ${String(budget.pool).replace(/_/g, " ")}`,
+                    label: chartPool(`${budget.provider}.${budget.pool}`),
                     remaining: Number(budget.remaining) || 0,
                     spent: Number(budget.spent) || 0,
                   }))}
@@ -36,7 +36,7 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
               <ChartCard title="Refills">
                 <HorizontalBarChart
                   rows={data.refills.slice(0, 8).map((item) => ({
-                    label: `${display(item.provider)} ${display(item.pool)}`,
+                    label: chartPool(`${item.provider}.${item.pool}`),
                     value: Number(item.amount) || 0,
                   }))}
                   emptyTitle="No recurring refills"
@@ -52,8 +52,8 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
               emptyTitle="No attested budgets"
               emptyDescription="Confirm a free pool on the CLI before the dashboard can chart it."
               columns={[
-                { key: "provider", header: "Provider", width: "10rem", mono: true },
-                { key: "pool", header: "Pool", width: "10rem", mono: true },
+                { key: "provider", header: "Provider", width: "10rem", value: (item) => humanName(item.provider) },
+                { key: "pool", header: "Pool", width: "12rem", value: (item) => humanName(item.pool) },
                 { key: "remaining", header: "Remaining", width: "8rem", mono: true },
                 { key: "spent", header: "Spent", width: "8rem", mono: true, value: (item) => item.spent || "0" },
                 { key: "source", header: "Source" },
@@ -62,7 +62,7 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
             <DetailSheet
               open={Boolean(row)}
               onOpenChange={(open) => !open && setRow(null)}
-              title={`${display(row?.provider)} · ${display(row?.pool)}`}
+              title={row ? humanPool(`${row.provider}.${row.pool}`) : "Budget pool"}
               description="Attested remaining and local spend"
               sections={[
                 {

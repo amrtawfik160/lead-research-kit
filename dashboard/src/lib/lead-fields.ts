@@ -1,4 +1,4 @@
-import { display, titleCase } from "@/lib/format";
+import { display, humanName, titleCase } from "@/lib/format";
 import type { LeadRow } from "@/lib/types";
 
 const GROUPS: Array<{ title: string; keys: string[] }> = [
@@ -43,6 +43,14 @@ export type FieldSection = {
 };
 
 const OPS_KEYS = new Set(["Stage", "Notes", "Owner", "ops_key", "ops_updated_at"]);
+const HUMAN_VALUES = new Set([
+  "Email Source",
+  "Source",
+  "Email Risk",
+  "Email Risk Reason",
+  "Email Verification",
+  "Company Type",
+]);
 
 function present(value: unknown): boolean {
   return value != null && value !== "";
@@ -57,7 +65,10 @@ export function leadFieldSections(lead: LeadRow | null): FieldSection[] {
       .filter((key) => present(lead[key]))
       .map((key) => {
         used.add(key);
-        return { label: titleCase(key), value: display(lead[key]) };
+        return {
+          label: titleCase(key),
+          value: HUMAN_VALUES.has(key) ? humanName(display(lead[key])) : display(lead[key]),
+        };
       });
     if (fields.length) sections.push({ title: group.title, fields });
   }

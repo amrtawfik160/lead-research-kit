@@ -15,11 +15,11 @@ export function PageHeader({
   return (
     <div className="flex flex-wrap items-start gap-3 px-6 pt-6 pb-4">
       <div className="min-w-0">
-        <h1 className="font-heading text-[23px] font-semibold tracking-[-0.022em] leading-[1.2] text-balance">
+        <h1 className="font-heading text-2xl font-semibold tracking-tight text-balance">
           {title}
         </h1>
         {description ? (
-          <p className="mt-1 max-w-2xl text-[13.5px] leading-5 text-[#57544e] dark:text-[#b5b2ab]">{description}</p>
+          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
         ) : null}
       </div>
       {actions ? <div className="ms-auto flex flex-wrap items-center gap-2">{actions}</div> : null}

@@ -231,7 +231,7 @@ export function DataTable<T extends object>({
             <ArrowUpDown className="size-3.5" />
             Sort
           </ToolbarButton>
-          <span className="px-1 text-[11px] tabular-nums text-muted-foreground">
+          <span className="px-1 text-xs tabular-nums text-muted-foreground">
             {filtered.length} {filtered.length === 1 ? "row" : "rows"}
           </span>
         </ToolbarGroup>
@@ -250,13 +250,13 @@ export function DataTable<T extends object>({
                       key={column.key}
                       style={column.width ? { width: column.width, maxWidth: column.width } : undefined}
                       aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"}
-                      className={cn("h-8 px-2 text-[12px]", column.align === "right" && "text-right")}
+                      className={cn("h-8 px-2 text-xs", column.align === "right" && "text-right")}
                     >
                       <Button
                         size="xs"
                         variant="ghost"
                         className={cn(
-                          "-ms-1 h-6 px-1 text-[11px] font-medium text-muted-foreground hover:text-foreground",
+                          "-ms-1 h-6 px-1 text-xs font-medium text-muted-foreground hover:text-foreground",
                           column.align === "right" && "ms-auto -me-1",
                         )}
                         onClick={() => toggleSort(column.key)}
@@ -295,7 +295,7 @@ export function DataTable<T extends object>({
       {pages > 1 ? (
         <Toolbar className="h-auto w-full justify-between gap-2 rounded-none border-x-0 border-b-0 px-3 py-1.5">
           <ToolbarGroup>
-            <span className="px-1 text-[11px] tabular-nums text-muted-foreground">
+            <span className="px-1 text-xs tabular-nums text-muted-foreground">
               Page {current + 1} of {pages}
             </span>
           </ToolbarGroup>
@@ -342,7 +342,7 @@ function GroupRows<T extends object>({
         <TableRow className="hover:bg-transparent">
           <TableCell
             colSpan={colSpan}
-            className="bg-transparent py-2 text-[12.5px] font-semibold text-foreground"
+            className="bg-transparent py-2 text-sm font-semibold text-foreground"
           >
             {group.key} · {group.total}
           </TableCell>
@@ -375,7 +375,7 @@ function GroupRows<T extends object>({
               <TableCell
                 key={column.key}
                 style={column.width ? { width: column.width, maxWidth: column.width } : undefined}
-                className={cn("h-10 px-2 py-0 text-[13.5px]", column.align === "right" && "text-right")}
+                className={cn("h-10 px-2 py-0 text-sm", column.align === "right" && "text-right")}
               >
                 {column.render ? (
                   column.render(row)
