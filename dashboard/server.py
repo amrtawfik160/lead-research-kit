@@ -22,10 +22,12 @@ from api.snapshot import (  # noqa: E402
     Dashboard,
     SAMPLE_DIR,
     clean_rows,
+    env_workspace_locked,
     load_settings,
     parse_tabular,
-    resolve_workspace,
     save_settings,
+    settings_view,
+    update_settings,
 )
 
 
@@ -59,20 +61,21 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip('/') or '/'
         query = {k: v[0] if v else '' for k, v in parse_qs(parsed.query).items()}
         body = self._body() if method == 'POST' else {}
-        dash = _dashboard()
-        if method == 'GET' and path == '/api/health':
-            return self._json({'ok': True, **dash.meta()})
         if method == 'GET' and path == '/api/settings':
-            return self._json({'settings': load_settings(), **dash.meta()})
+            return self._json(settings_view())
         if method == 'POST' and path == '/api/settings':
-            return self._json(self._update_settings(body))
+            return self._json(update_settings(body))
         if method == 'POST' and path == '/api/sample/reset':
             seed_sample(SAMPLE_DIR, force=True)
             settings = load_settings()
             settings['sample'] = True
-            settings.pop('workspace', None)
             save_settings(settings)
+            if env_workspace_locked():
+                return self._json(settings_view())
             return self._json(Dashboard().overview())
+        dash = _dashboard()
+        if method == 'GET' and path == '/api/health':
+            return self._json({'ok': True, **dash.meta()})
         if method == 'GET' and path == '/api/overview':
             return self._json(dash.overview())
         if method == 'GET' and path == '/api/status':
@@ -125,24 +128,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(dash.preview_daily(body.get('target') or 50, sources))
         raise PolicyError('unknown_route')
 
-    def _update_settings(self, body):
-        settings = load_settings()
-        if 'sample' in body:
-            settings['sample'] = bool(body['sample'])
-            if settings['sample']:
-                settings.pop('workspace', None)
-                seed_sample(SAMPLE_DIR, force=False)
-        workspace = body.get('workspace')
-        if workspace:
-            path = Path(str(workspace)).expanduser().resolve()
-            if '..' in Path(str(workspace)).parts:
-                raise PolicyError('invalid_workspace_path')
-            settings['workspace'] = str(path)
-            settings['sample'] = False
-        save_settings(settings)
-        path, sample = resolve_workspace(settings)
-        return {'settings': settings, **Dashboard(path, sample).meta()}
-
     def _body(self):
         length = int(self.headers.get('Content-Length') or 0)
         if length <= 0:
@@ -182,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Lead Research Kit dashboard API (loopback only)')
+    parser = argparse.ArgumentParser(description='Veinore dashboard API (loopback only)')
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8787)
     args = parser.parse_args(argv)

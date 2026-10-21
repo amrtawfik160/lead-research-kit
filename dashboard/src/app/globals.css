@@ -138,6 +138,7 @@
 }
 
 :root {
+  color-scheme: light;
   --destructive-foreground: var(--color-red-700);
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
@@ -183,6 +184,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --destructive-foreground: var(--color-red-400);
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-400);

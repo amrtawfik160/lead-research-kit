@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +36,27 @@ export type Column<T> = {
   value?: (row: T) => unknown;
 };
 
+type SortState = { key: string; dir: "asc" | "desc" } | null;
+
 const PAGE = 25;
+
+function isEmpty(value: unknown): boolean {
+  return value == null || value === "";
+}
+
+function compareValues(a: unknown, b: unknown): number {
+  const aNum = typeof a === "number" ? a : typeof a === "boolean" ? Number(a) : null;
+  const bNum = typeof b === "number" ? b : typeof b === "boolean" ? Number(b) : null;
+  if (aNum != null && bNum != null && Number.isFinite(aNum) && Number.isFinite(bNum)) {
+    return aNum - bNum;
+  }
+  return text(a).localeCompare(text(b), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function cellValue<T extends object>(row: T, column: Column<T> | undefined, key: string): unknown {
+  if (column?.value) return column.value(row);
+  return (row as Record<string, unknown>)[key];
+}
 
 export function DataTable<T extends object>({
   rows,
@@ -60,6 +81,7 @@ export function DataTable<T extends object>({
 }): React.ReactElement {
   const [query, setQuery] = useState("");
   const [groupBy, setGroupBy] = useState("none");
+  const [sort, setSort] = useState<SortState>(null);
   const [page, setPage] = useState(0);
 
   const filtered = useMemo(() => {
@@ -69,50 +91,86 @@ export function DataTable<T extends object>({
       const keys = searchKeys || columns.map((column) => column.key);
       return keys.some((key) => {
         const column = columns.find((item) => item.key === key);
-        const value = column?.value ? column.value(row) : (row as Record<string, unknown>)[key];
-        return text(value).toLowerCase().includes(needle);
+        return text(cellValue(row, column, key)).toLowerCase().includes(needle);
       });
     });
   }, [columns, query, rows, searchKeys]);
 
+  const sorted = useMemo(() => {
+    if (!sort) return filtered;
+    const column = columns.find((item) => item.key === sort.key);
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      const av = cellValue(a, column, sort.key);
+      const bv = cellValue(b, column, sort.key);
+      const ae = isEmpty(av);
+      const be = isEmpty(bv);
+      if (ae || be) {
+        if (ae && be) return 0;
+        return ae ? 1 : -1;
+      }
+      return dir * compareValues(av, bv);
+    });
+  }, [columns, filtered, sort]);
+
   const grouped = useMemo(() => {
-    if (groupBy === "none") return [{ key: "", rows: filtered }];
+    if (groupBy === "none") return [{ key: "", rows: sorted }];
     const buckets = new Map<string, T[]>();
-    for (const row of filtered) {
+    for (const row of sorted) {
       const column = columns.find((item) => item.key === groupBy);
-      const label = display(column?.value ? column.value(row) : (row as Record<string, unknown>)[groupBy]);
+      const label = display(cellValue(row, column, groupBy));
       buckets.set(label, [...(buckets.get(label) || []), row]);
     }
     return [...buckets.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
       .map(([key, groupRows]) => ({ key, rows: groupRows }));
-  }, [columns, filtered, groupBy]);
+  }, [columns, groupBy, sorted]);
 
   const keyed = useMemo(() => {
     const seen = new Map<string, number>();
-    return rows.map((row) => {
+    const map = new Map<T, string>();
+    for (const row of rows) {
       const base = rowKey(row);
       const n = seen.get(base) || 0;
       seen.set(base, n + 1);
-      return { row, key: n ? `${base}#${n}` : base };
-    });
+      map.set(row, n ? `${base}#${n}` : base);
+    }
+    return map;
   }, [rowKey, rows]);
-  const keyOf = (row: T) => keyed.find((item) => item.row === row)?.key || rowKey(row);
+  const keyOf = (row: T) => keyed.get(row) || rowKey(row);
 
-  const flat = grouped.flatMap((group) => group.rows);
+  const flat = useMemo(
+    () => grouped.flatMap((group) => group.rows.map((row) => ({ row, group }))),
+    [grouped],
+  );
   const pages = Math.max(1, Math.ceil(flat.length / PAGE));
   const current = Math.min(page, pages - 1);
   const visible = useMemo(() => {
-    const start = current * PAGE;
-    const slice = new Set(flat.slice(start, start + PAGE));
-    return grouped
-      .map((group) => ({ ...group, rows: group.rows.filter((row) => slice.has(row)) }))
-      .filter((group) => group.rows.length);
-  }, [current, flat, grouped]);
+    const slice = flat.slice(current * PAGE, current * PAGE + PAGE);
+    const groups: Array<{ key: string; total: number; rows: T[] }> = [];
+    for (const item of slice) {
+      const last = groups[groups.length - 1];
+      if (!last || last.key !== item.group.key) {
+        groups.push({ key: item.group.key, total: item.group.rows.length, rows: [item.row] });
+      } else {
+        last.rows.push(item.row);
+      }
+    }
+    return groups;
+  }, [current, flat]);
+
+  function toggleSort(key: string) {
+    setSort((prev) => {
+      if (!prev || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+    setPage(0);
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Toolbar className="h-auto w-full justify-between gap-2 border-b px-3 py-2">
+      <Toolbar className="h-auto w-full flex-wrap justify-between gap-2 border-b px-3 py-2">
         <ToolbarGroup className="min-w-0 flex-1">
           <Input
             value={query}
@@ -131,6 +189,10 @@ export function DataTable<T extends object>({
             <ToolbarGroup>
               <Select
                 value={groupBy}
+                items={[
+                  { value: "none", label: "No grouping" },
+                  ...groupOptions.map((option) => ({ value: option.value, label: option.label })),
+                ]}
                 onValueChange={(value) => {
                   setGroupBy(String(value || "none"));
                   setPage(0);
@@ -170,17 +232,39 @@ export function DataTable<T extends object>({
           <Table>
             <TableHeader>
               <TableRow>
-                {columns.map((column) => (
-                  <TableHead key={column.key} style={column.width ? { width: column.width } : undefined}>
-                    {column.header}
-                  </TableHead>
-                ))}
+                {columns.map((column) => {
+                  const active = sort?.key === column.key ? sort.dir : null;
+                  return (
+                    <TableHead
+                      key={column.key}
+                      style={column.width ? { width: column.width } : undefined}
+                      aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"}
+                    >
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        className="-ms-1 h-6 px-1 text-muted-foreground"
+                        onClick={() => toggleSort(column.key)}
+                        aria-label={`Sort by ${column.header}`}
+                      >
+                        {column.header}
+                        {active === "asc" ? (
+                          <ChevronUp />
+                        ) : active === "desc" ? (
+                          <ChevronDown />
+                        ) : (
+                          <ChevronsUpDown className="opacity-40" />
+                        )}
+                      </Button>
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             </TableHeader>
             <TableBody>
               {visible.map((group) => (
                 <GroupRows
-                  key={group.key || "all"}
+                  key={`${group.key || "all"}-${group.rows.map(keyOf).join("|")}`}
                   group={group}
                   columns={columns}
                   colSpan={columns.length}
@@ -230,7 +314,7 @@ function GroupRows<T extends object>({
   selectedKey,
   rowKey,
 }: {
-  group: { key: string; rows: T[] };
+  group: { key: string; total: number; rows: T[] };
   columns: Array<Column<T>>;
   colSpan: number;
   onRowClick?: (row: T) => void;
@@ -242,7 +326,7 @@ function GroupRows<T extends object>({
       {group.key ? (
         <TableRow>
           <TableCell colSpan={colSpan} className="bg-muted/40 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            {group.key} · {group.rows.length}
+            {group.key} · {group.total}
           </TableCell>
         </TableRow>
       ) : null}
@@ -259,7 +343,7 @@ function GroupRows<T extends object>({
               <TableCell key={column.key} className="text-xs">
                 {column.render
                   ? column.render(row)
-                  : display(column.value ? column.value(row) : (row as Record<string, unknown>)[column.key])}
+                  : display(cellValue(row, column, column.key))}
               </TableCell>
             ))}
           </TableRow>

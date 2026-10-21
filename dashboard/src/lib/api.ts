@@ -1,3 +1,4 @@
+import type { SettingsPayload } from "@/lib/load";
 import type {
   Attempt,
   CleanResult,
@@ -18,7 +19,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
     cache: "no-store",
   });
-  const data = (await response.json()) as T & { error?: string };
+  let data: T & { error?: string };
+  try {
+    data = (await response.json()) as T & { error?: string };
+  } catch {
+    throw new Error(response.ok ? "invalid_response" : "api_unreachable");
+  }
   if (!response.ok || (data && typeof data === "object" && "error" in data && data.error)) {
     throw new Error(
       (data && typeof data === "object" && data.error) || `request_failed_${response.status}`,
@@ -29,9 +35,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   overview: () => request<Overview>("/api/overview"),
-  settings: () => request<{ settings: Record<string, unknown> } & Meta>("/api/settings"),
+  settings: () => request<SettingsPayload>("/api/settings"),
   saveSettings: (body: { sample?: boolean; workspace?: string }) =>
-    request<Meta & { settings: Record<string, unknown> }>("/api/settings", {
+    request<SettingsPayload>("/api/settings", {
       method: "POST",
       body: JSON.stringify(body),
     }),

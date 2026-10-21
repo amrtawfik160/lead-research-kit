@@ -24,19 +24,98 @@ SAMPLE_DIR = DATA_DIR / 'sample-workspace'
 SETTINGS_PATH = DATA_DIR / 'settings.json'
 
 
+def env_workspace_locked():
+    return bool((os.environ.get('LEAD_RESEARCH_WORKSPACE') or '').strip())
+
+
+def validate_workspace_path(raw):
+    """A local directory. Reject traversal and paths that are not folders."""
+    text = str(raw or '').strip()
+    if not text:
+        raise PolicyError('workspace_required')
+    candidate = Path(text).expanduser()
+    if '..' in candidate.parts:
+        raise PolicyError('invalid_workspace_path')
+    path = candidate.resolve()
+    if not path.is_dir():
+        raise PolicyError('workspace_not_found')
+    return path
+
+
 def resolve_workspace(settings=None):
-    """Pick the operator workspace or the opt-in synthetic sample."""
+    """Pick the operator workspace or the opt-in synthetic sample.
+
+    LEAD_RESEARCH_WORKSPACE wins over the saved settings file. Sample mode is
+    the default. An explicit sample:false without a real directory is an error,
+    not a silent return to the sample workspace.
+    """
     settings = settings if settings is not None else load_settings()
     env_ws = (os.environ.get('LEAD_RESEARCH_WORKSPACE') or '').strip()
     env_sample = (os.environ.get('LEAD_RESEARCH_SAMPLE') or '').strip().lower()
     if env_ws:
-        sample = env_sample in ('1', 'true', 'yes')
-        return Path(env_ws).expanduser().resolve(), sample
-    if env_sample in ('0', 'false', 'no') and settings.get('workspace'):
-        return Path(settings['workspace']).expanduser().resolve(), False
-    if settings.get('sample') is False and settings.get('workspace'):
-        return Path(settings['workspace']).expanduser().resolve(), False
-    return SAMPLE_DIR, True
+        return Path(env_ws).expanduser().resolve(), env_sample in ('1', 'true', 'yes')
+    if env_sample in ('0', 'false', 'no') and str(settings.get('workspace') or '').strip():
+        return validate_workspace_path(settings.get('workspace')), False
+    if settings.get('sample') is False:
+        return validate_workspace_path(settings.get('workspace')), False
+    return SAMPLE_DIR.resolve(), True
+
+
+def _public_settings(settings):
+    if not isinstance(settings, dict):
+        return {'sample': True}
+    public = {'sample': settings.get('sample') is not False}
+    workspace = settings.get('workspace')
+    if isinstance(workspace, str) and workspace.strip():
+        public['workspace'] = workspace.strip()
+    return public
+
+
+def settings_view():
+    """Settings for the UI. Always readable, even when the saved path is broken."""
+    settings = load_settings()
+    error = None
+    try:
+        meta = Dashboard().meta()
+    except PolicyError as exc:
+        error = str(exc)
+        meta = {
+            'kit_version': __version__,
+            'workspace': '',
+            'sample': False,
+            'initialized': False,
+            'today': today_iso(),
+        }
+    return {
+        'settings': _public_settings(settings),
+        'env_locked': env_workspace_locked(),
+        'settings_error': error,
+        **meta,
+    }
+
+
+def update_settings(body):
+    """Switch sample mode or a real directory. Does not store secrets."""
+    if not isinstance(body, dict):
+        raise PolicyError('expected_object')
+    settings = load_settings()
+    if not isinstance(settings, dict):
+        settings = {'sample': True}
+    workspace = str(body.get('workspace') or '').strip() if 'workspace' in body else ''
+    if workspace:
+        settings['workspace'] = str(validate_workspace_path(workspace))
+        settings['sample'] = False
+    elif 'sample' in body:
+        if bool(body['sample']):
+            settings['sample'] = True
+            seed_sample(SAMPLE_DIR, force=False)
+        else:
+            settings['workspace'] = str(validate_workspace_path(settings.get('workspace')))
+            settings['sample'] = False
+    else:
+        raise PolicyError('workspace_required')
+    save_settings(settings)
+    return settings_view()
 
 
 def load_settings():

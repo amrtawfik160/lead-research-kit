@@ -7,7 +7,11 @@ import type {
   ProviderRow,
 } from "@/lib/types";
 
-export type SettingsPayload = Meta & { settings: Record<string, unknown> };
+export type SettingsPayload = Meta & {
+  settings: { sample?: boolean; workspace?: string };
+  env_locked?: boolean;
+  settings_error?: string | null;
+};
 export type ContactsPayload = { contacts: Contact[] };
 export type ResearchPayload = {
   queue: Contact[];

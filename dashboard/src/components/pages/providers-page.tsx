@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
-import { display } from "@/lib/format";
+import { display, explainError } from "@/lib/format";
 import type { ProvidersPayload } from "@/lib/load";
 import type { ProviderRow } from "@/lib/types";
 
@@ -18,13 +18,21 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
   const [row, setRow] = useState<ProviderRow | null>(null);
 
   async function toggle(provider: ProviderRow, enabled: boolean) {
-    await api.setEnabled(provider.id, enabled);
-    toastManager.add({
-      type: "success",
-      title: enabled ? "Provider enabled" : "Provider disabled",
-      description: `${provider.id} configuration only — no keys stored`,
-    });
-    reload();
+    try {
+      await api.setEnabled(provider.id, enabled);
+      toastManager.add({
+        type: "success",
+        title: enabled ? "Provider enabled" : "Provider disabled",
+        description: `${provider.id} configuration only — no keys stored`,
+      });
+      reload();
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not update provider",
+        description: explainError(error instanceof Error ? error.message : "request_failed"),
+      });
+    }
   }
 
   return (
@@ -65,13 +73,13 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
                   key: "key_present",
                   header: "Key",
                   value: (item) => (item.key_present ? "present" : "missing"),
-                  render: (item) => <StatusBadge value={item.key_present ? "funded" : "missing"} />,
+                  render: (item) => <StatusBadge value={item.key_present ? "present" : "missing"} />,
                 },
                 {
                   key: "paused",
                   header: "Pause",
                   value: (item) => (item.paused ? "paused" : "clear"),
-                  render: (item) => <StatusBadge value={item.paused ? "paused" : "enabled"} />,
+                  render: (item) => <StatusBadge value={item.paused ? "paused" : "clear"} />,
                 },
                 {
                   key: "operations",

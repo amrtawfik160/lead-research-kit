@@ -16,6 +16,8 @@ const VARIANT: Record<string, ComponentProps<typeof Badge>["variant"]> = {
   confirmed: "success",
   enabled: "success",
   funded: "success",
+  present: "success",
+  clear: "secondary",
   pending: "warning",
   uncertain: "warning",
   partial: "warning",

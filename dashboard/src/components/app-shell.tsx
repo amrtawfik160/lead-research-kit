@@ -1,9 +1,12 @@
 "use client";
 
+import { Moon, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useState } from "react";
 import { CommandPalette, useCommandHotkeys } from "@/components/command-palette";
+import { Mark } from "@/components/logo";
+import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import {
@@ -28,6 +31,7 @@ import { NAV } from "@/lib/nav";
 
 export function AppShell({ children }: { children: React.ReactNode }): React.ReactElement {
   const pathname = usePathname();
+  const { toggleTheme } = useTheme();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   useCommandHotkeys(openPalette);
@@ -44,17 +48,15 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
       >
         <Sidebar collapsible="icon" variant="inset">
           <SidebarHeader className="px-3 py-3">
-            <div className="flex items-center gap-2 overflow-hidden">
-              <div className="flex size-6 shrink-0 items-center justify-center rounded-md border bg-sidebar-accent text-[10px] font-medium">
-                LR
-              </div>
+            <Link href="/" className="flex items-center gap-2 overflow-hidden rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+              <Mark className="size-5 text-sidebar-accent-foreground" />
               <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-                <div className="truncate text-sm font-medium text-sidebar-accent-foreground">
-                  Lead Research
+                <div className="truncate text-sm font-medium tracking-tight text-sidebar-accent-foreground">
+                  Veinore
                 </div>
-                <div className="truncate text-[11px] text-muted-foreground">Evidence-first kit</div>
+                <div className="truncate text-[11px] text-muted-foreground">Evidence-first</div>
               </div>
-            </div>
+            </Link>
           </SidebarHeader>
           <SidebarSeparator />
           <SidebarContent>
@@ -101,6 +103,10 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
         <SidebarInset className="min-w-0 bg-background">
           <header className="flex h-11 items-center gap-2 border-b px-3">
             <SidebarTrigger />
+            <Button size="icon-sm" variant="ghost" aria-label="Toggle color theme" onClick={toggleTheme}>
+              <Sun className="hidden dark:block" />
+              <Moon className="dark:hidden" />
+            </Button>
             <button
               type="button"
               onClick={openPalette}

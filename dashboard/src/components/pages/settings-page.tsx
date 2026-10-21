@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
@@ -9,61 +10,104 @@ import { Switch } from "@/components/ui/switch";
 import { toastManager } from "@/components/ui/toast";
 import { PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
+import { useTheme } from "@/components/theme-provider";
 import { api } from "@/lib/api";
+import { explainError } from "@/lib/format";
 import type { SettingsPayload } from "@/lib/load";
 
+function failureText(error: unknown): string {
+  return explainError(error instanceof Error ? error.message : "request_failed");
+}
+
 export function SettingsPage({ initial = null }: { initial?: SettingsPayload | null }): React.ReactElement {
+  const router = useRouter();
+  const { theme, setTheme } = useTheme();
   const { data, error, loading, reload } = useQuery(() => api.settings(), [], initial);
   const [workspace, setWorkspace] = useState("");
   const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const saved = data?.settings.workspace;
+    if (saved) setWorkspace((current) => current || saved);
+  }, [data]);
+
+  async function run(action: () => Promise<SettingsPayload>, success: string, description?: string) {
+    setBusy(true);
+    setFormError(null);
+    try {
+      const result = await action();
+      if (result.env_locked) {
+        toastManager.add({
+          type: "warning",
+          title: "Saved, environment still wins",
+          description: "LEAD_RESEARCH_WORKSPACE is set, so this process keeps that folder.",
+        });
+      } else {
+        toastManager.add({ type: "success", title: success, description });
+      }
+      reload();
+      router.refresh();
+    } catch (err) {
+      const text = failureText(err);
+      setFormError(text);
+      toastManager.add({ type: "error", title: "Settings were not changed", description: text });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function setSample(sample: boolean) {
-    setBusy(true);
-    try {
-      await api.saveSettings({ sample });
-      toastManager.add({ type: "success", title: sample ? "Sample mode on" : "Sample mode off" });
-      reload();
-    } finally {
-      setBusy(false);
+    if (!sample) {
+      const path = workspace.trim() || data?.settings.workspace || "";
+      if (!path) {
+        const text = explainError("workspace_required");
+        setFormError(text);
+        toastManager.add({ type: "error", title: "Workspace path required", description: text });
+        return;
+      }
+      await run(() => api.saveSettings({ sample: false, workspace: path }), "Sample mode off", path);
+      return;
     }
+    await run(() => api.saveSettings({ sample: true }), "Sample mode on");
   }
 
-  async function saveWorkspace() {
-    setBusy(true);
-    try {
-      await api.saveSettings({ workspace, sample: false });
-      toastManager.add({ type: "success", title: "Workspace set", description: workspace });
-      reload();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function reset() {
-    setBusy(true);
-    try {
-      await api.resetSample();
-      toastManager.add({ type: "success", title: "Sample workspace rebuilt" });
-      reload();
-    } finally {
-      setBusy(false);
-    }
-  }
+  const locked = Boolean(data?.env_locked);
 
   return (
     <>
       <PageHeader
         title="Settings"
-        description="Point at a private workspace or use the synthetic sample. API keys stay in the environment."
+        description="Point Veinore at a private workspace, or use the synthetic sample. API keys stay in the environment."
         crumbs={[{ href: "/", label: "Overview" }, { label: "Settings" }]}
       />
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
           <div className="flex max-w-xl flex-col gap-5 p-4 sm:p-6">
+            {locked ? (
+              <Alert variant="warning">
+                <AlertTitle>Environment workspace is active</AlertTitle>
+                <AlertDescription>
+                  LEAD_RESEARCH_WORKSPACE selects the folder for this process. A path saved here is kept for the next launch without that variable.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {data.settings_error ? (
+              <Alert variant="error">
+                <AlertTitle>Saved workspace is not usable</AlertTitle>
+                <AlertDescription>{explainError(data.settings_error)}</AlertDescription>
+              </Alert>
+            ) : null}
+            {formError ? (
+              <Alert variant="error">
+                <AlertTitle>That change was rejected</AlertTitle>
+                <AlertDescription>{formError}</AlertDescription>
+              </Alert>
+            ) : null}
             <Alert variant="info">
               <AlertTitle>Never commit the workspace</AlertTitle>
               <AlertDescription>
-                This UI reads {data.workspace}. Sample mode seeds reserved example.org / .example contacts only.
+                This UI reads {data.workspace || "no folder"}. Sample mode seeds reserved example.org / .example contacts only.
               </AlertDescription>
             </Alert>
             <label className="flex items-center justify-between gap-3 text-sm">
@@ -75,37 +119,66 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
               </span>
               <Switch
                 checked={data.sample}
-                disabled={busy}
+                disabled={busy || locked}
                 onCheckedChange={(checked) => void setSample(Boolean(checked))}
+                aria-label="Sample data"
               />
             </label>
+            <Field>
+              <FieldLabel>Appearance</FieldLabel>
+              <FieldDescription>Light or dark. Stored in this browser.</FieldDescription>
+              <div className="flex gap-2">
+                <Button size="sm" variant={theme === "light" ? "default" : "outline"} onClick={() => setTheme("light")}>
+                  Light
+                </Button>
+                <Button size="sm" variant={theme === "dark" ? "default" : "outline"} onClick={() => setTheme("dark")}>
+                  Dark
+                </Button>
+              </div>
+            </Field>
             <Field>
               <FieldLabel>Kit version</FieldLabel>
               <Input readOnly value={data.kit_version} size="sm" />
             </Field>
             <Field>
               <FieldLabel>Active workspace</FieldLabel>
-              <Input readOnly value={data.workspace} size="sm" className="font-mono" />
+              <Input readOnly value={data.workspace || "—"} size="sm" className="font-mono" />
               <FieldDescription>
-                {data.initialized ? "providers.json found" : "Run `lead-research --workspace PATH init` first"}
+                {data.sample
+                  ? "Sample workspace"
+                  : data.initialized
+                    ? "providers.json found"
+                    : "Run `lead-research --workspace PATH init` first"}
               </FieldDescription>
             </Field>
             <Field>
               <FieldLabel>Use a real workspace</FieldLabel>
-              <FieldDescription>Absolute local path. No secrets. LEAD_RESEARCH_WORKSPACE overrides this.</FieldDescription>
+              <FieldDescription>Absolute local path. No secrets. LEAD_RESEARCH_WORKSPACE overrides this while it is set.</FieldDescription>
               <Input
                 value={workspace}
                 onChange={(event) => setWorkspace(event.target.value)}
                 placeholder="/private/path/research"
                 size="sm"
                 className="font-mono"
+                disabled={locked}
+                aria-label="Workspace path"
               />
             </Field>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" disabled={busy || !workspace} onClick={() => void saveWorkspace()}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || locked || !workspace.trim()}
+                onClick={() => void run(() => api.saveSettings({ workspace: workspace.trim(), sample: false }), "Workspace set", workspace.trim())}
+              >
                 Use this workspace
               </Button>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => void reset()}>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy || locked}
+                onClick={() => void run(() => api.resetSample().then(() => api.settings()), "Sample workspace rebuilt")}
+              >
                 Rebuild sample
               </Button>
             </div>

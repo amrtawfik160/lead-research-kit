@@ -1,14 +1,17 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from lead_research.models import PolicyError
 from lead_research.quality import HEADERS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'dashboard'))
 from api.sample import seed_sample  # noqa: E402
-from api.snapshot import Dashboard, clean_rows  # noqa: E402
+from api import snapshot  # noqa: E402
+from api.snapshot import Dashboard, clean_rows, resolve_workspace, update_settings, validate_workspace_path  # noqa: E402
 
 
 class SampleWorkspaceTests(unittest.TestCase):
@@ -106,6 +109,78 @@ class CleanApiTests(unittest.TestCase):
         self.assertEqual(result['clean'][0]['full_name'], 'Jane Sample')
 
 
+class WorkspaceSettingsTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self._env = {
+            'LEAD_RESEARCH_WORKSPACE': os.environ.get('LEAD_RESEARCH_WORKSPACE'),
+            'LEAD_RESEARCH_SAMPLE': os.environ.get('LEAD_RESEARCH_SAMPLE'),
+        }
+        os.environ.pop('LEAD_RESEARCH_WORKSPACE', None)
+        os.environ.pop('LEAD_RESEARCH_SAMPLE', None)
+        self._paths = (snapshot.SETTINGS_PATH, snapshot.DATA_DIR, snapshot.SAMPLE_DIR)
+        snapshot.DATA_DIR = self.root / 'data'
+        snapshot.SAMPLE_DIR = self.root / 'data' / 'sample-workspace'
+        snapshot.SETTINGS_PATH = self.root / 'data' / 'settings.json'
+        self.real = self.root / 'real-workspace'
+        self.real.mkdir()
+
+    def tearDown(self):
+        snapshot.SETTINGS_PATH, snapshot.DATA_DIR, snapshot.SAMPLE_DIR = self._paths
+        for key, value in self._env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self.tmp.cleanup()
+
+    def test_default_resolution_is_sample(self):
+        path, sample = resolve_workspace({})
+        self.assertTrue(sample)
+        self.assertEqual(path, snapshot.SAMPLE_DIR.resolve())
+
+    def test_explicit_sample_off_requires_a_directory(self):
+        with self.assertRaises(PolicyError) as caught:
+            resolve_workspace({'sample': False})
+        self.assertEqual(str(caught.exception), 'workspace_required')
+        missing = self.root / 'missing'
+        with self.assertRaises(PolicyError) as caught:
+            validate_workspace_path(missing)
+        self.assertEqual(str(caught.exception), 'workspace_not_found')
+        with self.assertRaises(PolicyError) as caught:
+            validate_workspace_path(str(self.real / '..' / 'escaped'))
+        self.assertEqual(str(caught.exception), 'invalid_workspace_path')
+
+    def test_real_workspace_round_trip_keeps_the_path_in_sample_mode(self):
+        saved = update_settings({'workspace': str(self.real)})
+        self.assertFalse(saved['sample'])
+        self.assertEqual(saved['workspace'], str(self.real.resolve()))
+        self.assertFalse(saved['env_locked'])
+        self.assertFalse(saved['initialized'])
+        again = update_settings({'sample': True})
+        self.assertTrue(again['sample'])
+        self.assertEqual(again['settings']['workspace'], str(self.real.resolve()))
+        path, sample = resolve_workspace(again['settings'])
+        self.assertTrue(sample)
+        self.assertEqual(path, snapshot.SAMPLE_DIR.resolve())
+
+    def test_bad_path_is_not_saved(self):
+        with self.assertRaises(PolicyError):
+            update_settings({'workspace': str(self.root / 'nope')})
+        self.assertFalse(snapshot.SETTINGS_PATH.exists())
+
+    def test_environment_workspace_overrides_saved_settings(self):
+        other = self.root / 'from-env'
+        other.mkdir()
+        os.environ['LEAD_RESEARCH_WORKSPACE'] = str(other)
+        saved = update_settings({'workspace': str(self.real)})
+        self.assertTrue(saved['env_locked'])
+        self.assertEqual(saved['workspace'], str(other.resolve()))
+        self.assertEqual(saved['settings']['workspace'], str(self.real.resolve()))
+        self.assertFalse(saved['sample'])
+
+
 class ReleaseAllowsDashboardTooling(unittest.TestCase):
     def test_package_json_is_tooling_not_contact_data(self):
         import importlib.util
@@ -120,6 +195,24 @@ class ReleaseAllowsDashboardTooling(unittest.TestCase):
             (root / 'a.py').write_text('print(1)\n')
             result = module.check(root)
             self.assertTrue(result['passed'], result)
+
+    def test_dashboard_brand_png_is_not_contact_data(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'release_check', Path(__file__).resolve().parents[1] / 'scripts' / 'release_check.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            public = root / 'dashboard' / 'public'
+            public.mkdir(parents=True)
+            (public / 'favicon-32.png').write_bytes(b'\x89PNG\r\n\x1a\n')
+            (root / 'notes.png').write_bytes(b'\x89PNG\r\n\x1a\n')
+            (root / 'a.py').write_text('print(1)\n')
+            result = module.check(root)
+            rules = {item['path']: item['rule'] for item in result['findings']}
+            self.assertNotIn('dashboard/public/favicon-32.png', rules)
+            self.assertEqual(rules.get('notes.png'), 'unexpected_binary')
 
 
 if __name__ == '__main__':

@@ -1,6 +1,10 @@
-# Lead Research dashboard
+<p>
+  <img src="public/brand/logo-light.svg" alt="Veinore" width="168" height="32" />
+</p>
 
-A Linear-style operator UI for the Lead Research Kit. It reads a private workspace through the kit’s own `Store`, `History`, `quality`, `intake`, and daily report APIs. Sample mode seeds reserved `example.org` / `.example` data so you can run the UI without a live workspace.
+# Veinore
+
+The local operator dashboard for the Lead Research Kit. It reads a private workspace through the kit’s own `Store`, `History`, `quality`, `intake`, and daily report APIs. Sample mode seeds reserved `example.org` / `.example` data so you can run the UI without a live workspace.
 
 This is a local dashboard. It does not send email, scrape private profiles, or store API keys.
 

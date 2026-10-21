@@ -1,6 +1,10 @@
-# Lead Research Kit
+<p>
+  <img src="dashboard/public/brand/logo-light.svg" alt="Veinore" width="168" height="32" />
+</p>
 
-An evidence-first Python toolkit for finding business contacts and researching their work emails without mixing guesses, public sources, and provider claims
+# Veinore
+
+Veinore is an evidence-first Python toolkit, with a local operator dashboard, for finding business contacts and researching their work emails without mixing guesses, public sources, and provider claims
 
 **Status: v0.4.0 alpha, local CLI, Python 3.11+, no runtime dependencies**
 

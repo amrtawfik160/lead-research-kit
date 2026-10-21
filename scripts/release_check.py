@@ -9,6 +9,7 @@ SKIP={'.git','__pycache__','.venv','venv','build','dist','node_modules','.next',
 PRIVATE_NAMES={'credentials.json','secrets.json','provider-state.json','research.sqlite3','providers.json'}
 PRIVATE_SUFFIXES={'.sqlite','.sqlite3','.db','.log','.p12','.pfx','.pem','.key'}
 TOOLING_JSON={'package.json','package-lock.json','tsconfig.json','components.json','jsconfig.json','.eslintrc.json'}
+BRAND_IMAGE_SUFFIXES={'.png','.ico','.webp','.svg'}
 EMAIL=re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+)")
 RESERVED=('example.com','example.org','example.net','example','test','invalid','localhost')
 PATTERNS={
@@ -30,6 +31,7 @@ def check(root):
   example='examples' in rel.parts
   if name in PRIVATE_NAMES and not example or p.suffix in PRIVATE_SUFFIXES or name.endswith(('-wal','-shm')) or (name.startswith('.env') and name!='.env.example'):
    findings.append({'path':str(rel),'rule':'private_runtime_file'});continue
+  if len(rel.parts)>=3 and rel.parts[0]=='dashboard' and rel.parts[1]=='public' and p.suffix.lower() in BRAND_IMAGE_SUFFIXES:continue
   if p.suffix in {'.csv','.json','.jsonl'} and not example:
    tooling=name in TOOLING_JSON or (name.startswith('tsconfig') and name.endswith('.json'))
    if not tooling:

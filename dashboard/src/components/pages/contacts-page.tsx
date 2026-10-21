@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
-import { display } from "@/lib/format";
+import { display, explainError } from "@/lib/format";
 import type { ContactsPayload } from "@/lib/load";
 import type { Contact, ContactDetail } from "@/lib/types";
 
@@ -23,15 +23,32 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
 
   async function open(contact: Contact) {
     setSelected(contact);
-    setDetail(await api.contact(contact.id));
+    try {
+      setDetail(await api.contact(contact.id));
+    } catch (error) {
+      setDetail(null);
+      toastManager.add({
+        type: "error",
+        title: "Could not open contact",
+        description: explainError(error instanceof Error ? error.message : "request_failed"),
+      });
+    }
   }
 
   async function hold() {
     if (!selected) return;
-    const next = await api.hold(selected.id, reason, "dashboard");
-    setDetail(next);
-    toastManager.add({ type: "success", title: "Contact held", description: selected.name });
-    reload();
+    try {
+      const next = await api.hold(selected.id, reason, "dashboard");
+      setDetail(next);
+      toastManager.add({ type: "success", title: "Contact held", description: selected.name });
+      reload();
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not hold contact",
+        description: explainError(error instanceof Error ? error.message : "request_failed"),
+      });
+    }
   }
 
   return (

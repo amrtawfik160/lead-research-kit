@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { explainError } from "@/lib/format";
 
 export function useQuery<T>(
   loader: () => Promise<T>,
@@ -78,8 +80,11 @@ export function QueryGate({
       <div className="p-6">
         <Alert variant="error">
           <AlertTitle>Could not read the workspace</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{explainError(error)}</AlertDescription>
         </Alert>
+        <Button size="sm" variant="outline" className="mt-3" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
       </div>
     );
   }

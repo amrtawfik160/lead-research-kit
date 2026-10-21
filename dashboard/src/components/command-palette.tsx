@@ -18,6 +18,7 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { useTheme } from "@/components/theme-provider";
 import { ALL_NAV } from "@/lib/nav";
 
 type CommandEntry = {
@@ -35,6 +36,7 @@ export function CommandPalette({
   onOpenChange: (open: boolean) => void;
 }): React.ReactElement {
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
   const groups = useMemo(() => {
     const navigate: CommandEntry[] = ALL_NAV.map((item) => ({
       value: `go:${item.href}`,
@@ -57,13 +59,19 @@ export function CommandPalette({
             label: "Workspace settings",
             run: () => router.push("/settings"),
           },
+          {
+            value: "action:theme",
+            label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
+            run: () => toggleTheme(),
+          },
         ],
       },
     ];
-  }, [router]);
+  }, [router, theme, toggleTheme]);
 
   function run(entry: CommandEntry) {
     onOpenChange(false);
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     entry.run();
   }
 
@@ -115,11 +123,13 @@ export function useCommandHotkeys(onOpen: () => void): void {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
+      const paletteOpen = document.querySelector('[data-slot="command-dialog-popup"]');
       const typing =
         target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
-          target.isContentEditable);
+          target.isContentEditable ||
+          Boolean(paletteOpen && paletteOpen.contains(target)));
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         onOpen();
