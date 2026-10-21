@@ -1,15 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { DataTable } from "@/components/data-table";
+import { DetailSheet, FieldList } from "@/components/detail-sheet";
+import { PageBody, PageHeader } from "@/components/page-header";
+import { QueryGate, useQuery } from "@/components/query-state";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { toastManager } from "@/components/ui/toast";
-import { DataTable } from "@/components/data-table";
-import { DetailSheet, FieldList } from "@/components/detail-sheet";
-import { PageHeader } from "@/components/page-header";
-import { QueryGate, useQuery } from "@/components/query-state";
-import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import { display, explainError } from "@/lib/format";
 import type { ContactsPayload } from "@/lib/load";
@@ -58,38 +58,53 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
         description="Imported workspace records. Holds stay held; LinkedIn channel is preserved."
         crumbs={[{ href: "/", label: "Overview" }, { label: "Contacts" }]}
       />
-      <QueryGate loading={loading} error={error} empty={!data}>
+      <QueryGate
+        loading={loading}
+        error={error}
+        empty={!data}
+        emptyTitle="No contacts"
+        emptyDescription="Import a list on the CLI, or rebuild the sample workspace."
+      >
         {data ? (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <PageBody className="flex min-h-0 flex-1 flex-col">
             <DataTable
               rows={data.contacts}
               rowKey={(row) => row.id}
               onRowClick={(row) => void open(row)}
               selectedKey={selected?.id}
+              emptyTitle="No contacts match"
+              emptyDescription="Clear the filter or change grouping."
               groupOptions={[
                 { value: "source_channel", label: "Channel" },
                 { value: "held", label: "Held" },
                 { value: "qualified", label: "Qualified" },
               ]}
               columns={[
-                { key: "name", header: "Name" },
-                { key: "title", header: "Title" },
-                { key: "company", header: "Company" },
-                { key: "source_channel", header: "Channel", render: (row) => <StatusBadge value={row.source_channel} /> },
+                { key: "name", header: "Name", width: "11rem" },
+                { key: "title", header: "Title", width: "11rem" },
+                { key: "company", header: "Company", width: "13rem" },
+                {
+                  key: "source_channel",
+                  header: "Channel",
+                  width: "7rem",
+                  render: (row) => <StatusBadge value={row.source_channel} />,
+                },
                 {
                   key: "qualified",
                   header: "Qualified",
+                  width: "6.5rem",
                   value: (row) => (row.qualified ? "yes" : "no"),
-                  render: (row) => <StatusBadge value={row.qualified ? "high" : "unknown"} />,
+                  render: (row) => <StatusBadge value={row.qualified ? "yes" : "no"} />,
                 },
                 {
                   key: "held",
                   header: "Held",
+                  width: "6rem",
                   value: (row) => (row.held ? "held" : "active"),
-                  render: (row) => <StatusBadge value={row.held ? "held" : "enabled"} />,
+                  render: (row) => <StatusBadge value={row.held ? "held" : "active"} />,
                 },
-                { key: "email", header: "Email" },
-                { key: "evidence_count", header: "Evidence" },
+                { key: "email", header: "Email", width: "14rem", mono: true },
+                { key: "evidence_count", header: "Evidence", width: "6rem", align: "right" },
               ]}
             />
             <DetailSheet
@@ -102,22 +117,32 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
               }}
               title={display(selected?.name)}
               description={display(selected?.id)}
-              fields={[
-                { label: "Title", value: display(detail?.contact.title || selected?.title) },
-                { label: "Company", value: display(detail?.contact.company || selected?.company) },
-                { label: "Channel", value: display(detail?.contact.source_channel) },
-                { label: "Email", value: display(detail?.contact.email) },
-                { label: "Provenance", value: display(detail?.contact.email_provenance) },
-                { label: "Hold", value: display(detail?.contact.hold_reason) },
-                { label: "Source", value: display(detail?.contact.source_url) },
+              sections={[
+                {
+                  title: "Identity",
+                  fields: [
+                    { label: "Title", value: display(detail?.contact.title || selected?.title) },
+                    { label: "Company", value: display(detail?.contact.company || selected?.company) },
+                    { label: "Channel", value: display(detail?.contact.source_channel) },
+                    { label: "Source", value: display(detail?.contact.source_url) },
+                  ],
+                },
+                {
+                  title: "Email",
+                  fields: [
+                    { label: "Email", value: display(detail?.contact.email) },
+                    { label: "Provenance", value: display(detail?.contact.email_provenance) },
+                    { label: "Hold", value: display(detail?.contact.hold_reason) },
+                  ],
+                },
               ]}
               extra={
                 detail ? (
                   <div className="space-y-4">
                     <div>
-                      <h3 className="mb-2 text-xs font-medium">Evidence</h3>
+                      <h3 className="mb-2 text-[13.5px] font-semibold">Evidence</h3>
                       {detail.evidence.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">None recorded.</p>
+                        <p className="text-[12px] text-muted-foreground">None recorded.</p>
                       ) : (
                         detail.evidence.map((item) => (
                           <FieldList
@@ -133,12 +158,12 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
                       )}
                     </div>
                     <div>
-                      <h3 className="mb-2 text-xs font-medium">Candidates</h3>
+                      <h3 className="mb-2 text-[13.5px] font-semibold">Candidates</h3>
                       {detail.candidates.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">None.</p>
+                        <p className="text-[12px] text-muted-foreground">None.</p>
                       ) : (
                         detail.candidates.map((item) => (
-                          <p key={String(item.id)} className="text-xs">
+                          <p key={String(item.id)} className="text-[12px]">
                             {display(item.email)} · {display(item.kind)}
                           </p>
                         ))
@@ -161,7 +186,7 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
                 ) : undefined
               }
             />
-          </div>
+          </PageBody>
         ) : null}
       </QueryGate>
     </>

@@ -1,155 +1,305 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { ArrowUpRight, Calendar, CircleCheck, CircleDashed, ClockAlert, FolderKanban } from "lucide-react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardPanel, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { PageHeader } from "@/components/page-header";
+import { EntityAvatar } from "@/components/entity-avatar";
+import { LabelChip } from "@/components/label-chip";
+import { PageBody, PageHeader } from "@/components/page-header";
+import { Panel, PanelHeader, SegTabs } from "@/components/panel";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
+import { PriorityGlyph, StatusGlyph } from "@/components/status-glyph";
+import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { display } from "@/lib/format";
-import type { Overview } from "@/lib/types";
+import { greeting, issueKey, longDate } from "@/lib/gr8r";
+import type { LeadRow, Overview } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export function OverviewPage({ initial = null }: { initial?: Overview | null }): React.ReactElement {
   const { data, error, loading } = useQuery(() => api.overview(), [], initial);
+  const [leads, setLeads] = useState<LeadRow[] | null>(null);
+  const [tab, setTab] = useState<"upcoming" | "overdue" | "completed">("upcoming");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .leads()
+      .then((payload) => {
+        if (!cancelled) setLeads(payload.leads);
+      })
+      .catch(() => {
+        if (!cancelled) setLeads([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const delivered = data?.latest_daily?.delivered ?? 0;
   const target = data?.latest_daily?.target ?? 0;
-  const pct = target ? Math.min(100, Math.round((delivered / target) * 100)) : 0;
+  const held = data?.status.held ?? 0;
+
+  const lists = {
+    upcoming: (leads || []).filter((row) => String(row["Email Risk"] || "").toLowerCase() === "low"),
+    overdue: (leads || []).filter((row) => /high|medium/.test(String(row["Email Risk"] || "").toLowerCase())),
+    completed: (leads || []).filter((row) => String(row.Source || "").toLowerCase().includes("website")),
+  };
 
   return (
     <>
-      <PageHeader
-        title="Overview"
-        description="Today's delivery, ledger health, and what the kit says to do next."
-        crumbs={[{ label: "Overview" }]}
-        actions={
-          <Button size="sm" variant="outline" render={<Link href="/daily" />}>
-            Open daily
-          </Button>
-        }
-      />
-      <QueryGate loading={loading} error={error} empty={!data}>
+      <QueryGate loading={loading} error={error} empty={!data} skeleton="cards">
         {data ? (
-          <div className="flex flex-col gap-4 p-4 sm:p-6">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <PageBody className="mx-auto w-full max-w-[1160px] px-6 pb-16">
+            <PageHeader
+              title={`${greeting()}`}
+              description={`${longDate()} · Here's what's happening across your workspace.`}
+              actions={
+                <>
+                  <Button size="sm" variant="outline" className="h-[26px] rounded-[6px] text-[12px]" render={<Link href="/contacts" />}>
+                    Contacts
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-[26px] rounded-[6px] text-[12px]" render={<Link href="/quality" />}>
+                    Clean list
+                  </Button>
+                  <Button size="sm" className="h-[26px] rounded-[6px] text-[12px]" render={<Link href="/daily" />}>
+                    Open inbox
+                  </Button>
+                </>
+              }
+            />
+            <div className="mb-4 grid grid-cols-2 overflow-hidden rounded-[10px] border sm:grid-cols-4">
               <Stat
+                href="/daily"
+                icon={FolderKanban}
                 label="Delivered"
-                value={`${delivered} / ${target || "—"}`}
-                hint={data.latest_daily?.date || "No daily file yet"}
+                value={`${delivered}`}
+                hint={target ? `${target} target` : "No daily file yet"}
               />
               <Stat
-                label="Contacts"
+                href="/contacts"
+                icon={CircleDashed}
+                label="Open contacts"
                 value={String(data.status.contacts)}
-                hint={`${data.status.held} held · ${data.research_queue_count} in research queue`}
+                hint={`${held} held · ${data.research_queue_count} in research`}
               />
               <Stat
-                label="Domain backlog"
-                value={String(data.history.domains_uncrawled ?? 0)}
-                hint={`${data.history.domains_known ?? 0} known · ${data.history.sites_stored ?? 0} crawled`}
-              />
-              <Stat
-                label="Audit chain"
+                href="/quality"
+                icon={CircleCheck}
+                label="Audit"
                 value={data.status.audit_ok ? "Intact" : "Broken"}
                 hint={data.meta.sample ? "Sample workspace" : data.meta.workspace}
+                tone={data.status.audit_ok ? "ok" : "bad"}
+              />
+              <Stat
+                href="/history"
+                icon={ClockAlert}
+                label="Domain backlog"
+                value={String(data.history.domains_uncrawled ?? 0)}
+                hint={`${data.history.domains_known ?? 0} known`}
+                tone={(data.history.domains_uncrawled ?? 0) > 0 ? "bad" : undefined}
               />
             </div>
-            <Card>
-              <CardHeader>
-                <CardTitle>Latest daily run</CardTitle>
-                <CardDescription>
-                  {data.latest_daily
-                    ? `${data.latest_daily.date} · ${data.latest_daily.execute ? "executed" : "preview"}`
-                    : "No daily/<date> folder yet"}
-                </CardDescription>
-              </CardHeader>
-              <CardPanel className="flex flex-col gap-3">
-                <Progress value={pct} />
-                <div className="flex flex-wrap gap-2 text-xs">
-                  {Object.entries(data.report?.delivered_by_source || {}).map(([key, count]) => (
-                    <span key={key} className="rounded-md border px-2 py-1">
-                      {key} {count}
-                    </span>
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+              <div className="flex flex-col gap-4">
+                <Panel>
+                  <PanelHeader
+                    title="My tasks"
+                    actions={
+                      <>
+                        <SegTabs
+                          value={tab}
+                          onChange={setTab}
+                          items={[
+                            { value: "upcoming", label: "Upcoming", count: lists.upcoming.length },
+                            { value: "overdue", label: "Overdue", count: lists.overdue.length },
+                            { value: "completed", label: "Completed", count: lists.completed.length },
+                          ]}
+                        />
+                        <Button size="icon-xs" variant="ghost" render={<Link href="/leads" />} aria-label="Open My Tasks">
+                          <ArrowUpRight />
+                        </Button>
+                      </>
+                    }
+                  />
+                  {(lists[tab].length ? lists[tab].slice(0, 6) : []).map((row, index) => (
+                    <MiniTask key={`${row.Email}-${index}`} row={row} index={index} />
                   ))}
-                  {Object.entries(data.report?.delivered_by_risk || {}).map(([key, count]) => (
-                    <StatusBadge key={key} value={`${key || "none"} ${count}`} />
-                  ))}
-                </div>
-              </CardPanel>
-            </Card>
-            {data.advice.length ? (
-              <Alert variant="info">
-                <AlertTitle>Shortfall advice</AlertTitle>
-                <AlertDescription>
-                  <ul className="mt-2 list-disc space-y-1 ps-4">
-                    {data.advice.map((tip) => (
-                      <li key={tip}>{tip}</li>
+                  {lists[tab].length === 0 ? (
+                    <p className="px-3.5 pb-3.5 text-[12.5px] text-muted-foreground">No leads in this view.</p>
+                  ) : null}
+                </Panel>
+                <Panel>
+                  <PanelHeader
+                    title="Project progress"
+                    actions={
+                      <Button size="sm" variant="ghost" className="h-[26px] text-[12px]" render={<Link href="/providers" />}>
+                        All providers
+                      </Button>
+                    }
+                  />
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[560px] text-[13px]">
+                      <thead>
+                        <tr className="border-t text-left text-[12px] font-medium text-muted-foreground">
+                          <th className="px-3.5 py-2 font-medium">Provider</th>
+                          <th className="py-2 font-medium">Status</th>
+                          <th className="py-2 font-medium">Key</th>
+                          <th className="px-3.5 py-2 text-right font-medium">Pools</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.values(data.status.providers)
+                          .slice(0, 6)
+                          .map((provider) => (
+                            <tr key={provider.id} className="border-t">
+                              <td className="px-3.5 py-2.5">
+                                <LabelChip value={provider.id} />
+                              </td>
+                              <td className="py-2.5">
+                                <StatusBadge value={provider.paused ? "paused" : provider.enabled ? "enabled" : "off"} />
+                              </td>
+                              <td className="py-2.5">
+                                <StatusBadge value={provider.key_present ? "present" : "missing"} />
+                              </td>
+                              <td className="px-3.5 py-2.5 text-right font-mono text-[12px] tabular-nums text-muted-foreground">
+                                {provider.budgets.length || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Panel>
+              </div>
+              <div className="flex flex-col gap-4">
+                <Panel>
+                  <PanelHeader
+                    title="Upcoming deadlines"
+                    actions={
+                      <Button size="sm" variant="ghost" className="h-[26px] text-[12px]" render={<Link href="/daily" />}>
+                        <Calendar className="size-3.5" />
+                        Daily
+                      </Button>
+                    }
+                  />
+                  <div className="px-3.5 pb-3">
+                    <DeadlineGroup label="This run" count={data.report?.this_run} />
+                    <div className="flex h-[30px] items-center gap-2 text-[13px]">
+                      <span className="size-2 rounded-[3px] bg-[#3570c4]" />
+                      <span className="min-w-0 flex-1 truncate">{data.latest_daily?.date || "No daily file"}</span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {delivered}/{target || "—"}
+                      </span>
+                    </div>
+                    <DeadlineGroup label="Advice" count={data.advice.length} />
+                    {data.advice.slice(0, 4).map((tip) => (
+                      <div key={tip} className="flex min-h-[30px] items-center gap-2 text-[13px]">
+                        <span className="size-2 rounded-[3px] bg-[#8f5e0e]" />
+                        <span className="min-w-0 flex-1 truncate">{tip}</span>
+                      </div>
                     ))}
-                  </ul>
-                </AlertDescription>
-              </Alert>
-            ) : null}
-            <div className="grid gap-3 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Unresolved attempts</CardTitle>
-                  <CardDescription>Reserved, sent, pending, or uncertain ledger rows</CardDescription>
-                </CardHeader>
-                <CardPanel>
-                  {data.status.unresolved_attempts.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">None. Resume is only for saved GET-pollable jobs.</p>
-                  ) : (
-                    <ul className="space-y-2 text-xs">
-                      {data.status.unresolved_attempts.map((attempt) => (
-                        <li key={attempt.id} className="flex items-center justify-between gap-2">
-                          <span className="truncate font-mono">{attempt.id.slice(0, 10)}</span>
-                          <span>{attempt.provider}</span>
+                  </div>
+                </Panel>
+                <Panel>
+                  <PanelHeader
+                    title="Recent activity"
+                    actions={
+                      <Button size="sm" variant="ghost" className="h-[26px] text-[12px]" render={<Link href="/jobs" />}>
+                        View all
+                      </Button>
+                    }
+                  />
+                  <div className="px-3.5 pb-3">
+                    {data.status.unresolved_attempts.length === 0 ? (
+                      <p className="py-2 text-[12.5px] text-muted-foreground">
+                        No unresolved attempts. Resume is only for saved GET-pollable jobs.
+                      </p>
+                    ) : (
+                      data.status.unresolved_attempts.map((attempt) => (
+                        <div key={attempt.id} className="flex min-h-[38px] items-center gap-2.5 border-t first:border-t-0">
+                          <EntityAvatar name={attempt.provider} size={22} />
+                          <div className="min-w-0 flex-1 text-[13px]">
+                            <span className="font-medium">{attempt.provider}</span>{" "}
+                            <span className="text-muted-foreground">{attempt.operation}</span>
+                          </div>
                           <StatusBadge value={attempt.state} />
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </CardPanel>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Budgets</CardTitle>
-                  <CardDescription>Confirmed free pools only — keys stay in the environment</CardDescription>
-                </CardHeader>
-                <CardPanel>
-                  {data.status.budgets.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No attested pools. Use `budget confirm` on the CLI.</p>
-                  ) : (
-                    <ul className="space-y-2 text-xs">
-                      {data.status.budgets.map((budget) => (
-                        <li key={`${budget.provider}-${budget.pool}`} className="flex justify-between gap-2">
-                          <span>
-                            {budget.provider}.{budget.pool}
-                          </span>
-                          <span className="font-mono">{display(budget.remaining)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </CardPanel>
-              </Card>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </Panel>
+              </div>
             </div>
-          </div>
+          </PageBody>
         ) : null}
       </QueryGate>
     </>
   );
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint: string }): React.ReactElement {
+function DeadlineGroup({ label, count }: { label: string; count?: number }): React.ReactElement {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardDescription>{label}</CardDescription>
-        <CardTitle className="text-2xl font-medium tracking-tight">{value}</CardTitle>
-      </CardHeader>
-      <CardPanel className="pt-0 text-xs text-muted-foreground">{hint}</CardPanel>
-    </Card>
+    <div className="mb-1 mt-1 flex items-center gap-1.5 text-[11.5px] font-semibold text-[#57544e] dark:text-[#b5b2ab]">
+      {label}
+      <span className="font-medium text-muted-foreground">{count ?? 0}</span>
+    </div>
+  );
+}
+
+function MiniTask({ row, index }: { row: LeadRow; index: number }): React.ReactElement {
+  return (
+    <Link
+      href="/leads"
+      className="flex min-h-[38px] items-center gap-2.5 border-t px-3.5 text-[13.5px] transition-colors hover:bg-[#f6f5f2] dark:hover:bg-[#252524]"
+    >
+      <StatusGlyph value={row["Email Risk"]} />
+      <span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground">{issueKey("LEA", index)}</span>
+      <span className="min-w-0 flex-1 truncate">{display(row["Full Name"])}</span>
+      <LabelChip value={row.Company} className="hidden max-w-[140px] sm:inline-flex" />
+      <PriorityGlyph value={row.Tier} />
+      <span className="w-14 truncate text-right text-[12px] text-muted-foreground">{display(row.City)}</span>
+    </Link>
+  );
+}
+
+function Stat({
+  href,
+  icon: Icon,
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  href: string;
+  icon: typeof FolderKanban;
+  label: string;
+  value: string;
+  hint: string;
+  tone?: "ok" | "bad";
+}): React.ReactElement {
+  return (
+    <Link
+      href={href}
+      className="flex flex-col gap-1.5 border-l px-4 py-3.5 first:border-l-0 transition-colors hover:bg-[#f6f5f2] dark:hover:bg-[#252524] sm:first:border-l-0"
+    >
+      <span className="inline-flex items-center gap-1.5 text-[12.5px] text-[#57544e] dark:text-[#b5b2ab]">
+        <Icon className="size-3.5" />
+        {label}
+      </span>
+      <span
+        className={cn(
+          "text-[22px] font-semibold tracking-[-0.02em] tabular-nums leading-none",
+          tone === "ok" && "text-success-foreground",
+          tone === "bad" && "text-destructive-foreground",
+        )}
+      >
+        {value}
+      </span>
+      <span className={cn("text-[12px] text-muted-foreground", tone === "ok" && "text-success-foreground", tone === "bad" && "text-destructive-foreground")}>
+        {hint}
+      </span>
+    </Link>
   );
 }

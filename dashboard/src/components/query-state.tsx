@@ -1,11 +1,17 @@
 "use client";
 
+import { Inbox } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
 import { explainError } from "@/lib/format";
 
 export function useQuery<T>(
@@ -48,12 +54,47 @@ export function useQuery<T>(
   return { data, error, loading, reload: () => setTick((n) => n + 1) };
 }
 
+function TableSkeleton(): React.ReactElement {
+  return (
+    <div className="flex flex-col gap-3 p-4 sm:p-6">
+      <div className="flex items-center justify-between gap-3">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-8 w-36" />
+      </div>
+      <div className="overflow-hidden rounded-lg border">
+        <Skeleton className="h-8 w-full rounded-none" />
+        {Array.from({ length: 8 }, (_, index) => (
+          <Skeleton key={index} className="mt-px h-9 w-full rounded-none opacity-80" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CardsSkeleton(): React.ReactElement {
+  return (
+    <div className="flex flex-col gap-4 p-4 sm:p-6">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <Skeleton key={index} className="h-[5.5rem] w-full rounded-xl" />
+        ))}
+      </div>
+      <Skeleton className="h-36 w-full rounded-xl" />
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Skeleton className="h-40 w-full rounded-xl" />
+        <Skeleton className="h-40 w-full rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
 export function QueryGate({
   loading,
   error,
   empty,
   emptyTitle = "Nothing here yet",
   emptyDescription = "Point the dashboard at a workspace or keep sample mode on.",
+  skeleton = "table",
   children,
 }: {
   loading: boolean;
@@ -61,19 +102,21 @@ export function QueryGate({
   empty?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
+  skeleton?: "table" | "cards" | "form";
   children: React.ReactNode;
 }): React.ReactElement {
   if (loading) {
-    return (
-      <div className="flex flex-col gap-3 p-6">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Spinner />
-          Loading workspace
+    if (skeleton === "cards") return <CardsSkeleton />;
+    if (skeleton === "form") {
+      return (
+        <div className="flex max-w-xl flex-col gap-3 p-4 sm:p-6">
+          <Skeleton className="h-16 w-full" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-10 w-48" />
         </div>
-        <Skeleton className="h-16 w-full" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    );
+      );
+    }
+    return <TableSkeleton />;
   }
   if (error) {
     return (
@@ -90,9 +133,12 @@ export function QueryGate({
   }
   if (empty) {
     return (
-      <Empty>
+      <Empty className="py-16">
         <EmptyHeader>
-          <EmptyTitle>{emptyTitle}</EmptyTitle>
+          <EmptyMedia variant="icon">
+            <Inbox />
+          </EmptyMedia>
+          <EmptyTitle className="text-base font-medium">{emptyTitle}</EmptyTitle>
           <EmptyDescription>{emptyDescription}</EmptyDescription>
         </EmptyHeader>
       </Empty>

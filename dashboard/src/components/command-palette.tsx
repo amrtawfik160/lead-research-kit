@@ -1,5 +1,6 @@
 "use client";
 
+import { Moon, Settings, ShieldCheck, Sun } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef } from "react";
 import {
@@ -20,11 +21,13 @@ import {
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { useTheme } from "@/components/theme-provider";
 import { ALL_NAV } from "@/lib/nav";
+import type { LucideIcon } from "lucide-react";
 
 type CommandEntry = {
   value: string;
   label: string;
   shortcut?: string;
+  icon?: LucideIcon;
   run: () => void;
 };
 
@@ -42,9 +45,29 @@ export function CommandPalette({
       value: `go:${item.href}`,
       label: `Go to ${item.label}`,
       shortcut: item.shortcut,
+      icon: item.icon,
       run: () => router.push(item.href),
     }));
     return [
+      {
+        value: "Suggestions",
+        items: [
+          {
+            value: "action:inbox",
+            label: "Open inbox",
+            shortcut: "G D",
+            icon: ALL_NAV.find((item) => item.href === "/daily")?.icon,
+            run: () => router.push("/daily"),
+          },
+          {
+            value: "action:tasks",
+            label: "Open my tasks",
+            shortcut: "G L",
+            icon: ALL_NAV.find((item) => item.href === "/leads")?.icon,
+            run: () => router.push("/leads"),
+          },
+        ],
+      },
       { value: "Navigate", items: navigate },
       {
         value: "Actions",
@@ -52,16 +75,19 @@ export function CommandPalette({
           {
             value: "action:quality",
             label: "Clean a lead list",
+            icon: ShieldCheck,
             run: () => router.push("/quality"),
           },
           {
             value: "action:settings",
             label: "Workspace settings",
+            icon: Settings,
             run: () => router.push("/settings"),
           },
           {
             value: "action:theme",
             label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
+            icon: theme === "dark" ? Sun : Moon,
             run: () => toggleTheme(),
           },
         ],
@@ -77,7 +103,7 @@ export function CommandPalette({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandDialogPopup>
+      <CommandDialogPopup className="max-h-[min(36rem,82vh)]">
         <Command items={groups}>
           <CommandInput placeholder="Type a command or search…" />
           <CommandEmpty>No commands found.</CommandEmpty>
@@ -85,10 +111,13 @@ export function CommandPalette({
             {(group: { value: string; items: CommandEntry[] }, index: number) => (
               <div key={group.value}>
                 <CommandGroup items={group.items}>
-                  <CommandGroupLabel>{group.value}</CommandGroupLabel>
+                  <CommandGroupLabel className="px-2 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+                    {group.value}
+                  </CommandGroupLabel>
                   <CommandCollection>
                     {(item: CommandEntry) => (
                       <CommandItem key={item.value} value={item} onClick={() => run(item)}>
+                        {item.icon ? <item.icon className="size-4 text-muted-foreground" /> : null}
                         {item.label}
                         {item.shortcut ? <CommandShortcut>{item.shortcut}</CommandShortcut> : null}
                       </CommandItem>
@@ -100,15 +129,21 @@ export function CommandPalette({
             )}
           </CommandList>
         </Command>
-        <CommandFooter>
+        <CommandFooter className="text-[11px] text-muted-foreground">
+          <KbdGroup>
+            <Kbd>↑</Kbd>
+            <Kbd>↓</Kbd>
+            <span>navigate</span>
+          </KbdGroup>
           <KbdGroup>
             <Kbd>↵</Kbd>
-            <span>to open</span>
+            <span>select</span>
           </KbdGroup>
           <KbdGroup>
             <Kbd>esc</Kbd>
-            <span>to close</span>
+            <span>close</span>
           </KbdGroup>
+          <span className="ms-auto">veinore</span>
         </CommandFooter>
       </CommandDialogPopup>
     </CommandDialog>
@@ -133,6 +168,9 @@ export function useCommandHotkeys(onOpen: () => void): void {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         onOpen();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
         return;
       }
       if (typing) return;

@@ -1,62 +1,88 @@
 "use client";
 
-import { useState } from "react";
-import { DataTable } from "@/components/data-table";
+import { useMemo, useState } from "react";
 import { DetailSheet } from "@/components/detail-sheet";
-import { PageHeader } from "@/components/page-header";
+import { IssueList, type IssueItem } from "@/components/issue-list";
+import { PageBody, PageHeader } from "@/components/page-header";
+import { SegTabs } from "@/components/panel";
 import { QueryGate, useQuery } from "@/components/query-state";
-import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import { display } from "@/lib/format";
+import { issueKey } from "@/lib/gr8r";
+import { leadFieldSections } from "@/lib/lead-fields";
 import type { DailyPayload, LeadRow } from "@/lib/types";
+
+function toIssue(row: LeadRow, index: number): IssueItem<LeadRow> {
+  const risk = String(row["Email Risk"] || "");
+  return {
+    id: issueKey("LEA", index),
+    title: display(row["Full Name"]),
+    project: display(row.Company),
+    status: display(row.Source),
+    priority: display(row.Tier || row.Confidence),
+    due: display(row.City),
+    avatar: display(row.Company),
+    group: display(row.Source),
+    done: risk.toLowerCase() === "low" && String(row.Source || "").toLowerCase().includes("website"),
+    raw: row,
+  };
+}
 
 export function LeadsPage({ initial = null }: { initial?: DailyPayload | null }): React.ReactElement {
   const { data, error, loading } = useQuery(() => api.leads(), [], initial);
   const [lead, setLead] = useState<LeadRow | null>(null);
+  const [tab, setTab] = useState<"all" | "website" | "finder" | "review">("all");
+
+  const issues = useMemo(() => (data?.leads || []).map(toIssue), [data]);
+  const visible = useMemo(() => {
+    if (tab === "website") return issues.filter((item) => String(item.status).toLowerCase().includes("website"));
+    if (tab === "finder") return issues.filter((item) => String(item.status).toLowerCase().includes("finder"));
+    if (tab === "review") return issues.filter((item) => /high|medium|review/.test(String(item.raw["Email Risk"] || "").toLowerCase()));
+    return issues;
+  }, [issues, tab]);
 
   return (
     <>
       <PageHeader
-        title="Leads"
-        description="The latest daily file: the 6 clean columns plus city, type, source, confidence and risk."
-        crumbs={[{ href: "/", label: "Overview" }, { label: "Leads" }]}
+        title="My Tasks"
+        description={`${data?.leads.length ?? 0} delivered · latest daily file`}
+        actions={
+          <SegTabs
+            value={tab}
+            onChange={setTab}
+            items={[
+              { value: "all", label: "All", count: issues.length },
+              { value: "website", label: "Website" },
+              { value: "finder", label: "Finder" },
+              { value: "review", label: "Review" },
+            ]}
+          />
+        }
       />
-      <QueryGate loading={loading} error={error} empty={!data}>
+      <QueryGate
+        loading={loading}
+        error={error}
+        empty={!data}
+        emptyTitle="No delivered leads"
+        emptyDescription="Run a daily execute, or open the sample workspace in Settings."
+      >
         {data ? (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <DataTable
-              rows={data.leads}
-              rowKey={(row) => `${row["Full Name"]}-${row.Email}-${row["Company Website"]}`}
-              onRowClick={setLead}
-              groupOptions={[
-                { value: "Source", label: "Source" },
-                { value: "Company Type", label: "Company type" },
-                { value: "Email Risk", label: "Email risk" },
-                { value: "Tier", label: "Tier" },
-              ]}
-              columns={[
-                { key: "Full Name", header: "Name" },
-                { key: "Title", header: "Title" },
-                { key: "Company", header: "Company" },
-                { key: "Company Website", header: "Website" },
-                { key: "Email", header: "Email" },
-                { key: "Company Type", header: "Type" },
-                { key: "Source", header: "Source", render: (row) => <StatusBadge value={row.Source} /> },
-                { key: "Email Risk", header: "Risk", render: (row) => <StatusBadge value={row["Email Risk"]} /> },
-                { key: "Tier", header: "Tier", render: (row) => <StatusBadge value={row.Tier} /> },
-              ]}
+          <PageBody className="flex min-h-0 flex-1 flex-col">
+            <IssueList
+              items={visible}
+              selectedId={lead ? issues.find((item) => item.raw === lead)?.id : undefined}
+              onSelect={(item) => setLead(item.raw)}
+              emptyTitle="No leads match"
+              emptyDescription="Clear the filter or change grouping."
             />
             <DetailSheet
               open={Boolean(lead)}
               onOpenChange={(open) => !open && setLead(null)}
               title={display(lead?.["Full Name"])}
               description={`${display(lead?.Title)} · ${display(lead?.Company)}`}
-              fields={Object.entries(lead || {}).map(([label, value]) => ({
-                label,
-                value: display(value),
-              }))}
+              sections={leadFieldSections(lead)}
             />
-          </div>
+          </PageBody>
         ) : null}
       </QueryGate>
     </>

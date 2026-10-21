@@ -1,12 +1,14 @@
 "use client";
 
-import { ChevronDown, ChevronUp, ChevronsUpDown } from "lucide-react";
+import { ChevronDown, ChevronUp, ChevronsUpDown, Inbox, Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { CellText } from "@/components/cell-text";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
   EmptyDescription,
   EmptyHeader,
+  EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
@@ -27,11 +29,14 @@ import {
 } from "@/components/ui/table";
 import { Toolbar, ToolbarButton, ToolbarGroup, ToolbarSeparator } from "@/components/ui/toolbar";
 import { display, text } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 export type Column<T> = {
   key: string;
   header: string;
   width?: string;
+  align?: "left" | "right";
+  mono?: boolean;
   render?: (row: T) => React.ReactNode;
   value?: (row: T) => unknown;
 };
@@ -66,6 +71,7 @@ export function DataTable<T extends object>({
   onRowClick,
   selectedKey,
   rowKey,
+  defaultSort = null,
   emptyTitle = "No rows",
   emptyDescription = "Nothing matches the current filters.",
 }: {
@@ -76,12 +82,13 @@ export function DataTable<T extends object>({
   onRowClick?: (row: T) => void;
   selectedKey?: string;
   rowKey: (row: T) => string;
+  defaultSort?: SortState;
   emptyTitle?: string;
   emptyDescription?: string;
 }): React.ReactElement {
   const [query, setQuery] = useState("");
   const [groupBy, setGroupBy] = useState("none");
-  const [sort, setSort] = useState<SortState>(null);
+  const [sort, setSort] = useState<SortState>(defaultSort);
   const [page, setPage] = useState(0);
 
   const filtered = useMemo(() => {
@@ -170,18 +177,22 @@ export function DataTable<T extends object>({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Toolbar className="h-auto w-full flex-wrap justify-between gap-2 border-b px-3 py-2">
+      <Toolbar className="h-auto w-full flex-wrap justify-between gap-2 border-b px-6 py-2">
         <ToolbarGroup className="min-w-0 flex-1">
-          <Input
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setPage(0);
-            }}
-            placeholder="Filter…"
-            size="sm"
-            aria-label="Filter rows"
-          />
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(0);
+              }}
+              placeholder="Filter…"
+              size="sm"
+              aria-label="Filter rows"
+              className="ps-7"
+            />
+          </div>
         </ToolbarGroup>
         {groupOptions.length ? (
           <>
@@ -215,7 +226,7 @@ export function DataTable<T extends object>({
         ) : null}
         <ToolbarSeparator />
         <ToolbarGroup>
-          <span className="px-1 text-xs text-muted-foreground">
+          <span className="px-1 text-[11px] tabular-nums text-muted-foreground">
             {filtered.length} {filtered.length === 1 ? "row" : "rows"}
           </span>
         </ToolbarGroup>
@@ -223,27 +234,34 @@ export function DataTable<T extends object>({
       {filtered.length === 0 ? (
         <Empty className="py-16">
           <EmptyHeader>
-            <EmptyTitle>{emptyTitle}</EmptyTitle>
+            <EmptyMedia variant="icon">
+              <Inbox />
+            </EmptyMedia>
+            <EmptyTitle className="text-base font-medium">{emptyTitle}</EmptyTitle>
             <EmptyDescription>{emptyDescription}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           <Table>
-            <TableHeader>
-              <TableRow>
+            <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm">
+              <TableRow className="hover:bg-transparent">
                 {columns.map((column) => {
                   const active = sort?.key === column.key ? sort.dir : null;
                   return (
                     <TableHead
                       key={column.key}
-                      style={column.width ? { width: column.width } : undefined}
+                      style={column.width ? { width: column.width, maxWidth: column.width } : undefined}
                       aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"}
+                      className={cn("h-8 px-2 text-[12px]", column.align === "right" && "text-right")}
                     >
                       <Button
                         size="xs"
                         variant="ghost"
-                        className="-ms-1 h-6 px-1 text-muted-foreground"
+                        className={cn(
+                          "-ms-1 h-6 px-1 text-[11px] font-medium text-muted-foreground hover:text-foreground",
+                          column.align === "right" && "ms-auto -me-1",
+                        )}
                         onClick={() => toggleSort(column.key)}
                         aria-label={`Sort by ${column.header}`}
                       >
@@ -253,7 +271,7 @@ export function DataTable<T extends object>({
                         ) : active === "desc" ? (
                           <ChevronDown />
                         ) : (
-                          <ChevronsUpDown className="opacity-40" />
+                          <ChevronsUpDown className="opacity-35" />
                         )}
                       </Button>
                     </TableHead>
@@ -278,9 +296,9 @@ export function DataTable<T extends object>({
         </div>
       )}
       {pages > 1 ? (
-        <Toolbar className="h-auto w-full justify-between gap-2 rounded-none border-x-0 border-b-0 px-3 py-2">
+        <Toolbar className="h-auto w-full justify-between gap-2 rounded-none border-x-0 border-b-0 px-3 py-1.5">
           <ToolbarGroup>
-            <span className="px-1 text-xs text-muted-foreground">
+            <span className="px-1 text-[11px] tabular-nums text-muted-foreground">
               Page {current + 1} of {pages}
             </span>
           </ToolbarGroup>
@@ -324,8 +342,11 @@ function GroupRows<T extends object>({
   return (
     <>
       {group.key ? (
-        <TableRow>
-          <TableCell colSpan={colSpan} className="bg-muted/40 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+        <TableRow className="hover:bg-transparent">
+          <TableCell
+            colSpan={colSpan}
+            className="bg-transparent py-2 text-[12.5px] font-semibold text-foreground"
+          >
             {group.key} · {group.total}
           </TableCell>
         </TableRow>
@@ -336,14 +357,34 @@ function GroupRows<T extends object>({
           <TableRow
             key={key}
             data-state={selectedKey === key ? "selected" : undefined}
-            className={onRowClick ? "cursor-pointer" : undefined}
+            tabIndex={onRowClick ? 0 : undefined}
+            className={cn(
+              onRowClick &&
+                "cursor-pointer transition-colors focus-visible:bg-accent/60 focus-visible:outline-none",
+            )}
             onClick={onRowClick ? () => onRowClick(row) : undefined}
+            onKeyDown={
+              onRowClick
+                ? (event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onRowClick(row);
+                    }
+                  }
+                : undefined
+            }
           >
             {columns.map((column) => (
-              <TableCell key={column.key} className="text-xs">
-                {column.render
-                  ? column.render(row)
-                  : display(cellValue(row, column, column.key))}
+              <TableCell
+                key={column.key}
+                style={column.width ? { width: column.width, maxWidth: column.width } : undefined}
+                className={cn("h-10 px-2 py-0 text-[13.5px]", column.align === "right" && "text-right")}
+              >
+                {column.render ? (
+                  column.render(row)
+                ) : (
+                  <CellText value={cellValue(row, column, column.key)} mono={column.mono} />
+                )}
               </TableCell>
             ))}
           </TableRow>

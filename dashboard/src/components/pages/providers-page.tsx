@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Switch } from "@/components/ui/switch";
-import { toastManager } from "@/components/ui/toast";
+import { CellText } from "@/components/cell-text";
 import { DataTable } from "@/components/data-table";
 import { DetailSheet } from "@/components/detail-sheet";
-import { PageHeader } from "@/components/page-header";
+import { PageBody, PageHeader } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { StatusBadge } from "@/components/status-badge";
+import { Switch } from "@/components/ui/switch";
+import { toastManager } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { display, explainError } from "@/lib/format";
 import type { ProvidersPayload } from "@/lib/load";
@@ -44,23 +45,27 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
       />
       <QueryGate loading={loading} error={error} empty={!data}>
         {data ? (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <PageBody className="flex min-h-0 flex-1 flex-col">
             <DataTable
               rows={data.providers}
               rowKey={(item) => item.id}
               onRowClick={setRow}
               selectedKey={row?.id}
+              defaultSort={{ key: "enabled", dir: "desc" }}
+              emptyTitle="No providers"
+              emptyDescription="The kit registry did not load."
               groupOptions={[
                 { value: "enabled", label: "Enabled" },
                 { value: "paused", label: "Paused" },
                 { value: "key_present", label: "Key present" },
               ]}
               columns={[
-                { key: "id", header: "Provider" },
+                { key: "id", header: "Provider", width: "11rem", mono: true },
                 {
                   key: "enabled",
                   header: "Enabled",
-                  value: (item) => (item.enabled ? "enabled" : "off"),
+                  width: "6.5rem",
+                  value: (item) => (item.enabled ? 1 : 0),
                   render: (item) => (
                     <Switch
                       checked={item.enabled}
@@ -72,12 +77,14 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
                 {
                   key: "key_present",
                   header: "Key",
+                  width: "6.5rem",
                   value: (item) => (item.key_present ? "present" : "missing"),
                   render: (item) => <StatusBadge value={item.key_present ? "present" : "missing"} />,
                 },
                 {
                   key: "paused",
                   header: "Pause",
+                  width: "14rem",
                   value: (item) => (item.paused ? item.pause_reason || "paused" : "clear"),
                   render: (item) => (
                     <StatusBadge
@@ -89,12 +96,24 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
                 {
                   key: "operations",
                   header: "Ops",
+                  width: "12rem",
                   value: (item) => item.operations.join(", "),
+                  render: (item) => <CellText value={item.operations.join(", ")} />,
                 },
                 {
                   key: "budgets",
                   header: "Pools",
-                  value: (item) => item.budgets.map((b) => `${b.pool}=${b.remaining}`).join(" "),
+                  value: (item) => item.budgets.map((budget) => `${budget.pool}=${budget.remaining}`).join(" "),
+                  render: (item) => (
+                    <CellText
+                      value={
+                        item.budgets.length
+                          ? item.budgets.map((budget) => `${budget.pool}=${budget.remaining}`).join(" · ")
+                          : "—"
+                      }
+                      mono
+                    />
+                  ),
                 },
               ]}
             />
@@ -103,18 +122,23 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
               onOpenChange={(open) => !open && setRow(null)}
               title={display(row?.id)}
               description={row?.auth_env.length ? `Env: ${row.auth_env.join(", ")}` : "No API key required"}
-              fields={[
-                { label: "Enabled", value: display(row?.enabled) },
-                { label: "Paused", value: display(row?.pause_reason || row?.paused) },
-                { label: "Operations", value: display(row?.operations) },
-                { label: "Key present", value: display(row?.key_present) },
+              sections={[
                 {
-                  label: "Budgets",
-                  value: row?.budgets.map((b) => `${b.pool} ${b.remaining}`).join(" · ") || "—",
+                  title: "Status",
+                  fields: [
+                    { label: "Enabled", value: display(row?.enabled) },
+                    { label: "Paused", value: display(row?.pause_reason || row?.paused) },
+                    { label: "Key present", value: display(row?.key_present) },
+                    { label: "Operations", value: display(row?.operations) },
+                    {
+                      label: "Budgets",
+                      value: row?.budgets.map((budget) => `${budget.pool} ${budget.remaining}`).join(" · ") || "—",
+                    },
+                  ],
                 },
               ]}
             />
-          </div>
+          </PageBody>
         ) : null}
       </QueryGate>
     </>

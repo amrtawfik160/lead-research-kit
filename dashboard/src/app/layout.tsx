@@ -1,16 +1,16 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Inter } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "@/components/app-shell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
-const interHeading = Inter({ subsets: ["latin"], variable: "--font-heading" });
+const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
+const geistHeading = Geist({ subsets: ["latin"], variable: "--font-heading" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
-const themeScript = `(function(){try{var t=localStorage.getItem("veinore-theme");var dark=t!=="light";document.documentElement.classList.toggle("dark",dark);document.documentElement.style.colorScheme=dark?"dark":"light";}catch(e){}})();`;
+const themeScript = `(function(){try{var t=localStorage.getItem("veinore-theme");var dark=t==="dark";document.documentElement.classList.toggle("dark",dark);document.documentElement.style.colorScheme=dark?"dark":"light";}catch(e){}})();`;
 
 export const metadata: Metadata = {
   metadataBase: new URL("http://127.0.0.1:3000"),
@@ -40,9 +40,9 @@ export default function RootLayout({ children }: LayoutProps<"/">): React.ReactE
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn("dark h-full antialiased", inter.variable, interHeading.variable, geistMono.variable, "font-sans")}
+      className={cn("h-full antialiased", geist.variable, geistHeading.variable, geistMono.variable, "font-sans")}
     >
-      <body className="min-h-full bg-background text-foreground">
+      <body className="min-h-full bg-[var(--page)] text-foreground">
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <ThemeProvider>
           <ToastProvider position="bottom-right">

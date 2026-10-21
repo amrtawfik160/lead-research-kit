@@ -12,7 +12,7 @@ Synthetic `example.org` / `.example` fixtures only. No contact database, API key
 
 ## Screenshots
 
-Synthetic sample workspace (dark theme). No real people or keys.
+Synthetic sample workspace (light theme, GR8R-style chrome). No real people or keys.
 
 | Overview | Leads |
 |---|---|
@@ -32,7 +32,7 @@ Synthetic sample workspace (dark theme). No real people or keys.
 - **Evidence first** — source excerpts, person-match attestations, holds; guesses stay candidates until verified
 - **Exact budgets** — providers start disabled and zero; `budget confirm` is operator attestation of free allowance
 - **Dry by default** — network commands plan unless `--execute`; pauses stay until an explicit review
-- **Veinore dashboard** — local Linear-style UI (coss ui) over the same Store / History / daily files; keys never leave the process environment
+- **Veinore dashboard** — local GR8R-style workspace UI (coss ui) over the same Store / History / daily files; keys never leave the process environment
 
 It does **not** send email, probe SMTP, scrape private profiles, rotate identities, or prove ownership or consent.
 

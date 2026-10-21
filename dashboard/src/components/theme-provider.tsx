@@ -25,7 +25,7 @@ function applyTheme(theme: ThemeName): void {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }): React.ReactElement {
-  const [theme, setThemeState] = useState<ThemeName>("dark");
+  const [theme, setThemeState] = useState<ThemeName>("light");
 
   useLayoutEffect(() => {
     setThemeState(document.documentElement.classList.contains("dark") ? "dark" : "light");
