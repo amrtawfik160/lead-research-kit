@@ -84,7 +84,7 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
       />
       <QueryGate loading={loading} error={error} empty={!data} skeleton="form">
         {data ? (
-          <PageBody className="flex max-w-xl flex-col gap-5 p-4 sm:p-6">
+          <PageBody className="flex max-w-xl flex-col gap-5 px-6 pb-16">
           <Card>
           <CardPanel className="flex flex-col gap-5 p-5">
             {locked ? (

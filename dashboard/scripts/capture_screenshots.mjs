@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Viewport-only README screenshots (no OS chrome).
- * 1440x900 @ deviceScaleFactor 2, dark theme, sample workspace.
+ * 1440x900 @ deviceScaleFactor 2, light theme (GR8R default), sample workspace.
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
@@ -38,19 +38,19 @@ const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 2,
-  colorScheme: "dark",
+  colorScheme: "light",
   reducedMotion: "reduce",
 });
 await context.addInitScript(() => {
   try {
-    localStorage.setItem("veinore-theme", "dark");
+    localStorage.setItem("veinore-theme", "light");
   } catch {
     /* ignore */
   }
   const root = document.documentElement;
   if (root) {
-    root.classList.add("dark");
-    root.style.colorScheme = "dark";
+    root.classList.remove("dark");
+    root.style.colorScheme = "light";
   }
 });
 const page = await context.newPage();
@@ -58,7 +58,7 @@ await page.addStyleTag({ content: freezeMotion });
 
 await page.goto(`${origin}/`, { waitUntil: "networkidle" });
 await page.addStyleTag({ content: freezeMotion });
-await hasText(page, "12 / 12");
+await hasText(page, "here's what's happening");
 await shot(page, "overview.png");
 
 await page.goto(`${origin}/leads`, { waitUntil: "networkidle" });

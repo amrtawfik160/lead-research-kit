@@ -35,29 +35,26 @@ export function DetailSheet({
   footer?: React.ReactNode;
 }): React.ReactElement {
   const blocks =
-    sections && sections.length
-      ? sections
-      : fields?.length
-        ? [{ title: "", fields }]
-        : [];
+    sections && sections.length ? sections : fields?.length ? [{ title: "", fields }] : [];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetPopup side="right" className="max-w-md sm:max-w-lg">
-        <SheetHeader className="gap-1.5 px-5 py-4">
-          <SheetTitle className="pr-8 text-base font-medium tracking-tight">{title}</SheetTitle>
+      <SheetPopup
+        side="right"
+        className="w-[min(620px,100vw)] max-w-[620px] sm:max-w-[620px]"
+      >
+        <SheetHeader className="gap-1 px-5 py-4">
+          <SheetTitle className="pr-8 text-[16px] font-semibold tracking-[-0.015em]">{title}</SheetTitle>
           {description ? (
-            <SheetDescription className="text-[12px] leading-5">{description}</SheetDescription>
+            <SheetDescription className="text-[12.5px] leading-5">{description}</SheetDescription>
           ) : null}
         </SheetHeader>
-        <SheetPanel className="px-5 py-3">
+        <SheetPanel className="px-5 py-2">
           <div className="flex flex-col gap-5">
             {blocks.map((block, index) => (
               <section key={block.title || `fields-${index}`} className="min-w-0">
                 {block.title ? (
-                  <h3 className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                    {block.title}
-                  </h3>
+                  <h3 className="mb-1.5 text-[13.5px] font-semibold">{block.title}</h3>
                 ) : null}
                 <FieldGrid rows={block.fields} />
               </section>
@@ -87,11 +84,13 @@ export function FieldGrid({
   rows: Array<{ label: string; value: React.ReactNode }>;
 }): React.ReactElement {
   return (
-    <dl className="grid grid-cols-[7.25rem_1fr] gap-x-3 gap-y-2 text-[12px] leading-5">
+    <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-0 text-[13px] leading-5">
       {rows.map((row) => (
         <div key={row.label} className="contents">
-          <dt className="text-muted-foreground">{row.label}</dt>
-          <dd className="min-w-0 wrap-break-word text-foreground">{row.value ?? "—"}</dd>
+          <dt className="flex min-h-[34px] items-center text-muted-foreground">{row.label}</dt>
+          <dd className="flex min-h-[34px] min-w-0 items-center wrap-break-word text-foreground">
+            {row.value ?? "—"}
+          </dd>
         </div>
       ))}
     </dl>
@@ -106,11 +105,11 @@ export function FieldList({
   className?: string;
 }): React.ReactElement {
   return (
-    <dl className={cn("grid grid-cols-[7.25rem_1fr] gap-x-3 gap-y-2 text-[12px] leading-5", className)}>
+    <dl className={cn("grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-0 text-[13px] leading-5", className)}>
       {rows.map((row) => (
         <div key={row.label} className="contents">
-          <dt className="text-muted-foreground">{row.label}</dt>
-          <dd className="min-w-0 wrap-break-word">{display(row.value)}</dd>
+          <dt className="flex min-h-[34px] items-center text-muted-foreground">{row.label}</dt>
+          <dd className="flex min-h-[34px] min-w-0 items-center wrap-break-word">{display(row.value)}</dd>
         </div>
       ))}
     </dl>

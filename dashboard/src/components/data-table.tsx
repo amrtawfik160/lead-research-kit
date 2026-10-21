@@ -177,7 +177,7 @@ export function DataTable<T extends object>({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Toolbar className="h-auto w-full flex-wrap justify-between gap-2 border-b px-3 py-1.5">
+      <Toolbar className="h-auto w-full flex-wrap justify-between gap-2 border-b px-6 py-2">
         <ToolbarGroup className="min-w-0 flex-1">
           <div className="relative w-full max-w-xs">
             <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -253,7 +253,7 @@ export function DataTable<T extends object>({
                       key={column.key}
                       style={column.width ? { width: column.width, maxWidth: column.width } : undefined}
                       aria-sort={active === "asc" ? "ascending" : active === "desc" ? "descending" : "none"}
-                      className={cn("h-8 px-2", column.align === "right" && "text-right")}
+                      className={cn("h-8 px-2 text-[12px]", column.align === "right" && "text-right")}
                     >
                       <Button
                         size="xs"
@@ -345,7 +345,7 @@ function GroupRows<T extends object>({
         <TableRow className="hover:bg-transparent">
           <TableCell
             colSpan={colSpan}
-            className="bg-muted/40 py-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase"
+            className="bg-transparent py-2 text-[12.5px] font-semibold text-foreground"
           >
             {group.key} · {group.total}
           </TableCell>
@@ -378,7 +378,7 @@ function GroupRows<T extends object>({
               <TableCell
                 key={column.key}
                 style={column.width ? { width: column.width, maxWidth: column.width } : undefined}
-                className={cn("px-2 py-1.5 text-[12px]", column.align === "right" && "text-right")}
+                className={cn("h-10 px-2 py-0 text-[13.5px]", column.align === "right" && "text-right")}
               >
                 {column.render ? (
                   column.render(row)

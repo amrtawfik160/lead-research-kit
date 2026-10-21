@@ -74,7 +74,7 @@ export function QualityPage(): React.ReactElement {
           </Button>
         }
       />
-      <PageBody className="grid gap-4 p-4 lg:grid-cols-[minmax(0,22rem)_1fr] sm:p-6">
+      <PageBody className="grid gap-4 px-6 pb-16 lg:grid-cols-[minmax(0,22rem)_1fr]">
         <Card>
         <CardPanel className="flex flex-col gap-4 p-4">
           <Field>

@@ -1,4 +1,4 @@
-import { display } from "@/lib/format";
+import { display, titleCase } from "@/lib/format";
 import type { LeadRow } from "@/lib/types";
 
 const GROUPS: Array<{ title: string; keys: string[] }> = [
@@ -55,13 +55,13 @@ export function leadFieldSections(lead: LeadRow | null): FieldSection[] {
       .filter((key) => present(lead[key]))
       .map((key) => {
         used.add(key);
-        return { label: key, value: display(lead[key]) };
+        return { label: titleCase(key), value: display(lead[key]) };
       });
     if (fields.length) sections.push({ title: group.title, fields });
   }
   const rest = Object.entries(lead)
     .filter(([key, value]) => !used.has(key) && present(value))
-    .map(([label, value]) => ({ label, value: display(value) }));
+    .map(([label, value]) => ({ label: titleCase(label), value: display(value) }));
   if (rest.length) sections.push({ title: "More", fields: rest });
   return sections;
 }

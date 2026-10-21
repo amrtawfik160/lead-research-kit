@@ -140,9 +140,7 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
                 detail ? (
                   <div className="space-y-4">
                     <div>
-                      <h3 className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                        Evidence
-                      </h3>
+                      <h3 className="mb-2 text-[13.5px] font-semibold">Evidence</h3>
                       {detail.evidence.length === 0 ? (
                         <p className="text-[12px] text-muted-foreground">None recorded.</p>
                       ) : (
@@ -160,9 +158,7 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
                       )}
                     </div>
                     <div>
-                      <h3 className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                        Candidates
-                      </h3>
+                      <h3 className="mb-2 text-[13.5px] font-semibold">Candidates</h3>
                       {detail.candidates.length === 0 ? (
                         <p className="text-[12px] text-muted-foreground">None.</p>
                       ) : (
