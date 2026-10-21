@@ -21,7 +21,7 @@ export function PanelHeader({
   actions?: ReactNode;
 }): React.ReactElement {
   return (
-    <div className="flex items-center gap-2 px-3.5 pt-3 pb-2.5">
+    <div className="flex items-center gap-2 px-4 pt-3 pb-2">
       <h2 className="text-[13.5px] font-semibold tracking-[-0.01em]">{title}</h2>
       {actions ? <div className="ms-auto flex items-center gap-1">{actions}</div> : null}
     </div>

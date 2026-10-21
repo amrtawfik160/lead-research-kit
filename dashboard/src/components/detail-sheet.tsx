@@ -49,6 +49,7 @@ export function DetailSheet({
   fields,
   sections,
   extra,
+  extraFirst = false,
   footer,
 }: {
   open: boolean;
@@ -59,6 +60,7 @@ export function DetailSheet({
   fields?: Array<{ label: string; value: React.ReactNode }>;
   sections?: FieldSection[];
   extra?: React.ReactNode;
+  extraFirst?: boolean;
   footer?: React.ReactNode;
 }): React.ReactElement {
   const blocks =
@@ -89,13 +91,14 @@ export function DetailSheet({
         <SheetPanel className="px-6 pt-5 pb-8">
           <p className="mb-3 text-[19px] font-semibold tracking-[-0.018em] leading-[1.3]">{title}</p>
           <div className="flex flex-col">
+            {extra && extraFirst ? <div className="mb-[26px]">{extra}</div> : null}
             {blocks.map((block, index) => (
               <section key={block.title || `fields-${index}`} className={cn(index > 0 && "mt-[26px]")}>
                 {block.title ? <h3 className="mb-2 text-[13.5px] font-semibold">{block.title}</h3> : null}
                 <PropertyGrid rows={block.fields} />
               </section>
             ))}
-            {extra ? <div className="mt-[26px]">{extra}</div> : null}
+            {extra && !extraFirst ? <div className="mt-[26px]">{extra}</div> : null}
           </div>
         </SheetPanel>
         {footer ? <SheetFooter className="px-6">{footer}</SheetFooter> : null}

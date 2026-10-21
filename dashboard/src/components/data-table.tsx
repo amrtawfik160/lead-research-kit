@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpDown, ChevronDown, ChevronUp, ChevronsUpDown, Filter, Inbox, Search } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronUp, ChevronsUpDown, Filter, Search, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CellText } from "@/components/cell-text";
 import { EmptyState } from "@/components/empty-state";
@@ -237,7 +237,7 @@ export function DataTable<T extends object>({
         </ToolbarGroup>
       </Toolbar>
       {filtered.length === 0 ? (
-        <EmptyState icon={Inbox} title={emptyTitle} description={emptyDescription} />
+        <EmptyState icon={Users} title={emptyTitle} description={emptyDescription} />
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           <Table>

@@ -1,11 +1,12 @@
 import type { SettingsPayload } from "@/lib/load";
 import type {
   Attempt,
+  BudgetView,
   CleanResult,
   Contact,
   ContactDetail,
   DailyPayload,
-  Meta,
+  LeadOpsRecord,
   Overview,
   ProviderRow,
 } from "@/lib/types";
@@ -128,4 +129,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ target, sources }),
     }),
+  runDaily: (target: number, execute = false, sources?: string[]) =>
+    request<Record<string, unknown>>("/api/daily/run", {
+      method: "POST",
+      body: JSON.stringify({ target, execute, sources }),
+    }),
+  ops: () => request<{ ops: Record<string, LeadOpsRecord>; stages: string[] }>("/api/ops"),
+  saveOps: (body: { key: string; stage?: string; notes?: string; owner?: string }) =>
+    request<{ key: string; ops: LeadOpsRecord }>("/api/ops", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  budget: () => request<BudgetView>("/api/budget"),
 };

@@ -55,15 +55,15 @@ export function CommandPalette({
         value: "Suggestions",
         items: [
           {
-            value: "action:inbox",
-            label: "Open inbox",
+            value: "action:daily",
+            label: "Open daily",
             shortcut: "N",
             icon: ALL_NAV.find((item) => item.href === "/daily")?.icon,
             run: () => router.push("/daily"),
           },
           {
-            value: "action:tasks",
-            label: "Open my tasks",
+            value: "action:leads",
+            label: "Open leads",
             shortcut: "G L",
             icon: ALL_NAV.find((item) => item.href === "/leads")?.icon,
             run: () => router.push("/leads"),
@@ -115,8 +115,8 @@ export function CommandPalette({
     <CommandDialog open={open} onOpenChange={onOpenChange}>
       <CommandDialogPopup className="w-[min(640px,calc(100vw-32px))] max-w-[640px] rounded-[12px]">
         <Command items={groups}>
-          <CommandInput placeholder="Type a command or search…" />
-          <CommandEmpty>No commands found.</CommandEmpty>
+          <CommandInput placeholder="Search leads or jump to a page…" />
+          <CommandEmpty>No matching leads or commands.</CommandEmpty>
           <CommandList>
             {(group: { value: string; items: CommandEntry[] }, index: number) => (
               <div key={group.value}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpDown, ChevronDown, ChevronRight, Filter, Inbox, Search } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronRight, Filter, Search, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { EntityAvatar } from "@/components/entity-avatar";
@@ -25,14 +25,34 @@ export type IssueItem<T> = {
   raw: T;
 };
 
+export type IssueColumns = {
+  title: string;
+  project: string;
+  status: string;
+  priority: string;
+  due: string;
+};
+
+const LEAD_COLUMNS: IssueColumns = {
+  title: "Lead",
+  project: "Company",
+  status: "Source",
+  priority: "Tier",
+  due: "City",
+};
+
 export function IssueList<T>({
   items,
   selectedId,
   onSelect,
   groupBy = "group",
-  emptyTitle = "No rows",
-  emptyDescription = "Nothing matches the current filters.",
+  emptyTitle = "No leads",
+  emptyDescription = "Nothing matches the current lead filters.",
   hideIds = false,
+  columns = LEAD_COLUMNS,
+  searchPlaceholder = "Filter leads…",
+  searchLabel = "Filter leads",
+  filterAllLabel = "All sources",
 }: {
   items: Array<IssueItem<T>>;
   selectedId?: string;
@@ -41,6 +61,10 @@ export function IssueList<T>({
   emptyTitle?: string;
   emptyDescription?: string;
   hideIds?: boolean;
+  columns?: IssueColumns;
+  searchPlaceholder?: string;
+  searchLabel?: string;
+  filterAllLabel?: string;
 }): React.ReactElement {
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -133,9 +157,9 @@ export function IssueList<T>({
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Filter…"
+            placeholder={searchPlaceholder}
             size="sm"
-            aria-label="Filter tasks"
+            aria-label={searchLabel}
             className="h-[26px] ps-7"
           />
         </div>
@@ -150,7 +174,7 @@ export function IssueList<T>({
             {statusFilter !== "all" ? <span className="text-muted-foreground">{titleCase(statusFilter)}</span> : null}
           </MenuTrigger>
           <MenuPopup align="start" className="min-w-40">
-            <MenuItem onClick={() => setStatusFilter("all")}>All statuses</MenuItem>
+            <MenuItem onClick={() => setStatusFilter("all")}>{filterAllLabel}</MenuItem>
             {statuses.map((status) => (
               <MenuItem key={status} onClick={() => setStatusFilter(status)}>
                 {titleCase(status)}
@@ -169,9 +193,9 @@ export function IssueList<T>({
           </MenuTrigger>
           <MenuPopup align="start" className="min-w-40">
             <MenuItem onClick={() => setSortKey("manual")}>Manual</MenuItem>
-            <MenuItem onClick={() => setSortKey("title")}>Title</MenuItem>
-            <MenuItem onClick={() => setSortKey("status")}>Status</MenuItem>
-            <MenuItem onClick={() => setSortKey("due")}>Due date</MenuItem>
+            <MenuItem onClick={() => setSortKey("title")}>{columns.title}</MenuItem>
+            <MenuItem onClick={() => setSortKey("status")}>{columns.status}</MenuItem>
+            <MenuItem onClick={() => setSortKey("due")}>{columns.due}</MenuItem>
           </MenuPopup>
         </Menu>
         <span className="ms-auto text-[11px] tabular-nums text-muted-foreground">
@@ -179,15 +203,15 @@ export function IssueList<T>({
         </span>
       </div>
       {filtered.length === 0 ? (
-        <EmptyState icon={Inbox} title={emptyTitle} description={emptyDescription} />
+        <EmptyState icon={Users} title={emptyTitle} description={emptyDescription} />
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           <div className="grid grid-cols-[minmax(0,1.6fr)_10rem_7.5rem_6rem_7rem] items-center border-b px-6 text-[12px] font-medium text-muted-foreground">
-            <div className="h-8">Task</div>
-            <div className="h-8">Project</div>
-            <div className="h-8">Status</div>
-            <div className="h-8">Priority</div>
-            <div className="h-8">Due date</div>
+            <div className="flex h-8 items-center">{columns.title}</div>
+            <div className="flex h-8 items-center">{columns.project}</div>
+            <div className="flex h-8 items-center">{columns.status}</div>
+            <div className="flex h-8 items-center">{columns.priority}</div>
+            <div className="flex h-8 items-center">{columns.due}</div>
           </div>
           {groups.map((group) => (
             <div key={group.key || "all"}>

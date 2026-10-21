@@ -94,6 +94,16 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
               }}
               emptyTitle="No contacts match"
               emptyDescription="Clear the filter or change grouping."
+              searchPlaceholder="Filter contacts…"
+              searchLabel="Filter contacts"
+              filterAllLabel="All statuses"
+              columns={{
+                title: "Contact",
+                project: "Company",
+                status: "Status",
+                priority: "Channel",
+                due: "Title",
+              }}
             />
             <DetailSheet
               open={Boolean(selected)}

@@ -1,9 +1,9 @@
 import type { LucideIcon } from "lucide-react";
-import { Inbox } from "lucide-react";
+import { Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function EmptyState({
-  icon: Icon = Inbox,
+  icon: Icon = Users,
   title,
   description,
   compact = false,

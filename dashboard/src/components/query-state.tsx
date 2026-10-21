@@ -1,6 +1,6 @@
 "use client";
 
-import { Inbox } from "lucide-react";
+import { Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -76,7 +76,7 @@ function TableSkeleton(): React.ReactElement {
 
 function CardsSkeleton(): React.ReactElement {
   return (
-    <div className="mx-auto flex w-full max-w-[1160px] flex-col gap-4 px-6 pt-7" aria-hidden>
+    <div className="mx-auto flex w-full max-w-[1160px] flex-col gap-4 px-6 pt-6" aria-hidden>
       <div className="flex items-end justify-between">
         <div className="flex flex-col gap-2">
           <Sk className="h-7 w-56" />
@@ -108,7 +108,7 @@ export function QueryGate({
   loading,
   error,
   empty,
-  emptyTitle = "Nothing here yet",
+  emptyTitle = "No leads yet",
   emptyDescription = "Point the dashboard at a workspace or keep sample mode on.",
   skeleton = "table",
   children,
@@ -148,7 +148,7 @@ export function QueryGate({
     );
   }
   if (empty) {
-    return <EmptyState icon={Inbox} title={emptyTitle} description={emptyDescription} />;
+    return <EmptyState icon={Users} title={emptyTitle} description={emptyDescription} />;
   }
   return <>{children}</>;
 }

@@ -175,10 +175,10 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
               <Menu>
                 <MenuTrigger
                   className="flex h-[30px] w-full items-center gap-2 rounded-[6px] px-2 text-left text-[13.5px] text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground group-data-[collapsible=icon]:justify-center"
-                  aria-label="Help and resources"
+                  aria-label="Shortcuts"
                 >
                   <CircleHelp className="size-4 text-[#8c8880]" />
-                  <span className="group-data-[collapsible=icon]:hidden">Help & resources</span>
+                  <span className="group-data-[collapsible=icon]:hidden">Shortcuts</span>
                 </MenuTrigger>
                 <MenuPopup align="start" side="top" className="min-w-56">
                   <MenuItem onClick={openShortcuts}>
@@ -232,13 +232,13 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
             className="flex h-[26px] w-[220px] items-center gap-2 rounded-[6px] border bg-[#f7f6f3] px-2.5 text-[12.5px] text-muted-foreground transition-colors hover:border-[#dad7d0] hover:text-foreground dark:bg-[#181817]"
           >
             <Search className="size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate text-left">Search or jump to…</span>
+            <span className="min-w-0 flex-1 truncate text-left">Search leads…</span>
             <Kbd className="h-4 min-w-0 px-1 text-[10px]">⌘K</Kbd>
           </button>
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label="Notifications"
+            aria-label="Daily deliveries"
             className="relative"
             render={<Link href="/daily" />}
           >
@@ -254,9 +254,9 @@ function ShellChrome({ children }: { children: ReactNode }): React.ReactElement 
               <ChevronDown className="size-3" />
             </MenuTrigger>
             <MenuPopup align="end" className="min-w-40">
-              <MenuItem onClick={() => router.push("/daily")}>Open inbox</MenuItem>
-              <MenuItem onClick={() => router.push("/leads")}>Open my tasks</MenuItem>
-              <MenuItem onClick={() => router.push("/quality")}>Clean a list</MenuItem>
+              <MenuItem onClick={() => router.push("/daily")}>Open daily</MenuItem>
+              <MenuItem onClick={() => router.push("/leads")}>Open leads</MenuItem>
+              <MenuItem onClick={() => router.push("/quality")}>Clean a lead list</MenuItem>
             </MenuPopup>
           </Menu>
           <Menu>

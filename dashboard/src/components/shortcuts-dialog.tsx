@@ -15,7 +15,7 @@ const GROUPS: Array<{ title: string; items: Array<[string, string[]]> }> = [
     title: "General",
     items: [
       ["Command menu", ["⌘", "K"]],
-      ["Search", ["/"]],
+      ["Search leads", ["/"]],
       ["Keyboard shortcuts", ["?"]],
       ["Toggle sidebar", ["["]],
       ["Toggle theme", ["D"]],
@@ -24,20 +24,21 @@ const GROUPS: Array<{ title: string; items: Array<[string, string[]]> }> = [
   {
     title: "Go to",
     items: [
-      ["Home", ["G", "O"]],
-      ["Inbox", ["G", "D"]],
-      ["My Tasks", ["G", "L"]],
+      ["Overview", ["G", "O"]],
+      ["Daily", ["G", "D"]],
+      ["Leads", ["G", "L"]],
       ["Quality", ["G", "Q"]],
+      ["Budget", ["G", "B"]],
       ["Settings", ["G", ","]],
-      ["Open inbox", ["N"]],
+      ["Open daily", ["N"]],
     ],
   },
   {
     title: "Lists",
     items: [
-      ["Next row", ["J"]],
-      ["Previous row", ["K"]],
-      ["Open row", ["↵"]],
+      ["Next lead", ["J"]],
+      ["Previous lead", ["K"]],
+      ["Open lead", ["↵"]],
       ["Clear selection", ["Esc"]],
     ],
   },
@@ -55,7 +56,7 @@ export function ShortcutsDialog({
       <DialogPopup className="max-w-[720px] sm:max-w-[720px]">
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
-          <DialogDescription>Same chords as GR8R, mapped onto Veinore screens.</DialogDescription>
+          <DialogDescription>Jump between Overview, Daily, Leads, and Budget without leaving the keyboard.</DialogDescription>
         </DialogHeader>
         <DialogPanel className="grid gap-6 sm:grid-cols-2">
           {GROUPS.map((group) => (

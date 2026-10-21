@@ -32,6 +32,14 @@ const ERROR_TEXT: Record<string, string> = {
   sec_access_denied:
     "SEC EDGAR refused this host. Confirm SEC_USER_AGENT is 'Name you@domain' and that this IP is allowed.",
   missing_auth: "That provider is enabled but its environment variable is empty.",
+  ops_key_required: "That lead needs an email or a name and company before notes can be saved.",
+  ops_key_too_long: "That lead key is too long.",
+  unknown_lead_stage: "Use new, contacted, replied, qualified, or disqualified.",
+  notes_too_long: "Keep lead notes under 4,000 characters.",
+  owner_too_long: "Keep the owner name under 80 characters.",
+  invalid_daily_target: "Enter a daily target between 1 and 200.",
+  dashboard_run_is_local_only: "The dashboard daily run stays on stored sites. Use the CLI for live providers.",
+  unknown_daily_source: "That daily source is not in this kit.",
 };
 
 export function explainError(raw: string): string {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Inbox } from "lucide-react";
+import { Users } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardPanel } from "@/components/ui/card";
@@ -164,7 +164,7 @@ export function QualityPage(): React.ReactElement {
           ) : (
             <EmptyState
               className="min-h-64 rounded-[10px] border"
-              icon={Inbox}
+              icon={Users}
               title="Paste a list"
               description="Sample CSV is already loaded. Run Clean — nothing is sent to providers."
             />

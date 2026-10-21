@@ -38,6 +38,7 @@ def seed_sample(root, force=False):
         _seed_ledger(store, config)
         _seed_history(history, store)
         _seed_daily(root, history)
+        _seed_ops(root)
     finally:
         history.close()
         store.close()
@@ -350,3 +351,28 @@ def _write_batch(root, day, records, *, target, execute, history, audited=False,
         (day_dir / 'audit.md').write_text(render_audit(audit), encoding='utf-8')
         os.chmod(day_dir / 'audit.md', 0o600)
         (day_dir / 'report.md').write_text(render_report(report), encoding='utf-8')
+
+
+def _seed_ops(root):
+    path = Path(root) / 'veinore-ops.json'
+    path.write_text(json.dumps({
+        'jane@harborrealty.example': {
+            'stage': 'contacted',
+            'owner': 'Operator',
+            'notes': 'Intro sent after the 2026-10-20 delivery.',
+            'updated_at': 1761000000,
+        },
+        'pat@harborrealty.example': {
+            'stage': 'qualified',
+            'owner': 'Operator',
+            'notes': 'Managing broker with a published website email.',
+            'updated_at': 1761000000,
+        },
+        'drew@westfork.example': {
+            'stage': 'new',
+            'owner': '',
+            'notes': 'Finder result — verify before outreach.',
+            'updated_at': 1761000000,
+        },
+    }, indent=2) + '\n', encoding='utf-8')
+    os.chmod(path, 0o600)

@@ -1,12 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeft, CheckCheck, Mail, MailOpen, PanelRightOpen } from "lucide-react";
+import { ArrowLeft, CheckCheck, PanelRightOpen, Users } from "lucide-react";
 import { CountBar } from "@/components/count-bar";
+import { DailyRunControl } from "@/components/daily-run-control";
 import { DetailSheet } from "@/components/detail-sheet";
+import { DuplicateBanner } from "@/components/duplicate-banner";
 import { EmptyState } from "@/components/empty-state";
 import { EntityAvatar } from "@/components/entity-avatar";
 import { LabelChip } from "@/components/label-chip";
+import { ExportLeadsButton, LeadOpsPanel } from "@/components/lead-ops-panel";
 import { PageBody } from "@/components/page-header";
 import { Panel, PanelHeader } from "@/components/panel";
 import { ProgBar } from "@/components/prog-bar";
@@ -20,8 +23,10 @@ import { api } from "@/lib/api";
 import { display } from "@/lib/format";
 import { issueKey } from "@/lib/gr8r";
 import { leadFieldSections } from "@/lib/lead-fields";
+import { copyText, leadEmail, leadSource } from "@/lib/lead-ops";
 import type { DailyPayload, LeadRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { toastManager } from "@/components/ui/toast";
 
 type Cat = "all" | "website" | "finder" | "review" | "report";
 
@@ -30,37 +35,37 @@ function needsReview(row: LeadRow): boolean {
 }
 
 function sourceOf(row: LeadRow): string {
-  return String(row.Source || row["Email Source"] || "").toLowerCase();
+  return leadSource(row).toLowerCase();
 }
 
 export function DailyPage({ initial = null }: { initial?: DailyPayload | null }): React.ReactElement {
   const [date, setDate] = useState<string | undefined>(undefined);
-  const { data, error, loading } = useQuery(() => api.daily(date), [date], initial);
+  const { data, error, loading, reload } = useQuery(() => api.daily(date), [date], initial);
   const [lead, setLead] = useState<LeadRow | null>(null);
   const [sheet, setSheet] = useState(false);
   const [cat, setCat] = useState<Cat>("all");
-  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [reviewOnly, setReviewOnly] = useState(false);
   const [seen, setSeen] = useState<Set<string>>(new Set());
 
   const rows = useMemo(() => data?.leads || [], [data]);
   const visible = useMemo(() => {
     return rows.filter((row, index) => {
       const id = issueKey("DAY", index);
-      const unread = needsReview(row) && !seen.has(id);
-      if (unreadOnly && !unread) return false;
+      const flagged = needsReview(row) && !seen.has(id);
+      if (reviewOnly && !flagged) return false;
       if (cat === "website") return sourceOf(row).includes("website");
       if (cat === "finder") return sourceOf(row).includes("finder");
       if (cat === "review") return needsReview(row);
       if (cat === "report") return false;
       return true;
     });
-  }, [cat, rows, seen, unreadOnly]);
+  }, [cat, reviewOnly, rows, seen]);
 
-  const countUnread = (key: Cat) =>
+  const countReview = (key: Cat) =>
     rows.filter((row, index) => {
       const id = issueKey("DAY", index);
-      const unread = needsReview(row) && !seen.has(id);
-      if (!unread) return false;
+      const flagged = needsReview(row) && !seen.has(id);
+      if (!flagged) return false;
       if (key === "website") return sourceOf(row).includes("website");
       if (key === "finder") return sourceOf(row).includes("finder");
       if (key === "review") return needsReview(row);
@@ -81,25 +86,28 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
           <PageBody className="flex min-h-0 flex-1 flex-col">
             <div className="inbox-grid grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
               <div className="flex min-h-0 flex-col border-r">
-                <div className="flex items-center gap-2 px-6 pt-[18px]">
-                  <h1 className="text-[19px] font-semibold tracking-[-0.015em]">Inbox</h1>
+                <div className="flex items-center gap-2 px-6 pt-4">
+                  <h1 className="text-[19px] font-semibold tracking-[-0.015em]">Daily</h1>
                   <span className="flex-1" />
                   <label className="flex items-center gap-1.5 text-[12px] text-[#57544e] dark:text-[#b5b2ab]">
                     <Switch
-                      checked={unreadOnly}
-                      onCheckedChange={(checked) => setUnreadOnly(Boolean(checked))}
-                      aria-label="Unread only"
+                      checked={reviewOnly}
+                      onCheckedChange={(checked) => setReviewOnly(Boolean(checked))}
+                      aria-label="Needs review only"
                     />
-                    Unread
+                    Review
                   </label>
                   <Button
                     size="icon-sm"
                     variant="ghost"
-                    aria-label="Mark all as read"
+                    aria-label="Clear review marks"
                     onClick={() => setSeen(new Set(rows.map((_, index) => issueKey("DAY", index))))}
                   >
                     <CheckCheck />
                   </Button>
+                </div>
+                <div className="px-6 pt-2">
+                  <DailyRunControl onDone={reload} />
                 </div>
                 <div className="flex flex-wrap gap-1.5 px-6 pt-3 pb-1">
                   {data.batches.map((batch) => {
@@ -142,7 +150,7 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                       ["report", "Report"],
                     ] as const
                   ).map(([key, label]) => {
-                    const unread = key === "report" ? 0 : countUnread(key);
+                    const flagged = key === "report" ? 0 : countReview(key);
                     const on = cat === key;
                     return (
                       <button
@@ -160,11 +168,12 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                         )}
                       >
                         {label}
-                        {unread ? <span className="text-[11px] text-muted-foreground">{unread}</span> : null}
+                        {flagged ? <span className="text-[11px] text-muted-foreground">{flagged}</span> : null}
                       </button>
                     );
                   })}
                 </div>
+                <DuplicateBanner items={data.duplicates} className="mx-4 mt-3" />
                 <div className="min-h-0 flex-1 overflow-auto">
                   {cat === "report" ? (
                     <p className="px-6 py-3 text-[12.5px] text-muted-foreground">
@@ -173,11 +182,11 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                   ) : visible.length === 0 ? (
                     <EmptyState
                       compact
-                      icon={Mail}
-                      title="You're all caught up."
+                      icon={Users}
+                      title="No leads in this view"
                       description={
-                        unreadOnly
-                          ? "No unread deliveries in this category."
+                        reviewOnly
+                          ? "No leads still need review in this category."
                           : "New website, finder, and review leads will show up here."
                       }
                     />
@@ -185,7 +194,7 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                     visible.map((row) => {
                       const index = rows.indexOf(row);
                       const id = issueKey("DAY", index);
-                      const unread = needsReview(row) && !seen.has(id);
+                      const flagged = needsReview(row) && !seen.has(id);
                       const selected = lead === row;
                       return (
                         <button
@@ -193,12 +202,12 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                           type="button"
                           onClick={() => selectLead(row, index)}
                           className={cn(
-                            "relative flex w-full items-start gap-2.5 border-b border-[#f0eeea] px-6 py-3 text-left transition-colors dark:border-[#252523]",
+                            "relative flex min-h-10 w-full items-start gap-2.5 border-b border-[#f0eeea] px-6 py-3 text-left transition-colors dark:border-[#252523]",
                             selected ? "bg-[#f6f5f2] dark:bg-[#252524]" : "hover:bg-[#f6f5f2] dark:hover:bg-[#252524]",
                           )}
                         >
-                          {unread ? (
-                            <span className="absolute top-[22px] left-1.5 size-1.5 rounded-full bg-primary" aria-label="Unread" />
+                          {flagged ? (
+                            <span className="absolute top-[22px] left-1.5 size-1.5 rounded-full bg-primary" aria-label="Needs review" />
                           ) : null}
                           <EntityAvatar name={display(row["Full Name"])} size={22} />
                           <div className="min-w-0 flex-1 text-[13px] leading-[1.45]">
@@ -212,12 +221,11 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                             <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-[#6b6760]">
                               <QuietStatus value={row.Source} />
                               <span>·</span>
+                              <QuietStatus value={row.Stage || "new"} />
+                              <span>·</span>
                               <span>{display(row.State)}</span>
                             </div>
                           </div>
-                          <span className="text-muted-foreground" aria-hidden>
-                            {unread ? <MailOpen className="size-3.5" /> : <Mail className="size-3.5" />}
-                          </span>
                         </button>
                       );
                     })
@@ -226,11 +234,11 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
               </div>
               <div className="flex min-h-0 flex-col overflow-auto">
                 {cat === "report" ? (
-                  <div className="px-7 pt-6">
+                  <div className="px-6 pt-6">
                     <ReportView data={data} />
                   </div>
                 ) : lead ? (
-                  <InboxPreview
+                  <LeadPreview
                     row={lead}
                     issueId={issueKey("DAY", rows.indexOf(lead))}
                     onBack={() => setLead(null)}
@@ -239,9 +247,9 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
                 ) : (
                   <div className="grid min-h-full place-items-center p-10">
                     <EmptyState
-                      icon={MailOpen}
-                      title="Select a delivery"
-                      description="Read the lead and open the drawer without leaving your inbox."
+                      icon={Users}
+                      title="Select a lead"
+                      description="Read the delivered lead and open details without leaving Daily."
                     />
                   </div>
                 )}
@@ -254,6 +262,16 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
               description={display(lead?.Company)}
               issueId={lead ? issueKey("DAY", rows.indexOf(lead)) : undefined}
               sections={leadFieldSections(lead)}
+              extraFirst
+              extra={
+                <LeadOpsPanel
+                  row={lead}
+                  onSaved={(next) => {
+                    setLead(next);
+                    reload();
+                  }}
+                />
+              }
             />
           </PageBody>
         ) : null}
@@ -262,7 +280,7 @@ export function DailyPage({ initial = null }: { initial?: DailyPayload | null })
   );
 }
 
-function InboxPreview({
+function LeadPreview({
   row,
   issueId,
   onBack,
@@ -273,30 +291,50 @@ function InboxPreview({
   onBack: () => void;
   onOpen: () => void;
 }): React.ReactElement {
+  const email = leadEmail(row);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-[46px] shrink-0 items-center gap-2 border-b px-4">
         <Button size="icon-sm" variant="ghost" aria-label="Back" onClick={onBack}>
           <ArrowLeft />
         </Button>
-        <span className="size-1.5 rounded-full bg-[#3570c4]" />
+        <span className="size-1.5 rounded-[3px] bg-[#3570c4]" />
         <span className="truncate text-[12.5px] text-muted-foreground">{display(row.Company)}</span>
         <span className="font-mono text-[11.5px] text-muted-foreground">{issueId}</span>
         <span className="flex-1" />
+        <ExportLeadsButton rows={[row]} filename="veinore-lead.csv" />
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-[26px] text-[12px]"
+          disabled={!email}
+          onClick={() => {
+            void copyText(email).then((ok) => {
+              toastManager.add({
+                type: ok ? "success" : "error",
+                title: ok ? "Email copied" : "Could not copy email",
+                description: email,
+              });
+            });
+          }}
+        >
+          Copy email
+        </Button>
         <Button size="sm" variant="outline" className="h-[26px] text-[12px]" onClick={onOpen}>
           <PanelRightOpen className="size-3.5" />
           Open details
         </Button>
       </div>
-      <div className="w-full max-w-[720px] px-7 py-6">
+      <div className="w-full max-w-[720px] px-6 py-6">
         <h2 className="mb-2.5 text-[19px] font-semibold tracking-[-0.015em]">{display(row["Full Name"])}</h2>
-        <div className="mb-[18px] flex flex-wrap items-center gap-1">
+        <div className="mb-4 flex flex-wrap items-center gap-1">
           <QuietStatus value={row.Source} />
+          <QuietStatus value={row.Stage || "new"} />
           <LabelChip value={row.Company} />
           <QuietStatus value={row["Email Risk"]} />
           <span className="text-[12.5px] text-muted-foreground">{display(row.City)}</span>
         </div>
-        <p className="mb-1 text-[11px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">Conversation</p>
+        <p className="mb-1 text-[11px] font-semibold tracking-[0.07em] text-muted-foreground uppercase">About this lead</p>
         <p className="text-[13.5px] leading-6 text-[#57544e] dark:text-[#b5b2ab]">
           {display(row.Title)} at {display(row.Company)}. Email {display(row.Email)} from {display(row.Source)}
           {row["Email Risk Reason"] ? ` — ${display(row["Email Risk Reason"])}` : "."}
@@ -315,7 +353,7 @@ function ReportView({ data }: { data: DailyPayload }): React.ReactElement {
     <div className="grid max-w-4xl gap-3 pb-10">
       <Panel>
         <PanelHeader title={`Leads ${data.date}: ${delivered} of ${target || "—"} delivered`} />
-        <div className="px-3.5 pb-4">
+        <div className="px-4 pb-4">
           <p className="mb-3 text-[12.5px] text-muted-foreground">
             {report.this_run != null
               ? `This run added ${report.this_run} (already on file today: ${report.prior_delivered ?? 0}).`
@@ -332,13 +370,13 @@ function ReportView({ data }: { data: DailyPayload }): React.ReactElement {
       <div className="grid gap-3 md:grid-cols-2">
         <Panel>
           <PanelHeader title="Email sources" />
-          <div className="px-3.5 pb-4">
+          <div className="px-4 pb-4">
             <CountBar counts={report.delivered_by_source} />
           </div>
         </Panel>
         <Panel>
           <PanelHeader title="Email risk" />
-          <div className="px-3.5 pb-4">
+          <div className="px-4 pb-4">
             <CountBar counts={report.delivered_by_risk} />
           </div>
         </Panel>
@@ -346,7 +384,7 @@ function ReportView({ data }: { data: DailyPayload }): React.ReactElement {
       {report.budgets_left ? (
         <Panel>
           <PanelHeader title="Budgets left" />
-          <ul className="grid gap-1.5 px-3.5 pb-4 text-[13px] sm:grid-cols-2">
+          <ul className="grid gap-1.5 px-4 pb-4 text-[13px] sm:grid-cols-2">
             {Object.entries(report.budgets_left).map(([name, left]) => (
               <li key={name} className="flex justify-between gap-3">
                 <span className="truncate text-muted-foreground">{name}</span>

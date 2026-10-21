@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Viewport-only README screenshots (no OS chrome).
- * 1440x900 @ deviceScaleFactor 2, light theme (GR8R default), sample workspace.
+ * 1440x900 @ deviceScaleFactor 2, light theme, sample workspace.
  */
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
@@ -58,7 +58,8 @@ await page.addStyleTag({ content: freezeMotion });
 
 await page.goto(`${origin}/`, { waitUntil: "networkidle" });
 await page.addStyleTag({ content: freezeMotion });
-await hasText(page, "here's what's happening");
+await hasText(page, "across this workspace");
+await hasText(page, "leads per day");
 await shot(page, "overview.png");
 
 await page.goto(`${origin}/leads`, { waitUntil: "networkidle" });
@@ -76,7 +77,7 @@ await page.waitForTimeout(150);
 
 await page.goto(`${origin}/daily`, { waitUntil: "networkidle" });
 await page.addStyleTag({ content: freezeMotion });
-await hasText(page, "select a delivery");
+await hasText(page, "select a lead");
 await hasText(page, "2026-10-20");
 const reportTab = page.getByRole("tab", { name: /report/i });
 if (await reportTab.count()) {

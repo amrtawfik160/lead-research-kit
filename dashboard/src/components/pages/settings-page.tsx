@@ -83,9 +83,9 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
       />
       <QueryGate loading={loading} error={error} empty={!data} skeleton="form">
         {data ? (
-          <PageBody className="flex max-w-2xl flex-col gap-5 px-6 pb-16">
+          <PageBody className="flex max-w-2xl flex-col gap-4 px-6 pb-16">
           <Card>
-          <CardPanel className="flex flex-col gap-4 p-5">
+          <CardPanel className="flex flex-col gap-4 p-4">
             <div>
               <h2 className="text-[14.5px] font-semibold">Theme</h2>
               <p className="mt-1 text-[12.5px] text-muted-foreground">Customize how Veinore looks on this device.</p>
@@ -94,7 +94,7 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
           </CardPanel>
           </Card>
           <Card>
-          <CardPanel className="flex flex-col gap-5 p-5">
+          <CardPanel className="flex flex-col gap-4 p-4">
             {locked ? (
               <Alert variant="warning">
                 <AlertTitle>Environment workspace is active</AlertTitle>
