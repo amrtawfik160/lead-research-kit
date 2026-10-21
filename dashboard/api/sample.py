@@ -29,7 +29,7 @@ def seed_sample(root, force=False):
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(root, 0o700)
     config = default_config()
-    for name in ('hunter', 'serper', 'reoon', 'overpass', 'zerobounce'):
+    for name in ('hunter', 'serper', 'reoon', 'overpass', 'zerobounce', 'jina', 'hackernews', 'firecrawl'):
         config['providers'][name]['enabled'] = True
     save_config(root / 'providers.json', config)
     store = Store(root / 'research.sqlite3')
@@ -129,7 +129,11 @@ def _seed_ledger(store, config):
     store.confirm_budget('reoon', 'credits', '18', 'synthetic_dashboard_sample', attested_free=True)
     store.confirm_budget('serper', 'queries', '80', 'synthetic_dashboard_sample', attested_free=True)
     store.confirm_budget('zerobounce', 'validation_credits', '4', 'synthetic_dashboard_sample', attested_free=True)
+    store.confirm_budget('jina', 'reads', '12', 'synthetic_dashboard_sample', attested_free=True)
+    store.confirm_budget('hackernews', 'signal_requests', '5', 'synthetic_dashboard_sample', attested_free=True)
+    store.confirm_budget('firecrawl', 'scrape_credits', '6', 'synthetic_dashboard_sample', attested_free=True)
     store.pause('apollo', 'sample_access_review_no_live_key')
+    store.pause('tavily', 'sample_pause_probe')
 
     class Offline:
         def send(self, request):
@@ -262,7 +266,8 @@ def _seed_daily(root, history):
         _lead('Noah Greer', 'Owner', 'Greer Properties', 'greer.example', 'noah@greer.example', 'Columbus', 'OH',
               email_source='website_published'),
     ]
-    _write_batch(root, '2026-10-20', today, target=20, execute=True, history=history)
+    _write_batch(root, '2026-10-20', today, target=12, execute=True, history=history, audited=True,
+                 this_run=5, prior_delivered=7)
     _write_batch(root, '2026-10-19', yesterday, target=8, execute=True, history=history, audited=True)
     history.mark_delivered(today, '2026-10-20')
 
@@ -282,7 +287,8 @@ def _lead(name, title, company, website, email, city, state, *, email_source='we
     return record
 
 
-def _write_batch(root, day, records, *, target, execute, history, audited=False):
+def _write_batch(root, day, records, *, target, execute, history, audited=False,
+                 this_run=None, prior_delivered=0):
     day_dir = Path(root) / 'daily' / day
     files = write_daily(records, day_dir)
     by_source, by_risk, by_type = {}, {}, {}
@@ -294,19 +300,25 @@ def _write_batch(root, day, records, *, target, execute, history, audited=False)
         kind = record.get('company_type') or 'other'
         by_type[kind] = by_type.get(kind, 0) + 1
     shortfall = max(0, target - len(records))
+    this_run = len(records) if this_run is None else this_run
     report = {
         'date': day, 'execute': execute, 'target': target, 'delivered': len(records),
+        'this_run': this_run, 'prior_delivered': prior_delivered,
         'fresh_available': len(records) + 6, 'shortfall': shortfall,
         'delivered_by_source': by_source, 'delivered_by_risk': by_risk,
         'delivered_by_company_type': by_type,
         'files': files,
-        'budgets_left': {'reoon.credits': '18', 'hunter.discover_requests': '40', 'serper.queries': '80'},
+        'budgets_left': {
+            'reoon.credits': '18', 'hunter.discover_requests': '40', 'serper.queries': '80',
+            'jina.reads': '12', 'hackernews.signal_requests': '5',
+        },
         'advice': history and (__import__('lead_research.daily', fromlist=['shortfall_advice']).shortfall_advice(shortfall, history) if shortfall else []),
         'steps': {
-            'crawl': {'domains_planned': 12, 'sites_ok': 9, 'people_with_email': 14},
-            'verify': {'sent': 3, 'skipped_reasons': {}},
-            'hunter-discover': {'sent': 0, 'domains_added': 4},
-            'resolve': {'resolved': 2},
+            'crawl': {'domains_planned': 18, 'sites_ok': 14, 'people_with_email': 22},
+            'jina-read': {'sites': 4, 'reads': {'sent': 4}, 'team_pages': {'sent': 2}, 'people': 3},
+            'verify': {'sent': 6, 'skipped_reasons': {}},
+            'hunter-discover': {'sent': 2, 'domains_added': 6},
+            'resolve': {'resolved': 5, 'by_method': {'guess': 3, 'serper': 2}},
             'email-safety': {'dropped': {'role_inbox': 1}},
         },
     }
@@ -315,17 +327,21 @@ def _write_batch(root, day, records, *, target, execute, history, audited=False)
     (day_dir / 'report.md').write_text(render_report(report), encoding='utf-8')
     os.chmod(day_dir / 'report.md', 0o600)
     if audited:
+        sample_n = min(8, len(records))
         audit = {
-            'date': day, 'sampled': 5, 'rows_in_file': len(records),
-            'score': {'confirmed_pct': 40.0, 'partial_pct': 20.0, 'failed_pct': 40.0},
-            'top_reasons': {'published email no longer on the evidence page': 1, 'site unreachable': 1},
+            'date': day, 'sampled': sample_n, 'rows_in_file': len(records),
+            'score': {'confirmed_pct': 75.0, 'partial_pct': 12.5, 'failed_pct': 12.5},
+            'top_reasons': {'published email no longer on the evidence page': 1},
             'leads': [
-                {'result': 'confirmed', 'full_name': 'Casey Morgan', 'company_website': 'harborrealty.example',
+                {'result': 'confirmed', 'full_name': records[0].get('full_name') or 'Jane Sample',
+                 'company_website': records[0].get('company_website') or 'harborrealty.example',
                  'email_source': 'website_published', 'reasons': []},
-                {'result': 'partial', 'full_name': 'Jordan Lee', 'company_website': 'summit.example',
-                 'email_source': 'website_published', 'reasons': ['published email no longer on the evidence page']},
-                {'result': 'failed', 'full_name': 'Sam Park', 'company_website': 'gone.example',
-                 'email_source': 'website_published', 'reasons': ['site unreachable']},
+                {'result': 'confirmed', 'full_name': records[1].get('full_name') or 'Pat Quinn',
+                 'company_website': records[1].get('company_website') or 'harborrealty.example',
+                 'email_source': 'website_published', 'reasons': []},
+                {'result': 'partial', 'full_name': records[min(2, len(records)-1)].get('full_name') or 'Morgan Ellis',
+                 'company_website': records[min(2, len(records)-1)].get('company_website') or 'metrolicense.example',
+                 'email_source': 'public_record', 'reasons': ['published email no longer on the evidence page']},
             ],
         }
         (day_dir / 'audit.json').write_text(json.dumps(audit, indent=2) + '\n', encoding='utf-8')

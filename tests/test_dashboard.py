@@ -265,12 +265,16 @@ class ReleaseAllowsDashboardTooling(unittest.TestCase):
             root = Path(tmp)
             public = root / 'dashboard' / 'public'
             public.mkdir(parents=True)
+            shots = root / 'docs' / 'screenshots'
+            shots.mkdir(parents=True)
             (public / 'favicon-32.png').write_bytes(b'\x89PNG\r\n\x1a\n')
+            (shots / 'overview.png').write_bytes(b'\x89PNG\r\n\x1a\n')
             (root / 'notes.png').write_bytes(b'\x89PNG\r\n\x1a\n')
             (root / 'a.py').write_text('print(1)\n')
             result = module.check(root)
             rules = {item['path']: item['rule'] for item in result['findings']}
             self.assertNotIn('dashboard/public/favicon-32.png', rules)
+            self.assertNotIn('docs/screenshots/overview.png', rules)
             self.assertEqual(rules.get('notes.png'), 'unexpected_binary')
 
 

@@ -32,6 +32,8 @@ def check(root):
   if name in PRIVATE_NAMES and not example or p.suffix in PRIVATE_SUFFIXES or name.endswith(('-wal','-shm')) or (name.startswith('.env') and name!='.env.example'):
    findings.append({'path':str(rel),'rule':'private_runtime_file'});continue
   if len(rel.parts)>=3 and rel.parts[0]=='dashboard' and rel.parts[1]=='public' and p.suffix.lower() in BRAND_IMAGE_SUFFIXES:continue
+  # README product screenshots: synthetic UI captures only (no contact CSVs/SQLite).
+  if len(rel.parts)>=2 and rel.parts[0]=='docs' and rel.parts[1]=='screenshots' and p.suffix.lower() in BRAND_IMAGE_SUFFIXES:continue
   if p.suffix in {'.csv','.json','.jsonl'} and not example:
    tooling=name in TOOLING_JSON or (name.startswith('tsconfig') and name.endswith('.json'))
    if not tooling:
