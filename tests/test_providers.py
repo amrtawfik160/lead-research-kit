@@ -18,7 +18,9 @@ ENV = {'QUICKEMAILVERIFICATION_API_KEY': 'fixture-secret', 'EMAILVALIDATION_API_
        'TAVILY_API_KEY': 'fixture-secret', 'FIRECRAWL_API_KEY': 'fixture-secret', 'ABSTRACT_EMAIL_API_KEY': 'fixture-secret',
        'EMAILABLE_API_KEY': 'fixture-secret', 'KICKBOX_API_KEY': 'fixture-secret', 'BOUNCER_API_KEY': 'fixture-secret',
        'MYEMAILVERIFIER_API_KEY': 'fixture-secret', 'PDL_API_KEY': 'fixture-secret', 'SERPAPI_API_KEY': 'fixture-secret',
-       'DEEPLINE_API_KEY': 'fixture-secret'}
+       'DEEPLINE_API_KEY': 'fixture-secret', 'JINA_API_KEY': 'fixture-secret',
+       'APIFY_API_TOKEN': 'fixture-secret', 'SKRAPP_API_KEY': 'fixture-secret',
+       'PRODUCTHUNT_TOKEN': 'fixture-secret', 'GITHUB_TOKEN': 'fixture-secret'}
 # Lead-source operations take their own payload shapes (see tests/test_discovery.py).
 OPERATION_PAYLOADS = {'discover': {'filters': {'query': 'real estate companies in Texas'}},
                       'domain_search': {'domain': 'example.org'}, 'search': {'query': 'site:linkedin.com/in "CEO"'},
@@ -29,6 +31,9 @@ OPERATION_PAYLOADS = {'discover': {'filters': {'query': 'real estate companies i
                       'search_batch': {'queries': ['"Harborlight Homes" Austin TX real estate']},
                       'company_search': {'query': 'Harborlight Homes real estate company in Austin, TX'},
                       'scrape': {'url': 'https://example.org/team'},
+                      'read': {'url': 'https://example.org/team'},
+                      'watch': {'query': 'Harbor Realty'},
+                      'contacts': {'url': 'https://example.org'},
                       'person_enrich': {'linkedin_url': 'https://www.linkedin.com/in/alex-example'}}
 # people_search criteria are provider-specific (Apollo vs Prospeo enums).
 PEOPLE_SEARCH = {'apollo': {'criteria': {'titles': ['CEO']}}, 'prospeo': {'criteria': {'websites': ['example.org']}}}
@@ -46,7 +51,8 @@ class ProviderTests(unittest.TestCase):
                                           'tomba', 'icypeas', 'reoon', 'millionverifier', 'abstract', 'emailable',
                                           'kickbox', 'bouncer', 'myemailverifier', 'tavily', 'firecrawl', 'pdl', 'serpapi',
                                           'deepline', 'quickemailverification', 'emailvalidation', 'emaillistverify',
-                                          'enrow', 'lusha', 'zenserp', 'linkup', 'youcom'})
+                                          'enrow', 'lusha', 'zenserp', 'linkup', 'youcom',
+                                          'jina', 'apify', 'skrapp', 'hackernews', 'producthunt', 'github'})
         for p in PROVIDERS.values():
             for operation in p.operations:
                 payload = PEOPLE_SEARCH[p.id] if operation == 'people_search' else OPERATION_PAYLOADS.get(operation, PAYLOAD)
@@ -74,11 +80,20 @@ class ProviderTests(unittest.TestCase):
     def test_http_failures_all_adapters(self):
         for p in PROVIDERS.values():
             for status, code in ((401, 'auth'), (403, 'auth'), (402, 'quota'), (429, 'rate_limit'), (524, 'provider_error'), (404, 'http_error')):
+                if p.id == 'skrapp' and status == 404:
+                    # Skrapp documents HTTP 404 as "email not found" (not charged); see test_providers_v7.
+                    continue
                 out = p.parse(p.operations[0], Response(status, {'secret': 'fixture-secret'}))
                 self.assertEqual((out.assessment, out.error), ('error', code))
                 self.assertNotIn('fixture-secret', repr(out))
             # Google Places (New) answers a zero-match Text Search with {} (covered in test_providers_v3).
-            for data in ([], None, {'error': 'fixture-secret'}, {'errors': ['fixture-secret']}) + (() if p.id == 'google_places' else ({},)):
+            # Apify run-sync-get-dataset-items answers a finished empty dataset with [] (covered in test_providers_v7).
+            shapes = [None, {'error': 'fixture-secret'}, {'errors': ['fixture-secret']}]
+            if p.id != 'apify':
+                shapes.insert(0, [])
+            if p.id != 'google_places':
+                shapes.append({})
+            for data in shapes:
                 out = p.parse(p.operations[0], Response(200, data))
                 self.assertEqual(out.assessment, 'error')
                 self.assertNotIn('fixture-secret', repr(out))

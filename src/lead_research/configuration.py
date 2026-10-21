@@ -58,7 +58,14 @@ DEFAULT = {'version':1,'providers':{
  # v5: Deepline managed-credit finder, last in auto-route order. 'credits' counts finds locally;
  # Deepline bills about 0.14-0.5 Deepline credits per find (0.34 per found email on the default
  # leadmagic_email_finder route; per executed stage on the waterfall Play).
- 'deepline':{'enabled':False,'charges':{'find':{'credits':'1'}}}
+ 'deepline':{'enabled':False,'charges':{'find':{'credits':'1'}}},
+ # v7 free-tier adapters. New entries start disabled with no budget.
+ 'jina':{'enabled':False,'charges':{'read':{'reads':'1'}}},
+ 'apify':{'enabled':False,'charges':{'places':{'runs':'1'},'contacts':{'runs':'1'}}},
+ 'skrapp':{'enabled':False,'charges':{'find':{'credits':'1'},'company_search':{'credits':'1'}}},
+ 'hackernews':{'enabled':False,'charges':{'watch':{'signal_requests':'1'}}},
+ 'producthunt':{'enabled':False,'charges':{'watch':{'signal_requests':'1'}}},
+ 'github':{'enabled':False,'charges':{'watch':{'signal_requests':'1'}}}
 }}
 
 # Additions after the first v1 release. A saved v1 file may lack exactly these;
@@ -69,7 +76,8 @@ MIGRATION_ADDED_PROVIDERS = frozenset({'serper', 'brave', 'overpass',
                                        'abstract', 'emailable', 'kickbox', 'bouncer', 'myemailverifier',
                                        'tavily', 'firecrawl', 'pdl', 'serpapi', 'deepline',
                                        'quickemailverification', 'emailvalidation', 'emaillistverify',
-                                       'enrow', 'lusha', 'zenserp', 'linkup', 'youcom'})
+                                       'enrow', 'lusha', 'zenserp', 'linkup', 'youcom',
+                                       'jina', 'apify', 'skrapp', 'hackernews', 'producthunt', 'github'})
 MIGRATION_ADDED_CHARGES = {'hunter': frozenset({'discover', 'domain_search'}), 'serper': frozenset({'search_batch'}),
                            'exa': frozenset({'company_search'})}
 # Operations whose fixed charge is multiplied by the number of payload items. The

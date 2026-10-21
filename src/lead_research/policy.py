@@ -34,6 +34,12 @@ DISCOVERY_PAYLOAD_KEYS = {
     'linkedin_email': frozenset({'linkedin_url'}),
     # Firecrawl rendered-page scrape: one public https URL (see scrape_url).
     'scrape': frozenset({'url'}),
+    # Jina Reader page-to-text/html: one public https URL.
+    'read': frozenset({'url'}),
+    # Apify website-contact actor: one public https start URL.
+    'contacts': frozenset({'url'}),
+    # Topic/company mention signals (HN / Product Hunt / GitHub).
+    'watch': frozenset({'query'}),
     # People Data Labs Person Enrichment: a LinkedIn profile, or a name plus company domain/name.
     'person_enrich': frozenset({'linkedin_url', 'name', 'domain', 'company', 'location'}),
 }
@@ -627,6 +633,15 @@ def _normalize_discovery_job(job, operation):
     elif operation == 'scrape':
         if 'url' not in payload:
             raise PolicyError('scrape_requires_url')
+    elif operation == 'read':
+        if 'url' not in payload:
+            raise PolicyError('read_requires_url')
+    elif operation == 'contacts':
+        if 'url' not in payload:
+            raise PolicyError('contacts_requires_url')
+    elif operation == 'watch':
+        if 'query' not in payload:
+            raise PolicyError('watch_requires_query')
     else:
         payload = _normalize_v3_payload(str(job.get('provider', '')), operation, payload)
     return {'provider': str(job.get('provider', '')), 'operation': operation,
@@ -650,6 +665,12 @@ def discovery_identity(operation, payload):
         return identity
     if operation == 'scrape':
         return {'url': scrape_url(payload.get('url'))}
+    if operation == 'read':
+        return {'url': scrape_url(payload.get('url'))}
+    if operation == 'contacts':
+        return {'url': scrape_url(payload.get('url'))}
+    if operation == 'watch':
+        return {'query': search_query(payload.get('query'))}
     if operation == 'search_batch':
         # Order-insensitive: the same query set is one cached observation.
         return {'queries': sorted(batch_queries(payload.get('queries')))}

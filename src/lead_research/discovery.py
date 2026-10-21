@@ -47,7 +47,7 @@ __all__ = ['US_STATES', 'DEFAULT_DM_TITLES', 'HUNTER_REAL_ESTATE_INDUSTRIES', 'D
            'places_queries', 'places_jobs', 'exa_people_queries', 'exa_jobs', 'PLACES_QUERY_TEMPLATES',
            'FINDER_OPERATIONS', 'hunter_discover_city_jobs', 'hunter_discover_keyword_jobs',
            'hunter_name_resolution_jobs', 'serper_batch_jobs', 'HUNTER_NAME_BATCH', 'SEARCH_PROVIDERS',
-           'search_jobs', 'firecrawl_scrape_jobs', 'pdl_enrich_jobs', 'scraped_html', 'scraped_pages',
+           'search_jobs', 'firecrawl_scrape_jobs', 'jina_read_jobs', 'pdl_enrich_jobs', 'scraped_html', 'scraped_pages',
            'encode_html', 'decode_html', 'FIRECRAWL_MAX_HTML']
 
 DEFAULT_DM_TITLES = ('CEO', 'Founder', 'Owner', 'President', 'Principal', 'Managing Partner',
@@ -59,7 +59,7 @@ HUNTER_REAL_ESTATE_INDUSTRIES = ('Real Estate', 'Real Estate Agents and Brokers'
                                  'Leasing Residential Real Estate', 'Leasing Non-residential Real Estate')
 
 DISCOVERY_OPERATIONS = ('discover', 'domain_search', 'search', 'search_batch', 'places', 'people_search',
-                        'text_search')
+                        'text_search', 'company_search', 'contacts', 'watch')
 # Firm names per Hunter Discover organization.name job: one free response holds at most 100
 # companies, so 50 names leave room for a couple of same-name matches per firm.
 HUNTER_NAME_BATCH = 50
@@ -725,6 +725,18 @@ def search_jobs(provider, queries, pages=1, include_domains=None):
             if domains:
                 payload['include_domains'] = list(domains)
             jobs.append({'provider': provider, 'operation': 'search', 'payload': payload})
+    return jobs
+
+
+def jina_read_jobs(urls):
+    """One Jina Reader 'read' job per distinct public page URL."""
+    jobs, seen = [], set()
+    for url in urls:
+        clean = scrape_url(url)
+        if clean in seen:
+            continue
+        seen.add(clean)
+        jobs.append({'provider': 'jina', 'operation': 'read', 'payload': {'url': clean}})
     return jobs
 
 

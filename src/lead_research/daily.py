@@ -29,14 +29,14 @@ from . import quality
 from .pipeline import _name_key, build
 
 DEFAULT_SOURCES = ('records', 'resolve', 'hunter-discover', 'google-places', 'osm', 'crawl', 'render-js', 'find-emails', 'verify', 'build')
-OPTIONAL_SOURCES = ('hunter-domains', 'apollo', 'xray-linkedin', 'pdl')
+OPTIONAL_SOURCES = ('hunter-domains', 'apollo', 'xray-linkedin', 'pdl', 'jina-read')
 DEFAULT_RECORD_SOURCES = ('tx-trec', 'ny-dos', 'co-dora', 'ct-dls', 'sec-form-d')
 DEFAULT_CAPS = {'records': 3000, 'resolve': 600, 'resolve-hunter': 1500, 'resolve-guess': 1500, 'hunter-discover': 90, 'google-places': 30, 'osm': 6,
                 'apollo': 20, 'apollo-enrich': 50, 'hunter-domains': 25, 'find-emails': 60, 'verify': 300, 'xray-linkedin': 300,
-                'render-js': 25, 'pdl': 3, 'verify-published': 25}
+                'render-js': 25, 'pdl': 3, 'verify-published': 25, 'jina-read': 12}
 KEYWORD_SETS = (['property management'], ['commercial real estate'], ['multifamily'], ['real estate investment'],
                 ['real estate development'], ['brokerage'], ['luxury real estate'], ['land'])
-SEARCH_FALLBACK = ('serper', 'linkup', 'youcom', 'zenserp', 'tavily', 'exa')
+SEARCH_FALLBACK = ('serper', 'linkup', 'youcom', 'zenserp', 'tavily', 'exa', 'serpapi', 'firecrawl')
 EXPECTED_LEADS_PER_DOMAIN = 0.3  # measured: ~0.3 fresh decision makers with work email per crawled brokerage site
 
 # Large US metros as (place, state) for OpenStreetMap rotation. Official place names
@@ -760,6 +760,8 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                             people=sum(len(s['people']) for s in sites),
                             people_with_email=sum(1 for s in sites for p in s['people'] if p.get('email')))
             report['steps']['crawl'] = step
+        if 'jina-read' in sources:
+            report['steps']['jina-read'] = _jina_read_sites(history, store, config, execute, env, transport, caps['jina-read'])
         if 'render-js' in sources:
             report['steps']['render-js'] = _render_js_sites(history, store, config, execute, env, transport, caps['render-js'])
         if 'hunter-domains' in sources:
@@ -852,14 +854,20 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
         report['steps']['email-safety'] = safety
         source_quality = history.source_quality()
         pool.sort(key=lambda r: _selection_key(r, source_quality))
+        out_dir = Path(output_root or work / 'daily') / (day if execute else day + '-preview')
+        prior = load_daily_records(out_dir) if execute else []
+        slot = max(0, target - len(prior))
+        prior_keys = set()
+        for record in prior:
+            prior_keys |= set(History.keys_for(record))
         picked, seen = [], set()
         for record in pool:
             keys = set(History.keys_for(record))
-            if keys & seen:
+            if keys & seen or keys & prior_keys:
                 continue
             seen |= keys
             picked.append(record)
-            if len(picked) >= target:
+            if len(picked) >= slot:
                 break
 
         if 'xray-linkedin' in sources:
@@ -876,16 +884,26 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
             if execute and step['sent']:
                 step['linkedin_filled'] = attach_linkedin(picked, discovery.collect(store)['prospects'])
 
+        merged = merge_daily_records(prior, picked) if execute else picked
         report['fresh_available'] = len(pool)
-        report['delivered'] = len(picked)
-        report['shortfall'] = max(0, target - len(picked))
-        report['delivered_by_source'] = _count_by(picked, 'email_source')
-        report['delivered_by_risk'] = _count_by(picked, 'email_risk')
-        report['delivered_by_company_type'] = _count_by(picked, 'company_type')
+        report['delivered'] = len(merged)
+        report['this_run'] = len(picked)
+        report['prior_delivered'] = len(prior)
+        report['shortfall'] = max(0, target - len(merged))
+        report['delivered_by_source'] = _count_by(merged, 'email_source')
+        report['delivered_by_risk'] = _count_by(merged, 'email_risk')
+        report['delivered_by_company_type'] = _count_by(merged, 'company_type')
         if report['shortfall']:
             report['advice'] = shortfall_advice(report['shortfall'], history)
-        out_dir = Path(output_root or work / 'daily') / (day if execute else day + '-preview')
-        report['files'] = write_daily(picked, out_dir)
+        if execute and prior:
+            stamp = str(int(clock()))
+            report['archived'] = [p for p in (
+                archive_daily_file(out_dir / 'report.json', 'runs', stamp + '-report.json'),
+                archive_daily_file(out_dir / 'report.md', 'runs', stamp + '-report.md'),
+                archive_daily_file(out_dir / 'audit.json', 'audits', stamp + '-audit.json'),
+                archive_daily_file(out_dir / 'audit.md', 'audits', stamp + '-audit.md'),
+            ) if p]
+        report['files'] = write_daily(merged, out_dir)
         if execute:
             history.mark_delivered(picked, day)
         report['history'] = history.stats()
@@ -934,7 +952,8 @@ def _funded(store, config, provider, pool):
 
 
 SEARCH_POOLS = {'serper': 'queries', 'tavily': 'credits', 'exa': 'queries', 'brave': 'queries',
-                'zenserp': 'searches', 'linkup': 'queries', 'youcom': 'queries'}
+                'zenserp': 'searches', 'linkup': 'queries', 'youcom': 'queries',
+                'serpapi': 'searches', 'firecrawl': 'search_ops'}
 
 
 def _resolve_firms(history, store, config, execute, env, transport, caps, provider='serper', *, fetcher=None,
@@ -1081,6 +1100,91 @@ def _render_js_sites(history, store, config, execute, env, transport, cap):
     return step
 
 
+def _jina_pages(store):
+    """Completed Jina reads as {url, html} rows (HTML already decoded)."""
+    from .discovery import decode_html
+    pages = []
+    for attempt in store.attempts():
+        outcome = attempt.get('outcome') or {}
+        if attempt.get('provider') != 'jina' or attempt.get('operation') != 'read' \
+                or attempt.get('state') not in ('completed', 'reviewed') or outcome.get('error') \
+                or outcome.get('assessment') != 'results':
+            continue
+        html_text = decode_html((outcome.get('fields') or {}).get('html_zb64'))
+        if not html_text:
+            continue
+        fields = outcome.get('fields') or {}
+        pages.append({'url': fields.get('url') or (attempt.get('payload') or {}).get('url'),
+                      'html': html_text})
+    return pages
+
+
+def _page_host(url):
+    if not isinstance(url, str) or '://' not in url:
+        return ''
+    return url.split('/')[2].removeprefix('www.')
+
+
+def _jina_read_sites(history, store, config, execute, env, transport, cap):
+    """Jina Reader fallback for crawled sites that published no emails (keyless or keyed).
+
+    Homepage first, then the same team-page follow-up Firecrawl render uses. Cached homepage
+    reads are not re-debited, so a second same-day run can spend remaining reads on team pages.
+    """
+    from .discovery import jina_read_jobs
+    from .extract import discover_pages, extract_company, extract_people, merge_people
+    from .models import PolicyError
+    rows = history.db.execute(
+        "SELECT domain FROM domains WHERE last_crawled IS NOT NULL AND emails=0 "
+        "ORDER BY last_crawled DESC LIMIT ?", (cap,)).fetchall()
+    domains = [r['domain'] for r in rows]
+    step = {'sites': len(domains)}
+    if not domains or not _funded(store, config, 'jina', 'reads'):
+        return step
+    homes = [f'https://{domain}/' for domain in domains]
+    step['reads'] = _run_jobs(store, config, jina_read_jobs(homes), execute, env, transport, cap)
+    pages = _jina_pages(store)
+    followups = []
+    for domain in domains:
+        home = next((p for p in pages if _page_host(p.get('url')) == domain), None)
+        if not home or not home.get('html'):
+            continue
+        try:
+            best = discover_pages(home['url'] or f'https://{domain}/', home['html'], limit=1)
+        except (PolicyError, ValueError, TypeError):
+            best = []
+        for url in best:
+            if url not in followups and url not in homes:
+                followups.append(url)
+    leftover = max(0, cap - (step['reads'].get('sent') or 0))
+    followups = followups[:leftover]
+    if followups and _funded(store, config, 'jina', 'reads'):
+        step['team_pages'] = _run_jobs(store, config, jina_read_jobs(followups), execute, env, transport, len(followups))
+        if execute:
+            pages = _jina_pages(store)
+    if not execute:
+        return step
+    updated = []
+    for domain in domains:
+        found, company = [], None
+        for page in pages:
+            if _page_host(page.get('url')) != domain:
+                continue
+            found += extract_people(page['html'], page['url'])
+            company = company or extract_company(page['html'], page['url'])
+        if not found:
+            continue
+        site = {'domain': domain, 'status': 'ok', 'homepage_url': f'https://{domain}/',
+                'company': company or {'name': ''}, 'people': merge_people(found),
+                'errors': ['read_by_jina']}
+        updated.append(site)
+    if updated:
+        history.save_sites(updated)
+    step['sites_with_people'] = len(updated)
+    step['people'] = sum(len(s.get('people') or []) for s in updated)
+    return step
+
+
 def backup_workspace(work, day):
     """Consistent SQLite copies of the ledger and history; keeps the newest BACKUPS_KEPT days."""
     work = Path(work)
@@ -1109,6 +1213,8 @@ def backup_workspace(work, day):
 def render_report(report):
     """Short human summary for the morning message."""
     lines = [f"Leads {report['date']}: {report['delivered']} of {report['target']} delivered" + (" (preview)" if not report['execute'] else ''), '']
+    if report.get('prior_delivered') or report.get('this_run'):
+        lines.append(f"This run added {report.get('this_run', 0)} (already on file today: {report.get('prior_delivered', 0)})")
     by = report.get('delivered_by_source') or {}
     if by:
         lines.append('Email sources: ' + ', '.join(f'{k} {v}' for k, v in sorted(by.items(), key=lambda kv: -kv[1])))
@@ -1218,6 +1324,58 @@ def attach_linkedin(records, prospects):
 
 DETAIL_EXTRA_HEADERS = ['Tier', 'Score', 'Email Source', 'Source URL', 'Issues', 'Email Risk', 'Email Risk Reason',
                         'MX Provider', 'Email Verification']
+
+
+def load_daily_records(out_dir):
+    """Reload a previous same-day execute so a second run can merge instead of overwrite."""
+    out_dir = Path(out_dir)
+    details = out_dir / 'leads-details.csv'
+    leads = out_dir / 'leads.csv'
+    path = details if details.exists() else leads
+    if not path.exists():
+        return []
+    records = []
+    for raw in quality.read_rows(path):
+        rec = quality.normalize_record(raw)
+        rec['tier'] = raw.get('Tier') or rec.get('tier') or 'B'
+        try:
+            rec['score'] = int(raw.get('Score') or rec.get('score') or 0)
+        except (TypeError, ValueError):
+            rec['score'] = rec.get('score') or 0
+        rec['email_source'] = raw.get('Email Source') or rec.get('email_source') or ''
+        rec['source_url'] = raw.get('Source URL') or rec.get('source_url') or ''
+        rec['email_evidence_url'] = rec.get('email_evidence_url') or rec['source_url']
+        rec['issues'] = [part for part in str(raw.get('Issues') or '').split('; ') if part]
+        rec['email_risk'] = raw.get('Email Risk') or rec.get('email_risk') or ''
+        rec['email_risk_reason'] = raw.get('Email Risk Reason') or rec.get('email_risk_reason') or ''
+        rec['mx_provider'] = raw.get('MX Provider') or rec.get('mx_provider') or ''
+        rec['email_verification'] = raw.get('Email Verification') or rec.get('email_verification') or ''
+        rec['company_type'] = raw.get('Company Type') or rec.get('company_type') or rec.get('company_type')
+        records.append(rec)
+    return records
+
+
+def merge_daily_records(prior, new):
+    seen, merged = set(), []
+    for rec in list(prior or []) + list(new or []):
+        keys = set(History.keys_for(rec))
+        if not keys or keys & seen:
+            continue
+        seen |= keys
+        merged.append(rec)
+    return merged
+
+
+def archive_daily_file(path, folder, name):
+    path = Path(path)
+    if not path.exists():
+        return None
+    dest_dir = path.parent / folder
+    dest_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    dest = dest_dir / name
+    dest.write_bytes(path.read_bytes())
+    os.chmod(dest, 0o600)
+    return str(dest)
 
 
 def write_daily(records, out_dir):

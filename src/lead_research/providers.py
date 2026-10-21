@@ -3186,13 +3186,361 @@ class YouCom(_NoBalance):
         return Outcome('results' if results else 'not_found', fields={'prospects': prospects, 'results': results})
 
 
+class Jina(_NoBalance):
+    """Jina Reader page-to-HTML. Key optional; keyless reads are rate-limited.
+
+    Docs (verified 2026-10): https://r.jina.ai/docs — POST https://r.jina.ai/ with
+    {url} and Accept: application/json. X-Respond-With: html keeps extract_people working.
+    Authorization: Bearer is optional; reading works without a key at a lower limit.
+    429 is the documented over-limit answer.
+    """
+    id = 'jina'
+    independence_group = 'jina'
+    operations = ('read',)
+    auth_env = ()
+    optional_auth_env = ('JINA_API_KEY',)
+    min_spacing = {'read': 1.2}
+    origin = 'https://r.jina.ai'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'X-Respond-With': 'html'}
+        key = env.get('JINA_API_KEY')
+        if isinstance(key, str) and key.strip():
+            headers['Authorization'] = 'Bearer ' + _secret(env, 'JINA_API_KEY')
+        return self._request('POST', '/', headers, {'url': scrape_url(payload.get('url'))}, timeout=60,
+                             max_response_bytes=MAX_RESPONSE_CEILING)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        if j.get('code') not in (200, None) and j.get('status') not in (20000, 200, None):
+            return _error('provider_application_error')
+        if 'data' not in j:
+            return _error('invalid_response')
+        data = j.get('data')
+        html = title = final = None
+        if isinstance(data, str):
+            html = data
+        elif isinstance(data, dict):
+            html = data.get('html') or data.get('content')
+            title = clean_text(data.get('title'), 200)
+            final = safe_link(data.get('url')) if isinstance(data.get('url'), str) else None
+        elif data is not None:
+            return _error('invalid_response')
+        if not isinstance(html, str) or not html.strip():
+            return Outcome('not_found', fields={'title': title, 'url': final})
+        encoded = html.encode('utf-8', 'replace')
+        truncated = len(encoded) > FIRECRAWL_MAX_HTML
+        html = encoded[:FIRECRAWL_MAX_HTML].decode('utf-8', 'ignore') if truncated else html
+        fields = {'url': final, 'title': title, 'truncated': truncated,
+                  'html_zb64': encode_html(html), 'html_bytes': len(html.encode('utf-8'))}
+        return Outcome('results', fields=fields)
+
+    def scope_outcome(self, operation, outcome, payload):
+        requested = payload.get('url')
+        fields = {**outcome.fields, 'requested_url': requested}
+        if not fields.get('url'):
+            fields['url'] = requested
+        return dataclasses.replace(outcome, fields=fields)
+
+
+class Apify(_NoBalance):
+    """Apify actor run (sync dataset items). Whitelisted Google Maps / contact actors.
+
+    Docs (verified 2026-10): https://docs.apify.com/api/v2 — Authorization: Bearer token.
+    POST /v2/actors/:actorId/run-sync-get-dataset-items?timeout=55 returns the dataset
+    JSON array. Actor IDs are owner~name. Token never goes in the URL.
+    """
+    id = 'apify'
+    independence_group = 'apify'
+    operations = ('places', 'contacts')
+    auth_env = ('APIFY_API_TOKEN',)
+    min_spacing = {'places': 2.0, 'contacts': 2.0}
+    origin = 'https://api.apify.com'
+    ACTORS = {
+        'places': 'compass~crawler-google-places',
+        'contacts': 'vdrmota~contact-info-scraper',
+    }
+    ACTOR_ID = re.compile(r'[A-Za-z0-9_-]{1,64}~[A-Za-z0-9_-]{1,80}')
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        actor = self.ACTORS[operation]
+        if not self.ACTOR_ID.fullmatch(actor):
+            raise PolicyError('invalid_payload')
+        headers = {'Authorization': 'Bearer ' + _secret(env, 'APIFY_API_TOKEN'),
+                   'Content-Type': 'application/json', 'Accept': 'application/json'}
+        if operation == 'places':
+            area, state = _text(payload, 'area'), payload.get('state')
+            query = area if not state else f'{area} {state}'
+            body = {'searchStringsArray': [search_query(query + ' real estate')],
+                    'maxCrawledPlacesPerSearch': 5, 'language': 'en', 'maxImages': 0}
+        else:
+            body = {'startUrls': [{'url': scrape_url(payload.get('url'))}], 'maxRequestsPerStartUrl': 3}
+        path = '/v2/actors/' + actor + '/run-sync-get-dataset-items?timeout=55'
+        return self._request('POST', path, headers, body, timeout=70)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        if response.status == 408:
+            return _error('provider_error')
+        if response.status in (200, 201) and isinstance(response.data, list):
+            items = response.data[:20]
+            if operation == 'places':
+                companies = []
+                for row in items:
+                    if not isinstance(row, dict):
+                        continue
+                    name = clean_text(row.get('title') or row.get('name'), 160)
+                    website = safe_link(row.get('website') or row.get('url') or '')
+                    if name:
+                        state = None
+                        try:
+                            if row.get('state'):
+                                state = us_state_code(row.get('state'))
+                        except PolicyError:
+                            state = None
+                        companies.append({'organization': name, 'domain': (urlsplit(website).hostname or '') if website else '',
+                                          'source': 'apify', 'city': clean_text(row.get('city'), 80),
+                                          'state': state})
+                return Outcome('results' if companies else 'not_found', fields={'companies': companies})
+            prospects = []
+            for row in items:
+                if not isinstance(row, dict):
+                    continue
+                emails = row.get('emails') or row.get('email')
+                if isinstance(emails, str):
+                    emails = [emails]
+                if not isinstance(emails, list):
+                    continue
+                for raw in emails[:3]:
+                    email = _revealed_email(raw)
+                    if email:
+                        prospects.append({'email': email, 'full_name': clean_text(row.get('name') or row.get('fullName'), 120),
+                                          'source': 'apify', 'company': clean_text(row.get('companyName'), 160)})
+            return Outcome('results' if prospects else 'not_found',
+                           fields={'prospects': prospects, 'companies': []})
+        failure = http_failure(response)
+        return failure or _error('invalid_response')
+
+
+class Skrapp(_NoBalance):
+    """Skrapp email finder and company search. X-Access-Key on every request.
+
+    Docs (verified 2026-10): https://skrapp.io/api — GET /api/v2/find
+    (firstName+lastName+domain) and POST /api/v3/companies/search. 404 is not found
+    and is not charged. quality.status is the verification result on a find.
+    """
+    id = 'skrapp'
+    independence_group = 'skrapp'
+    operations = ('find', 'company_search')
+    auth_env = ('SKRAPP_API_KEY',)
+    min_spacing = {'find': 1.0, 'company_search': 3.5}
+    origin = 'https://api.skrapp.io'
+    FIND_STATUS = {'valid': 'valid', 'catch-all': 'accept_all', 'catchall': 'accept_all',
+                   'unknown': 'unknown', 'invalid': 'invalid'}
+
+    def _headers(self, env, json_body=False):
+        headers = {'X-Access-Key': _secret(env, 'SKRAPP_API_KEY'), 'Accept': 'application/json'}
+        if json_body:
+            headers['Content-Type'] = 'application/json'
+        return headers
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        if operation == 'company_search':
+            body = {'companyName': search_query(payload.get('query')), 'sort': 'relevance'}
+            return self._request('POST', '/api/v3/companies/search?size=10&lead_counts=false',
+                                 self._headers(env, True), body, timeout=30)
+        first, last = _first_last(payload)
+        query = urlencode({'firstName': first, 'lastName': last, 'domain': _finder_domain(payload)})
+        return self._request('GET', '/api/v2/find?' + query, self._headers(env), timeout=15)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        if operation == 'find' and response.status == 404:
+            return Outcome('not_found')
+        if response.status == 408:
+            return _error('provider_error')
+        failure = http_failure(response)
+        if failure:
+            return failure
+        j = response.data
+        if operation == 'company_search':
+            rows = j.get('results')
+            if not isinstance(rows, list):
+                return _error('invalid_response')
+            companies = []
+            for row in rows[:10]:
+                if not isinstance(row, dict):
+                    continue
+                name = clean_text(row.get('name'), 160)
+                domain = row.get('domain')
+                try:
+                    domain = normalize_domain(domain) if isinstance(domain, str) else ''
+                except PolicyError:
+                    domain = ''
+                if name:
+                    companies.append({'organization': name, 'domain': domain, 'source': 'skrapp',
+                                      'city': clean_text(row.get('city'), 80),
+                                      'country': clean_text(row.get('country'), 80)})
+            return Outcome('results' if companies else 'not_found', fields={'companies': companies})
+        if 'email' not in j and 'quality' not in j:
+            return _error('invalid_response')
+        email = _revealed_email(j.get('email'))
+        quality_block = j.get('quality') if isinstance(j.get('quality'), dict) else {}
+        status = quality_block.get('status') if isinstance(quality_block.get('status'), str) else ''
+        mapped = self.FIND_STATUS.get(status.lower())
+        if not email or mapped == 'invalid':
+            return Outcome('not_found', fields={'status': status or None})
+        flags = ['catch_all'] if mapped == 'accept_all' else []
+        first, last = clean_text(j.get('firstName'), 60), clean_text(j.get('lastName'), 60)
+        prospect = {'full_name': ' '.join(p for p in (first, last) if p) or None, 'email': email,
+                    'source': 'skrapp', 'source_url': None}
+        fields = {'status': status, 'finder_verification_status': mapped or 'unknown',
+                  'verification_is_fresh': False, 'prospect': prospect}
+        return Outcome('candidate', email, tuple(flags), fields)
+
+
+class HackerNews(_NoBalance):
+    """Hacker News Algolia story search. No key.
+
+    Docs (verified 2026-10): https://hn.algolia.com/api — GET
+    https://hn.algolia.com/api/v1/search?query=&tags=story.
+    """
+    id = 'hackernews'
+    independence_group = 'hackernews'
+    operations = ('watch',)
+    auth_env = ()
+    min_spacing = {'watch': 1.0}
+    origin = 'https://hn.algolia.com'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        query = urlencode({'query': search_query(payload.get('query')), 'tags': 'story', 'hitsPerPage': 10})
+        return self._request('GET', '/api/v1/search?' + query, {'Accept': 'application/json'})
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        hits = response.data.get('hits')
+        if not isinstance(hits, list):
+            return _error('invalid_response')
+        results = []
+        for row in hits[:10]:
+            if not isinstance(row, dict):
+                continue
+            title = clean_text(row.get('title'), 200)
+            url = safe_link(row.get('url')) if isinstance(row.get('url'), str) else None
+            if title:
+                results.append({'title': title, 'url': url, 'object_id': clean_text(row.get('objectID'), 40),
+                                'points': row.get('points') if type(row.get('points')) is int else None})
+        return Outcome('results' if results else 'not_found', fields={'results': results, 'prospects': []})
+
+
+class ProductHunt(_NoBalance):
+    """Product Hunt public posts (GraphQL). Developer/client token.
+
+    Docs (verified 2026-10): https://api.producthunt.com/v2/docs — POST
+    /v2/api/graphql with Authorization: Bearer. posts(first, topic).
+    """
+    id = 'producthunt'
+    independence_group = 'producthunt'
+    operations = ('watch',)
+    auth_env = ('PRODUCTHUNT_TOKEN',)
+    min_spacing = {'watch': 2.0}
+    origin = 'https://api.producthunt.com'
+    QUERY = ('query Watch($first: Int!, $topic: String) { posts(first: $first, topic: $topic) '
+             '{ edges { node { id name tagline url } } } }')
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        raw = search_query(payload.get('query'))
+        topic = raw if re.fullmatch(r'[a-z0-9-]{2,40}', raw) else None
+        headers = {'Authorization': 'Bearer ' + _secret(env, 'PRODUCTHUNT_TOKEN'),
+                   'Content-Type': 'application/json', 'Accept': 'application/json'}
+        body = {'query': self.QUERY, 'variables': {'first': 10, 'topic': topic}}
+        return self._request('POST', '/v2/api/graphql', headers, body, timeout=30)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        data = response.data.get('data')
+        posts = data.get('posts') if isinstance(data, dict) else None
+        edges = posts.get('edges') if isinstance(posts, dict) else None
+        if not isinstance(edges, list):
+            if isinstance(response.data.get('errors'), list):
+                return _error('provider_application_error')
+            return _error('invalid_response')
+        results = []
+        for edge in edges[:10]:
+            node = edge.get('node') if isinstance(edge, dict) else None
+            if not isinstance(node, dict):
+                continue
+            name = clean_text(node.get('name'), 160)
+            if name:
+                results.append({'title': name, 'tagline': clean_text(node.get('tagline'), 240),
+                                'url': safe_link(node.get('url')) if isinstance(node.get('url'), str) else None})
+        return Outcome('results' if results else 'not_found', fields={'results': results, 'prospects': []})
+
+
+class GitHub(_NoBalance):
+    """GitHub repository search as a company/product signal.
+
+    Docs (verified 2026-10): https://docs.github.com/en/rest/search/search —
+    GET /search/repositories. Authorization: Bearer. User-Agent required.
+    """
+    id = 'github'
+    independence_group = 'github'
+    operations = ('watch',)
+    auth_env = ('GITHUB_TOKEN',)
+    min_spacing = {'watch': 2.0}
+    origin = 'https://api.github.com'
+
+    def request(self, operation, payload, env):
+        self._operation(operation)
+        query = urlencode({'q': search_query(payload.get('query')), 'per_page': 5})
+        headers = {'Authorization': 'Bearer ' + _secret(env, 'GITHUB_TOKEN'),
+                   'Accept': 'application/vnd.github+json',
+                   'X-GitHub-Api-Version': '2022-11-28',
+                   'User-Agent': 'lead-research-kit github-signals'}
+        return self._request('GET', '/search/repositories?' + query, headers)
+
+    def parse(self, operation, response):
+        self._operation(operation)
+        failure = http_failure(response)
+        if failure:
+            return failure
+        items = response.data.get('items')
+        if not isinstance(items, list):
+            return _error('invalid_response')
+        results = []
+        for row in items[:5]:
+            if not isinstance(row, dict):
+                continue
+            name = clean_text(row.get('full_name'), 160)
+            if name:
+                results.append({'title': name, 'url': safe_link(row.get('html_url')) if isinstance(row.get('html_url'), str) else None,
+                                'description': clean_text(row.get('description'), 240)})
+        return Outcome('results' if results else 'not_found', fields={'results': results, 'prospects': []})
+
+
 PROVIDERS = {provider.id: provider for provider in (Hunter(), Verifalia(), Clearout(), ZeroBounce(), HunterInsight(), Disify(),
                                                     Serper(), Brave(), Overpass(), Apollo(), Prospeo(), GooglePlaces(),
                                                     Exa(), Tomba(), Icypeas(), Reoon(), MillionVerifier(),
                                                     AbstractEmail(), Emailable(), Kickbox(), Bouncer(), MyEmailVerifier(),
                                                     Tavily(), Firecrawl(), PeopleDataLabs(), SerpApi(), Deepline(),
                                                     QuickEmailVerification(), EmailValidationIo(), EmailListVerify(),
-                                                    Enrow(), Lusha(), Zenserp(), Linkup(), YouCom())}
+                                                    Enrow(), Lusha(), Zenserp(), Linkup(), YouCom(),
+                                                    Jina(), Apify(), Skrapp(), HackerNews(), ProductHunt(), GitHub())}
 
 
 def get_provider(provider_id):
