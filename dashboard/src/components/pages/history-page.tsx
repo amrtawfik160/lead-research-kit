@@ -9,7 +9,7 @@ import { QuietStatus } from "@/components/status-glyph";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { display, formatTime } from "@/lib/format";
+import { display, formatTime, humanName } from "@/lib/format";
 import type { HistoryPayload } from "@/lib/load";
 
 export function HistoryPage({ initial = null }: { initial?: HistoryPayload | null }): React.ReactElement {
@@ -52,9 +52,10 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                 <DataTable
                   rows={data.delivered}
                   rowKey={(item) =>
-                    `${item.batch}-${item.full_name}-${item.email}-${item.email_source}-${item.source}-${item.company_website}`
+                    String(item.key || `${item.batch}-${item.full_name}-${item.email}-${item.email_source}-${item.source}-${item.company_website}`)
                   }
                   onRowClick={setRow}
+                  exportFilename="veinore-history-delivered.csv"
                   emptyTitle="Nothing delivered yet"
                   emptyDescription="An executed daily run writes keys here."
                   groupOptions={[
@@ -66,8 +67,20 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                     { key: "email", header: "Email", width: "14rem", mono: true },
                     { key: "company_website", header: "Website", width: "12rem", mono: true },
                     { key: "batch", header: "Batch", width: "8rem" },
-                    { key: "email_source", header: "Email source", width: "10rem" },
-                    { key: "source", header: "Source", width: "8rem" },
+                    {
+                      key: "email_source",
+                      header: "Source",
+                      width: "11rem",
+                      value: (item) => humanName(String(item.email_source || item.source || "")),
+                      render: (item) => <QuietStatus value={String(item.email_source || item.source || "")} />,
+                    },
+                    {
+                      key: "key_count",
+                      header: "Keys",
+                      width: "6.5rem",
+                      align: "right",
+                      value: (item) => Number(item.key_count || 1),
+                    },
                   ]}
                 />
               </TabsPanel>
@@ -76,6 +89,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                   rows={data.suppressed}
                   rowKey={(item) => String(item.key)}
                   onRowClick={setRow}
+                  exportFilename="veinore-history-suppressed.csv"
                   emptyTitle="No suppressions"
                   emptyDescription="Do-not-contact and bounce blocks appear here."
                   columns={[
@@ -100,6 +114,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                   rows={data.outcomes}
                   rowKey={(item) => `${item.key}-${item.outcome}`}
                   onRowClick={setRow}
+                  exportFilename="veinore-history-outcomes.csv"
                   emptyTitle="No outreach outcomes"
                   emptyDescription="Import send results to score sources."
                   groupOptions={[{ value: "outcome", label: "Outcome" }]}
@@ -111,7 +126,7 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                       width: "8rem",
                       render: (item) => <QuietStatus value={String(item.outcome)} />,
                     },
-                    { key: "email_source", header: "Email source", width: "10rem" },
+                    { key: "email_source", header: "Email source", width: "10rem", value: (item) => humanName(String(item.email_source || "")) },
                     { key: "batch", header: "Batch", width: "8rem" },
                   ]}
                 />
@@ -121,12 +136,13 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                   rows={patterns}
                   rowKey={(item) => String(item.domain)}
                   onRowClick={setRow}
+                  exportFilename="veinore-history-patterns.csv"
                   emptyTitle="No distrusted patterns"
                   emptyDescription="Hard bounces on guessed emails mark a domain here."
                   columns={[
                     { key: "domain", header: "Domain", width: "14rem", mono: true },
                     { key: "reason", header: "Reason" },
-                    { key: "bounces", header: "Bounces", width: "6rem", align: "right" },
+                    { key: "bounces", header: "Bounces", width: "7rem", align: "right" },
                   ]}
                 />
               </TabsPanel>
@@ -135,10 +151,11 @@ export function HistoryPage({ initial = null }: { initial?: HistoryPayload | nul
                   rows={sources}
                   rowKey={(item) => String(item.source)}
                   onRowClick={setRow}
+                  exportFilename="veinore-history-sources.csv"
                   emptyTitle="No source quality yet"
                   emptyDescription="Outcomes roll up bounce and reply rates per email source."
                   columns={[
-                    { key: "source", header: "Source", width: "10rem" },
+                    { key: "source", header: "Source", width: "11rem", value: (item) => humanName(String(item.source || "")) },
                     { key: "delivered", header: "Delivered", width: "7rem", align: "right" },
                     { key: "bounced", header: "Bounced", width: "7rem", align: "right" },
                     { key: "replied", header: "Replied", width: "7rem", align: "right" },

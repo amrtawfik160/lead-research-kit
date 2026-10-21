@@ -7,7 +7,7 @@ import { PageBody, PageHeader, PageShell } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
 import { QuietStatus } from "@/components/status-glyph";
 import { api } from "@/lib/api";
-import { display, formatTime } from "@/lib/format";
+import { display, formatTime, humanName } from "@/lib/format";
 import type { JobsPayload } from "@/lib/load";
 import type { Attempt } from "@/lib/types";
 
@@ -35,6 +35,7 @@ export function JobsPage({ initial = null }: { initial?: JobsPayload | null }): 
               rows={data.attempts}
               rowKey={(item) => item.id}
               onRowClick={setRow}
+              exportFilename="veinore-jobs.csv"
               emptyTitle="No attempts match"
               emptyDescription="Clear the filter or change grouping."
               groupOptions={[
@@ -50,8 +51,8 @@ export function JobsPage({ initial = null }: { initial?: JobsPayload | null }): 
                   mono: true,
                   render: (item) => item.id.slice(0, 10),
                 },
-                { key: "provider", header: "Provider", width: "9rem" },
-                { key: "operation", header: "Op", width: "7rem" },
+                { key: "provider", header: "Provider", width: "9rem", value: (item) => humanName(item.provider) },
+                { key: "operation", header: "Op", width: "7rem", value: (item) => humanName(item.operation) },
                 {
                   key: "state",
                   header: "State",

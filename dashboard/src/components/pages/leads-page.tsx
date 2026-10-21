@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { DetailSheet } from "@/components/detail-sheet";
 import { FilterSelect } from "@/components/filter-select";
 import { DuplicateBanner } from "@/components/duplicate-banner";
@@ -8,6 +9,7 @@ import { ExportLeadsButton, LeadOpsPanel } from "@/components/lead-ops-panel";
 import { IssueList, type IssueItem } from "@/components/issue-list";
 import { PageBody, PageHeader, PageShell, PageToolbar } from "@/components/page-header";
 import { QueryGate, useQuery } from "@/components/query-state";
+import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { display, humanName } from "@/lib/format";
 import { issueKey } from "@/lib/gr8r";
@@ -16,17 +18,21 @@ import { isVerifiedLead, LEAD_STAGES, leadSource, leadStage } from "@/lib/lead-o
 import type { DailyPayload, LeadRow } from "@/lib/types";
 
 function toIssue(row: LeadRow, index: number): IssueItem<LeadRow> {
-  const risk = String(row["Email Risk"] || "");
+  const stage = leadStage(row);
+  const risk = String(row["Email Risk"] || "low");
+  const owner = String(row.Owner || "").trim();
   return {
     id: issueKey("LEA", index),
     title: display(row["Full Name"]),
+    subtitle: owner ? `Owner: ${owner}` : undefined,
+    leadGlyph: stage !== "new" ? stage : risk,
     project: display(row.Company),
     status: humanName(leadSource(row)),
     priority: display(row.Tier || row.Confidence),
     due: display(row.City),
     avatar: display(row.Company),
-    group: display(leadStage(row)),
-    done: risk.toLowerCase() === "low" && String(leadSource(row)).toLowerCase().includes("website"),
+    group: display(stage),
+    done: stage === "disqualified",
     raw: row,
   };
 }
@@ -38,6 +44,17 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
   const [source, setSource] = useState("all");
   const [verified, setVerified] = useState("all");
   const [stage, setStage] = useState("all");
+  const [ownerFilter, setOwnerFilter] = useState("all");
+
+  const owners = useMemo(() => {
+    return [
+      ...new Set(
+        (data?.leads || [])
+          .map((row) => String(row.Owner || "").trim())
+          .filter(Boolean),
+      ),
+    ].sort();
+  }, [data]);
 
   const rows = useMemo(() => {
     return (data?.leads || []).filter((row) => {
@@ -45,21 +62,28 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
       if (verified === "verified" && !isVerifiedLead(row)) return false;
       if (verified === "unverified" && isVerifiedLead(row)) return false;
       if (stage !== "all" && leadStage(row) !== stage) return false;
+      const rowOwner = String(row.Owner || "").trim();
+      if (ownerFilter === "assigned" && !rowOwner) return false;
+      if (ownerFilter === "unassigned" && rowOwner) return false;
+      if (ownerFilter !== "all" && ownerFilter !== "assigned" && ownerFilter !== "unassigned" && rowOwner !== ownerFilter) {
+        return false;
+      }
       return true;
     });
-  }, [data, source, stage, verified]);
+  }, [data, ownerFilter, source, stage, verified]);
 
   const issues = useMemo(() => rows.map((row) => toIssue(row, (data?.leads || []).indexOf(row))), [data, rows]);
   const selected = lead ? issues.find((item) => item.raw === lead || leadOpsMatch(item.raw, lead)) : undefined;
   const sources = useMemo(() => {
     return [...new Set((data?.leads || []).map((row) => leadSource(row).toLowerCase()).filter(Boolean))].sort();
   }, [data]);
+  const hasActiveFilters = source !== "all" || verified !== "all" || stage !== "all" || ownerFilter !== "all";
 
   return (
     <PageShell>
       <PageHeader
         title="Leads"
-        description={`${rows.length} shown · filter by source, verification, date, or stage`}
+        description={`${rows.length} shown · filter by source, verification, date, stage, or owner`}
         actions={<ExportLeadsButton rows={rows} filename={`veinore-leads-${data?.date || "export"}.csv`} />}
       />
       <QueryGate
@@ -110,6 +134,33 @@ export function LeadsPage({ initial = null }: { initial?: DailyPayload | null })
                 onChange={setStage}
                 options={[{ value: "all", label: "All stages" }, ...LEAD_STAGES]}
               />
+              <FilterSelect
+                label="Owner"
+                ariaLabel="Filter leads by owner"
+                value={ownerFilter}
+                onChange={setOwnerFilter}
+                options={[
+                  { value: "all", label: "All owners" },
+                  { value: "assigned", label: "Assigned" },
+                  { value: "unassigned", label: "Unassigned" },
+                  ...owners.map((item) => ({ value: item, label: item })),
+                ]}
+              />
+              {hasActiveFilters ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setSource("all");
+                    setVerified("all");
+                    setStage("all");
+                    setOwnerFilter("all");
+                  }}
+                >
+                  <X className="size-3.5" />
+                  Clear filters
+                </Button>
+              ) : null}
             </PageToolbar>
             <DuplicateBanner items={data.duplicates} className="mt-3 mb-1" />
             <IssueList

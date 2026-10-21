@@ -38,6 +38,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                   rows={data.queue}
                   rowKey={(row) => row.id}
                   onRowClick={setContact}
+                  exportFilename="veinore-research-queue.csv"
                   emptyTitle="Research queue is empty"
                   emptyDescription="Everyone already has evidence, is held, or is complete."
                   columns={[
@@ -47,7 +48,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                     {
                       key: "source_channel",
                       header: "Channel",
-                      width: "7rem",
+                      width: "8rem",
                       render: (row) => <QuietStatus value={row.source_channel} />,
                     },
                     { key: "source_url", header: "Source" },
@@ -59,6 +60,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                   rows={data.evidence}
                   rowKey={(row) => String(row.id)}
                   onRowClick={setRecord}
+                  exportFilename="veinore-evidence.csv"
                   emptyTitle="No evidence yet"
                   emptyDescription="Record a public source on the CLI."
                   groupOptions={[{ value: "classification", label: "Classification" }]}
@@ -68,7 +70,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                     {
                       key: "classification",
                       header: "Class",
-                      width: "10rem",
+                      width: "11rem",
                       render: (row) => <QuietStatus value={String(row.classification)} />,
                     },
                     { key: "source_url", header: "Source", width: "16rem" },
@@ -81,6 +83,7 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                   rows={data.candidates}
                   rowKey={(row) => String(row.id)}
                   onRowClick={setRecord}
+                  exportFilename="veinore-candidates.csv"
                   emptyTitle="No email candidates"
                   emptyDescription="Generate candidates after a domain is known."
                   groupOptions={[{ value: "kind", label: "Kind" }]}
@@ -96,8 +99,9 @@ export function ResearchPage({ initial = null }: { initial?: ResearchPayload | n
                     {
                       key: "identity_confirmed",
                       header: "Identity",
-                      width: "7rem",
-                      value: (row) => String(row.identity_confirmed),
+                      width: "8rem",
+                      value: (row) => (row.identity_confirmed ? "Confirmed" : "Unverified"),
+                      render: (row) => <QuietStatus value={row.identity_confirmed ? "confirmed" : "unverified"} />,
                     },
                   ]}
                 />

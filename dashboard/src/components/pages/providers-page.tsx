@@ -52,6 +52,7 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
               onRowClick={setRow}
               selectedKey={row?.id}
               defaultSort={{ key: "enabled", dir: "desc" }}
+              exportFilename="veinore-providers.csv"
               emptyTitle="No providers"
               emptyDescription="The kit registry did not load."
               groupOptions={[
@@ -93,9 +94,9 @@ export function ProvidersPage({ initial = null }: { initial?: ProvidersPayload |
                 {
                   key: "operations",
                   header: "Ops",
-                  width: "12rem",
-                  value: (item) => item.operations.join(", "),
-                  render: (item) => <CellText value={item.operations.join(", ")} />,
+                  width: "13rem",
+                  value: (item) => item.operations.map(humanName).join(", "),
+                  render: (item) => <CellText value={item.operations.map(humanName).join(", ")} />,
                 },
                 {
                   key: "budgets",

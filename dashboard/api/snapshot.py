@@ -412,9 +412,32 @@ class Dashboard:
         if history is None:
             return {'stats': {}, 'delivered': [], 'suppressed': [], 'outcomes': [], 'patterns': {}, 'source_quality': {}, 'refills': []}
         try:
-            delivered = [dict(r) for r in history.db.execute(
-                'SELECT batch, full_name, company_website, email, linkedin_url, email_source, source FROM delivered ORDER BY batch DESC LIMIT 400'
+            raw_delivered = [dict(r) for r in history.db.execute(
+                'SELECT key, batch, full_name, company_website, email, linkedin_url, email_source, source FROM delivered ORDER BY batch DESC LIMIT 400'
             )]
+            grouped_delivered = {}
+            for row in raw_delivered:
+                person_key = (
+                    row.get('batch') or '',
+                    (row.get('email') or row.get('full_name') or row.get('key') or '').lower(),
+                )
+                entry = grouped_delivered.get(person_key)
+                key_prefix = str(row.get('key') or '').split(':', 1)[0]
+                if entry is None:
+                    entry = {
+                        **row,
+                        'keys': [key_prefix] if key_prefix else [],
+                        'key_count': 1,
+                    }
+                    grouped_delivered[person_key] = entry
+                else:
+                    entry['key_count'] = int(entry.get('key_count') or 1) + 1
+                    if key_prefix and key_prefix not in entry['keys']:
+                        entry['keys'].append(key_prefix)
+            delivered = [
+                {**item, 'keys': ', '.join(item.get('keys') or [])}
+                for item in grouped_delivered.values()
+            ]
             suppressed = [dict(r) for r in history.db.execute('SELECT key, reason, added_at FROM suppressed ORDER BY added_at DESC LIMIT 200')]
             outcomes = [dict(r) for r in history.db.execute(
                 'SELECT key, outcome, source, email_source, batch, added_at FROM outcomes ORDER BY added_at DESC LIMIT 200'
@@ -525,6 +548,7 @@ class Dashboard:
                 'quota_units': remaining_units + spent_units,
                 'quota': format_units(remaining_units + spent_units),
             })
+        rows.sort(key=lambda row: (-int(row.get('spent_units') or 0), -int(row.get('quota_units') or 0), str(row.get('provider') or '')))
         return {
             'budgets': rows,
             'refills': providers.get('refills') or [],
@@ -699,7 +723,7 @@ class Dashboard:
                     'quota': format_units(remaining_units + spent_units),
                     'quota_units': remaining_units + spent_units,
                 })
-        quota.sort(key=lambda row: (-int(row.get('quota_units') or 0), str(row.get('id'))))
+        quota.sort(key=lambda row: (-int(row.get('spent_units') or 0), -int(row.get('quota_units') or 0), str(row.get('id'))))
         budget_spent = [
             {
                 'provider': provider,

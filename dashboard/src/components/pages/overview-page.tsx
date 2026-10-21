@@ -284,8 +284,8 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                         <div key={attempt.id} className="flex min-h-10 items-center gap-2.5 border-t first:border-t-0">
                           <EntityAvatar name={attempt.provider} size={22} />
                           <div className="min-w-0 flex-1 text-sm">
-                            <span className="font-medium">{attempt.provider}</span>{" "}
-                            <span className="text-muted-foreground">{attempt.operation}</span>
+                            <span className="font-medium">{humanName(attempt.provider)}</span>{" "}
+                            <span className="text-muted-foreground">{humanName(attempt.operation)}</span>
                           </div>
                           <QuietStatus value={attempt.state} />
                         </div>

@@ -15,12 +15,12 @@ export function CellText({
 }): React.ReactElement {
   const shown = display(value);
   const classes = cn("block min-w-0 truncate", mono && "font-mono text-xs", className);
-  if (shown === "—" || shown.length <= 28) {
+  if (shown === "—" || shown.length <= 20) {
     return <span className={classes}>{shown}</span>;
   }
   return (
     <Tooltip>
-      <TooltipTrigger render={<span className={classes} />}>{shown}</TooltipTrigger>
+      <TooltipTrigger render={<span className={classes} data-cell-tooltip="true" />}>{shown}</TooltipTrigger>
       <TooltipPopup className="max-w-xs text-xs">{shown}</TooltipPopup>
     </Tooltip>
   );

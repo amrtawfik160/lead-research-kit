@@ -65,6 +65,22 @@ const measure = () => {
             gap: next.left - box.right,
           });
         }
+        const leftChild = cell.firstElementChild?.getBoundingClientRect();
+        const rightChild = cells[i + 1].firstElementChild?.getBoundingClientRect();
+        if (
+          leftChild &&
+          rightChild &&
+          leftChild.width > 0 &&
+          rightChild.width > 0 &&
+          rightChild.left - leftChild.right < 6
+        ) {
+          overlaps.push({
+            kind: "cell-content-gap",
+            left: cell.textContent?.trim().slice(0, 48) || "",
+            right: cells[i + 1].textContent?.trim().slice(0, 48) || "",
+            gap: rightChild.left - leftChild.right,
+          });
+        }
       }
       for (const node of cell.querySelectorAll("span, a, p, div, button")) {
         const text = (node.textContent || "").trim();
@@ -79,6 +95,32 @@ const measure = () => {
           });
         }
       }
+    }
+  }
+  for (const headSpan of document.querySelectorAll('[data-slot="table-head"] button span')) {
+    if (headSpan.scrollWidth > headSpan.clientWidth + 1) {
+      overlaps.push({
+        kind: "table-head-truncated",
+        text: (headSpan.textContent || "").trim(),
+      });
+    }
+  }
+  for (const statusNode of document.querySelectorAll('[data-slot="quiet-status"]')) {
+    const rawText = (statusNode.textContent || "").trim();
+    if (/[a-z0-9]+_[a-z0-9]+/i.test(rawText)) {
+      overlaps.push({
+        kind: "raw-snake-case-status",
+        text: rawText.slice(0, 48),
+      });
+    }
+  }
+  for (const titleNode of document.querySelectorAll(".issue-title")) {
+    const deco = getComputedStyle(titleNode).textDecorationLine || "";
+    if (deco.includes("line-through")) {
+      overlaps.push({
+        kind: "lead-title-strikethrough",
+        text: (titleNode.textContent || "").trim().slice(0, 48),
+      });
     }
   }
   return {
@@ -155,6 +197,39 @@ try {
         });
       }
     }
+
+    // Interactive state & tab checks at each width
+    await page.goto(`${origin}/history`, { waitUntil: "networkidle", timeout: 45000 });
+    for (const tabLabel of ["Suppressed", "Outcomes", "Patterns", "Sources", "Delivered"]) {
+      const tab = page.getByRole("tab", { name: tabLabel });
+      if (await tab.count()) {
+        await tab.click();
+        await page.waitForTimeout(80);
+        const tabMeasure = await page.evaluate(measure);
+        if (tabMeasure.overlaps?.length) {
+          failures.push(`/history (${tabLabel}) @${width}: ${JSON.stringify(tabMeasure.overlaps.slice(0, 4))}`);
+        }
+      }
+    }
+
+    await page.goto(`${origin}/leads`, { waitUntil: "networkidle", timeout: 45000 });
+    await page.keyboard.press("Tab");
+    const hasFocus = await page.evaluate(() => Boolean(document.activeElement && document.activeElement !== document.body));
+    if (!hasFocus) {
+      failures.push(`/leads @${width}: keyboard Tab did not move focus`);
+    }
+    const firstLeadRow = page.locator('[data-slot="table-row"]').nth(1);
+    if (await firstLeadRow.count()) {
+      await firstLeadRow.click();
+      await page.waitForTimeout(120);
+      const stageTrigger = page.getByRole("combobox", { name: "Lead stage" });
+      if (!(await stageTrigger.count())) {
+        failures.push(`/leads @${width}: clicking lead row did not open LeadOpsPanel in DetailSheet`);
+      }
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(80);
+    }
+
     await context.close();
   }
 } finally {

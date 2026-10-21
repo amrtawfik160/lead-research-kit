@@ -26,7 +26,7 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
             <div className="grid gap-4 pb-4 md:grid-cols-2">
               <ChartCard title="Spent vs remaining">
                 <QuotaChart
-                  rows={data.budgets.slice(0, 8).map((budget) => ({
+                  rows={data.budgets.slice(0, 6).map((budget) => ({
                     label: chartPool(`${budget.provider}.${budget.pool}`),
                     remaining: Number(budget.remaining) || 0,
                     spent: Number(budget.spent) || 0,
@@ -35,7 +35,7 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
               </ChartCard>
               <ChartCard title="Refills">
                 <HorizontalBarChart
-                  rows={data.refills.slice(0, 8).map((item) => ({
+                  rows={data.refills.slice(0, 6).map((item) => ({
                     label: chartPool(`${item.provider}.${item.pool}`),
                     value: Number(item.amount) || 0,
                   }))}
@@ -49,6 +49,7 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
               rowKey={(item) => `${item.provider}-${item.pool}`}
               onRowClick={setRow}
               selectedKey={row ? `${row.provider}-${row.pool}` : undefined}
+              exportFilename="veinore-budgets.csv"
               emptyTitle="No attested budgets"
               emptyDescription="Confirm a free pool on the CLI before the dashboard can chart it."
               columns={[
@@ -56,7 +57,7 @@ export function BudgetPage({ initial = null }: { initial?: BudgetPayload | null 
                 { key: "pool", header: "Pool", width: "12rem", value: (item) => humanName(item.pool) },
                 { key: "remaining", header: "Remaining", width: "8rem", mono: true },
                 { key: "spent", header: "Spent", width: "8rem", mono: true, value: (item) => item.spent || "0" },
-                { key: "source", header: "Source" },
+                { key: "source", header: "Source", value: (item) => humanName(String(item.source || "")) },
               ]}
             />
             <DetailSheet

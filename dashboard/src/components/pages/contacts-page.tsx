@@ -10,7 +10,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { toastManager } from "@/components/ui/toast";
 import { api } from "@/lib/api";
-import { display, explainError } from "@/lib/format";
+import { display, explainError, humanName } from "@/lib/format";
 import type { ContactsPayload } from "@/lib/load";
 import type { Contact, ContactDetail } from "@/lib/types";
 
@@ -26,10 +26,11 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
         title: display(row.name),
         project: display(row.company),
         status: row.held ? "held" : row.qualified ? "qualified" : "open",
-        priority: display(row.source_channel),
+        priority: humanName(display(row.source_channel)),
         due: display(row.title),
         avatar: display(row.company || row.name),
-        group: display(row.source_channel),
+        group: humanName(display(row.source_channel)),
+        done: Boolean(row.held),
         raw: row,
       })),
     [data],
@@ -83,6 +84,7 @@ export function ContactsPage({ initial = null }: { initial?: ContactsPayload | n
           <PageBody>
             <IssueList
               items={issues}
+              hideIds
               selectedId={selected?.id}
               onSelect={(item) => {
                 if (!item) {

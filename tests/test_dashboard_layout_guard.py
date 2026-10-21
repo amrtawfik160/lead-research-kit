@@ -22,6 +22,11 @@ class DashboardLayoutGuardTests(unittest.TestCase):
             result.stdout + result.stderr,
         )
 
+    def test_primitive_guards_enforced(self):
+        from scripts.check_dashboard_layout import primitive_guards
+
+        self.assertEqual(primitive_guards(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

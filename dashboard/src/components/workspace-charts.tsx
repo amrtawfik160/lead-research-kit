@@ -65,19 +65,29 @@ function ChartTooltip({
   label,
 }: Partial<TooltipContentProps<number, string>>): React.ReactElement | null {
   if (!active || !payload?.length) return null;
+  const total =
+    payload.length > 1
+      ? payload.reduce((sum, item) => sum + (typeof item.value === "number" ? item.value : Number(item.value) || 0), 0)
+      : 0;
   return (
-    <div className="rounded-lg border bg-popover px-2.5 py-2 text-sm text-popover-foreground shadow-md">
-      {label ? <p className="mb-1 font-medium">{label}</p> : null}
-      <ul className="grid gap-0.5">
+    <div className="rounded-lg border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md">
+      {label ? <p className="mb-1.5 font-medium text-foreground">{label}</p> : null}
+      <ul className="grid gap-1">
         {payload.map((item) => (
           <li key={String(item.dataKey || item.name)} className="flex items-center justify-between gap-4">
             <span className="inline-flex items-center gap-1.5 text-muted-foreground">
               <span className="size-2 rounded-[2px]" style={{ background: item.color || "var(--chart-1)" }} />
               {item.name}
             </span>
-            <span className="font-medium tabular-nums">{item.value}</span>
+            <span className="font-medium tabular-nums text-foreground">{item.value}</span>
           </li>
         ))}
+        {total > 0 && payload.some((item) => item.name === "Spent" || item.name === "Remaining") ? (
+          <li className="mt-0.5 flex items-center justify-between gap-4 border-t pt-1 text-muted-foreground">
+            <span>Total pool</span>
+            <span className="font-medium tabular-nums text-foreground">{total}</span>
+          </li>
+        ) : null}
       </ul>
     </div>
   );
@@ -181,6 +191,7 @@ export function HorizontalBarChart({
           <YAxis
             type="category"
             dataKey="name"
+            interval={0}
             width={156}
             tick={AXIS}
             tickLine={false}
@@ -188,7 +199,7 @@ export function HorizontalBarChart({
             tickFormatter={shortLabel}
           />
           <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--accent)", opacity: 0.35 }} />
-          <Bar dataKey="Count" fill="var(--chart-1)" radius={[0, 4, 4, 0]} maxBarSize={14} />
+          <Bar dataKey="Count" fill="var(--chart-1)" radius={[0, 4, 4, 0]} maxBarSize={16} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -224,6 +235,7 @@ export function QuotaChart({
             <YAxis
               type="category"
               dataKey="name"
+              interval={0}
               width={156}
               tick={AXIS}
               tickLine={false}
@@ -231,8 +243,8 @@ export function QuotaChart({
               tickFormatter={shortLabel}
             />
             <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--accent)", opacity: 0.35 }} />
-            <Bar dataKey="Spent" stackId="quota" fill="var(--chart-5)" maxBarSize={14} />
-            <Bar dataKey="Remaining" stackId="quota" fill="var(--chart-1)" radius={[0, 4, 4, 0]} maxBarSize={14} />
+            <Bar dataKey="Spent" stackId="quota" fill="var(--chart-5)" maxBarSize={16} />
+            <Bar dataKey="Remaining" stackId="quota" fill="var(--chart-1)" radius={[0, 4, 4, 0]} maxBarSize={16} />
           </BarChart>
         </ResponsiveContainer>
       </div>
