@@ -1469,7 +1469,10 @@ def output_row(r, mode='clean', target=None):
     email = r.get('email', '')
     company = r.get('company', '')
     if mode == 'clean':
-        allowed = r.get('email_kind') == 'work' or (r.get('email_kind') == 'personal' and target.allow_personal_email)
+        # A reloaded daily row has an address but no email_kind stamp. Classify it
+        # here so a later execute does not blank work emails it already delivered.
+        kind = r.get('email_kind') or (email_kind(email) if email else '')
+        allowed = kind == 'work' or (kind == 'personal' and target.allow_personal_email)
         email = email if allowed else ''
         if 'company_generic' in r.get('issues', ()):
             company = ''

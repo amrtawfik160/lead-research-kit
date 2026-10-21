@@ -7,7 +7,7 @@ import { DuplicateBanner } from "@/components/duplicate-banner";
 import { EmptyState } from "@/components/empty-state";
 import { EntityAvatar } from "@/components/entity-avatar";
 import { LabelChip } from "@/components/label-chip";
-import { BarSpark, ChartCard, Donut, HBars, StackedQuota } from "@/components/mini-charts";
+import { ChartCard, HorizontalBarChart, LeadsPerDayChart, QuotaChart, VerificationChart } from "@/components/workspace-charts";
 import { PageBody, PageHeader } from "@/components/page-header";
 import { Panel, PanelHeader, SegTabs } from "@/components/panel";
 import { ProgBar } from "@/components/prog-bar";
@@ -55,26 +55,27 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
     <>
       <QueryGate loading={loading} error={error} empty={!data} skeleton="cards">
         {data ? (
-          <PageBody className="mx-auto w-full max-w-[1160px] px-6 pb-16">
+          <PageBody className="mx-auto w-full max-w-[1160px] pb-16">
             <PageHeader
               title={`${greeting()}`}
               description={`${longDate()} · Lead deliveries and provider quota across this workspace.`}
               actions={
                 <>
-                  <Button size="sm" variant="outline" className="h-[26px] rounded-[6px] text-[12px]" render={<Link href="/leads" />}>
+                  <Button size="sm" variant="outline" render={<Link href="/leads" />}>
                     Leads
                   </Button>
-                  <Button size="sm" variant="outline" className="h-[26px] rounded-[6px] text-[12px]" render={<Link href="/quality" />}>
+                  <Button size="sm" variant="outline" render={<Link href="/quality" />}>
                     Clean list
                   </Button>
-                  <Button size="sm" className="h-[26px] rounded-[6px] text-[12px]" render={<Link href="/daily" />}>
+                  <Button size="sm" render={<Link href="/daily" />}>
                     Open daily
                   </Button>
                 </>
               }
             />
-            <DuplicateBanner items={data.duplicates} />
-            <div className="mb-4 grid grid-cols-2 overflow-hidden rounded-[10px] border sm:grid-cols-4">
+            <div className="flex flex-col gap-4 px-6">
+            <DuplicateBanner items={data.duplicates} className="mb-0" />
+            <div className="grid grid-cols-2 overflow-hidden rounded-[10px] border sm:grid-cols-4">
               <Stat
                 href="/daily"
                 icon={Users}
@@ -106,52 +107,44 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                 tone={(data.history.domains_uncrawled ?? 0) > 0 ? "bad" : undefined}
               />
             </div>
-            <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <ChartCard title="Leads per day" hint={`${charts?.leads_per_day.length || 0} days`}>
-                <BarSpark
-                  values={(charts?.leads_per_day || []).map((row) => row.delivered)}
-                  labels={(charts?.leads_per_day || []).map((row) => String(row.date || ""))}
+            <div className="grid gap-4 lg:grid-cols-6">
+              <ChartCard className="lg:col-span-3" title="Leads per day" hint={`${charts?.leads_per_day.length || 0} days`}>
+                <LeadsPerDayChart points={charts?.leads_per_day || []} />
+              </ChartCard>
+              <ChartCard className="lg:col-span-3" title="Verification rate" hint={`${charts?.verification.verified || 0} verified`}>
+                <VerificationChart
+                  verified={charts?.verification.verified || 0}
+                  unverified={charts?.verification.unverified || 0}
                 />
               </ChartCard>
-              <ChartCard title="Verification rate" hint={`${charts?.verification.verified || 0} verified`}>
-                <Donut
-                  value={charts?.verification.verified || 0}
-                  total={(charts?.verification.verified || 0) + (charts?.verification.unverified || 0)}
-                  label={`${charts?.verification.unverified || 0} still unverified in the latest delivery`}
-                />
-              </ChartCard>
-              <ChartCard title="Lead sources">
-                <HBars
-                  items={(charts?.sources || []).slice(0, 5).map((row) => ({
+              <ChartCard className="lg:col-span-2" title="Lead sources">
+                <HorizontalBarChart
+                  rows={(charts?.sources || []).slice(0, 6).map((row) => ({
                     label: row.name.replace(/_/g, " "),
                     value: row.count,
                   }))}
+                  emptyTitle="No source mix"
+                  emptyDescription="Deliver a daily file to see where emails came from."
                 />
               </ChartCard>
-              <ChartCard title="Provider quota">
-                <StackedQuota
-                  items={(charts?.provider_quota || []).slice(0, 5).map((row) => ({
-                    label: `${row.id} ${row.pool}`,
-                    remaining: row.remaining_units,
-                    spent: row.spent_units,
-                    hint: row.spent_units
-                      ? `${prettyUnits(row.spent)} used · ${prettyUnits(row.remaining)} left`
-                      : `${prettyUnits(row.remaining)} left`,
+              <ChartCard className="lg:col-span-2" title="Provider quota">
+                <QuotaChart
+                  rows={(charts?.provider_quota || []).slice(0, 6).map((row) => ({
+                    label: `${row.id} ${String(row.pool).replace(/_/g, " ")}`,
+                    remaining: displayUnits(row.remaining),
+                    spent: displayUnits(row.spent),
                   }))}
                 />
               </ChartCard>
-              <ChartCard title="Budget spent" hint={charts?.budget_spent.length ? `${charts.budget_spent.length} pools` : "none"}>
-                {(charts?.budget_spent || []).length ? (
-                  <HBars
-                    items={(charts?.budget_spent || []).slice(0, 5).map((row) => ({
-                      label: `${row.provider} ${row.pool}`,
-                      value: row.spent_units,
-                      hint: prettyUnits(row.spent),
-                    }))}
-                  />
-                ) : (
-                  <p className="pt-4 text-[12px] text-muted-foreground">No provider spend in this workspace yet.</p>
-                )}
+              <ChartCard className="lg:col-span-2" title="Budget spent" hint={charts?.budget_spent.length ? `${charts.budget_spent.length} pools` : "none"}>
+                <HorizontalBarChart
+                  rows={(charts?.budget_spent || []).slice(0, 6).map((row) => ({
+                    label: `${row.provider} ${String(row.pool).replace(/_/g, " ")}`,
+                    value: displayUnits(row.spent),
+                  }))}
+                  emptyTitle="No provider spend"
+                  emptyDescription="Completed attempts in this workspace have not charged a pool."
+                />
               </ChartCard>
             </div>
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
@@ -194,7 +187,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                   <PanelHeader
                     title="Provider usage"
                     actions={
-                      <Button size="sm" variant="ghost" className="h-[26px] text-[12px]" render={<Link href="/providers" />}>
+                      <Button size="xs" variant="ghost" render={<Link href="/providers" />}>
                         All providers
                       </Button>
                     }
@@ -249,7 +242,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                   <PanelHeader
                     title="Today's delivery"
                     actions={
-                      <Button size="sm" variant="ghost" className="h-[26px] text-[12px]" render={<Link href="/daily" />}>
+                      <Button size="xs" variant="ghost" render={<Link href="/daily" />}>
                         <Calendar className="size-3.5" />
                         Daily
                       </Button>
@@ -277,7 +270,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                   <PanelHeader
                     title="Recent attempts"
                     actions={
-                      <Button size="sm" variant="ghost" className="h-[26px] text-[12px]" render={<Link href="/jobs" />}>
+                      <Button size="xs" variant="ghost" render={<Link href="/jobs" />}>
                         View all
                       </Button>
                     }
@@ -303,6 +296,7 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
                 </Panel>
               </div>
             </div>
+            </div>
           </PageBody>
         ) : null}
       </QueryGate>
@@ -310,11 +304,10 @@ export function OverviewPage({ initial = null }: { initial?: Overview | null }):
   );
 }
 
-function prettyUnits(value?: string | number | null): string {
+function displayUnits(value?: string | number | null): number {
   const text = value == null ? "" : String(value);
-  if (!text) return "0";
-  if (!text.includes(".")) return text;
-  return text.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function DeadlineGroup({ label, count }: { label: string; count?: number }): React.ReactElement {
@@ -360,7 +353,7 @@ function Stat({
   return (
     <Link
       href={href}
-      className="flex flex-col gap-1.5 border-l px-4 py-3 first:border-l-0 transition-colors hover:bg-[#f6f5f2] dark:hover:bg-[#252524] sm:first:border-l-0"
+      className="flex flex-col gap-2 border-l px-4 py-4 first:border-l-0 transition-colors hover:bg-[#f6f5f2] dark:hover:bg-[#252524] sm:first:border-l-0"
     >
       <span className="inline-flex items-center gap-1.5 text-[12.5px] text-[#57544e] dark:text-[#b5b2ab]">
         <Icon className="size-3.5" />
