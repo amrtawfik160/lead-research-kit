@@ -136,5 +136,81 @@ class DailyTargetingTests(unittest.TestCase):
             self.assertIn('skipped_targeting', report)
 
 
+
+
+class StateRevenueTitleDiscoveryTests(unittest.TestCase):
+    CA = {'country': 'US', 'states': 'CA', 'revenue_min': '5M',
+          'industry': 'real estate development,real estate,commercial real estate,property management,construction',
+          'include_titles': 'CEO,COO,CFO,President,Partner,Managing Partner,Managing Director,VP of Strategy,Founder,Owner,Principal,EVP,SVP',
+          'exclude_titles': 'junior,assistant,coordinator,intern'}
+
+    def lead(self, **kw):
+        base = {'full_name': 'Casey Morgan', 'title': 'Chief Executive Officer', 'company': 'Harbor Development Group',
+                'company_website': 'harbor.example', 'state': 'CA'}
+        base.update(kw)
+        return base
+
+    def test_titles_strict(self):
+        from lead_research.targeting import title_matches, title_matches_include
+        self.assertTrue(title_matches('Vice President, Strategy & Growth', 'VP of Strategy'))
+        self.assertFalse(title_matches_include('Vice President of Sales', ['President']))
+        self.assertFalse(title_matches_include('Vice President of Sales', ['EVP', 'SVP', 'VP of Strategy']))
+        self.assertTrue(title_matches_include('EVP, Development', ['EVP']))
+        self.assertTrue(title_matches_include('President & CEO', ['President']))
+
+    def test_states_and_reasons(self):
+        from lead_research.targeting import normalize_targeting, targeting_reason
+        rules = normalize_targeting(self.CA)
+        self.assertEqual(rules['states'], ['CA'])
+        self.assertIsNone(targeting_reason(self.lead(), rules))
+        self.assertEqual(targeting_reason(self.lead(state='TX'), rules), 'state')
+        self.assertEqual(targeting_reason(self.lead(state=''), rules), 'state_unknown')
+        self.assertEqual(targeting_reason(self.lead(title='Executive Assistant to the CEO'), rules), 'excluded_title')
+        with self.assertRaises(PolicyError):
+            normalize_targeting({'states': 'Narnia'})
+
+    def test_revenue_unknown_keep_label_or_drop(self):
+        from lead_research.targeting import filter_records, normalize_targeting, targeting_reason
+        kept, step = filter_records([self.lead(), self.lead(annual_revenue_usd=1_000_000), self.lead(annual_revenue_usd=9_000_000)],
+                                    normalize_targeting(self.CA))
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(step['dropped'], {'revenue': 1})
+        self.assertEqual(step['notes'], {'revenue_unknown': 1})
+        self.assertEqual(kept[0]['revenue_status'], 'unknown')
+        self.assertEqual(targeting_reason(self.lead(), normalize_targeting({**self.CA, 'revenue_unknown': 'drop'})), 'revenue_unknown')
+
+    def test_discovery_plan_and_record_feeds(self):
+        from lead_research.targeting import allowed_record_sources, discovery_plan, normalize_targeting
+        rules = normalize_targeting(self.CA)
+        plan = discovery_plan(rules, [('Irvine', 'CA'), ('Austin', 'TX')], {'CA': 'California', 'TX': 'Texas'}, ('Real Estate',))
+        self.assertEqual(plan['metros'], [('Irvine', 'CA')])
+        self.assertEqual(plan['states'], ['CA'])
+        self.assertIn('Construction', plan['industries'])
+        kept, skipped = allowed_record_sources(('tx-trec', 'ny-dos', 'sec-form-d'), rules)
+        self.assertEqual(kept, ('sec-form-d',))
+        self.assertEqual(set(skipped), {'tx-trec', 'ny-dos'})
+
+    def test_cli_save_pin_show_with_dollar_name(self):
+        import contextlib, io, json, tempfile
+        from pathlib import Path
+        from lead_research.cli import main
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / 'ws'
+            def call(*args):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    code = main(['--workspace', str(work), '--json', *args])
+                return code, json.loads(out.getvalue())
+            call('init')
+            code, out = call('filter', 'save', 'US CRE decision makers $5M+', '--country', 'US', '--state', 'CA',
+                             '--revenue-min', '5M', '--revenue-unknown', 'keep', '--industry', 'real estate,construction',
+                             '--include-titles', 'CEO,Managing Partner', '--exclude-titles', 'assistant,intern', '--exclude-junior', '--pin')
+            self.assertEqual(code, 0)
+            self.assertTrue(out['saved']['pinned'])
+            code, shown = call('filter', 'show', 'us cre decision makers $5m+')
+            self.assertEqual(code, 0)
+            self.assertEqual(shown['filter']['query']['states'], ['CA'])
+            self.assertEqual(shown['filter']['query']['revenue_unknown'], 'keep')
+
 if __name__ == '__main__':
     unittest.main()

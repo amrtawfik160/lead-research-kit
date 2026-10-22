@@ -31,7 +31,7 @@ def normalize_filter_name(name):
         raise PolicyError('filter_name_required')
     if len(text) > FILTER_NAME_MAX:
         raise PolicyError('filter_name_too_long')
-    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9 _.-]*', text):
+    if not re.fullmatch(r'[A-Za-z0-9$][A-Za-z0-9 _.$+&()-]*', text):
         raise PolicyError('invalid_filter_name')
     return text
 
