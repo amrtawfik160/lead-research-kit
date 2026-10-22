@@ -69,4 +69,36 @@ class CliTests(unittest.TestCase):
             self.assertEqual((os.environ['SYNTH_TEST_KEY_A'],os.environ['SYNTH_TEST_KEY_B']),('fromfile','preset'))
             os.environ.pop('SYNTH_TEST_KEY_A',None)
 
+    def test_json_flag_accepted_in_any_position(self):
+        code1,r1=self.call('--json','init')
+        code2,r2=self.call('status','--json')
+        code3,r3=self.call('provider','list','--json')
+        self.assertEqual((code1,code2,code3),(0,0,0))
+        self.assertTrue(r2['audit_ok'])
+        self.assertEqual(len(r3['providers']),41)
+        jina=next(p for p in r3['providers'] if p['id']=='jina')
+        self.assertEqual(jina['required_env'],[])
+        self.assertEqual(jina['optional_env'],['JINA_API_KEY'])
+        self.assertTrue(jina['key_present'])
+
+    def test_entrypoint_emits_structured_error_with_hint_when_uninitialized(self):
+        from lead_research.cli import entrypoint
+        err=io.StringIO()
+        with patch('sys.argv',['lead-research','--workspace',str(self.root/'missing-ws'),'status','--json']),contextlib.redirect_stderr(err):
+            code=entrypoint()
+        self.assertEqual(code,2)
+        payload=json.loads(err.getvalue())
+        self.assertEqual(payload['error'],'run_init_first')
+        self.assertIn('init',payload['hint'])
+
+    def test_env_example_and_agents_md_cover_all_provider_auth_env_names(self):
+        from lead_research.providers import PROVIDERS
+        repo_root=Path(__file__).resolve().parents[1]
+        env_example=(repo_root/'.env.example').read_text(encoding='utf-8')
+        agents_md=(repo_root/'AGENTS.md').read_text(encoding='utf-8')
+        for provider in PROVIDERS.values():
+            for var in tuple(getattr(provider,'auth_env',()) or ())+tuple(getattr(provider,'optional_auth_env',()) or ()):
+                self.assertIn(f'{var}=',env_example)
+                self.assertIn(var,agents_md)
+
 if __name__=='__main__':unittest.main()

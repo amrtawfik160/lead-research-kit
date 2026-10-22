@@ -5,11 +5,15 @@
   "scripts": {
     "dev": "concurrently -k -n api,web -c yellow,cyan \"npm run api\" \"next dev --port 3000\"",
     "api": "python3 server.py --host 127.0.0.1 --port 8787",
+    "web": "next dev --port 3000",
     "build": "next build",
     "start": "concurrently -k -n api,web -c yellow,cyan \"npm run api\" \"next start --port 3000\"",
     "lint": "eslint",
+    "test": "PYTHONPATH=../src python3 -m unittest discover -s ../tests -v",
     "layout:check": "python3 ../scripts/check_dashboard_layout.py",
-    "layout:test": "node scripts/layout_test.mjs"
+    "layout:test": "node scripts/layout_test.mjs",
+    "release:check": "python3 ../scripts/release_check.py ..",
+    "check": "npm run test && npm run layout:check && npm run release:check && npm run build"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
