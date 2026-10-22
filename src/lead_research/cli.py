@@ -30,6 +30,22 @@ ERROR_HINTS = {
     'unknown_area_kind': 'Area kind must be industry, region, source, or icp.',
     'filter_name_required': 'Give the filter a short name: `filter save austin-new --date 2026-10-20 --stage new`.',
     'unknown_filter': 'No saved filter with that name. Run `filter list --json`.',
+    'ops_key_required': 'Pass --email or --key for the lead (work email, or name|company).',
+    'ops_patch_required': 'Set at least one of --stage, --owner, or --notes.',
+    'unknown_lead_stage': 'Stage must be new, contacted, replied, qualified, or disqualified.',
+    'unknown_country': 'Country must be an ISO code or US/USA/United States.',
+    'invalid_revenue_min': 'Revenue minimum looks like 5000000, 5M, or $5M.',
+    'leads_output_required': 'Give --output FILE.csv for `leads export`.',
+    'invalid_filter_name': 'Filter names are letters, numbers, spaces, _ . - and cannot include $ or punctuation. Example: US CRE decision makers 5M.',
+    'filter_name_too_long': 'Keep filter names at 40 characters or fewer.',
+    'unknown_filter_field': 'Unknown filter field. Listing: stage, owner, area, source, risk, date, verified, found_by. Targeting: country, revenue_min, industry, include_titles, exclude_titles, exclude_junior.',
+    'too_many_titles': 'At most 40 include/exclude titles.',
+    'title_too_long': 'Each title must be 80 characters or fewer.',
+    'too_many_industry_keywords': 'At most 30 industry keywords.',
+    'invalid_bool_flag': 'Use true/false (or yes/no) for boolean filter flags.',
+    'ops_key_too_long': 'The lead key is too long (email, or name|company).',
+    'notes_too_long': 'Keep lead notes under 4,000 characters.',
+    'owner_too_long': 'Keep the owner name under 80 characters.',
 }
 
 
@@ -119,7 +135,31 @@ def parser():
     c=s.add_parser('cancel-unsent',help='Cancel only a reservation that was never marked sent')
     c.add_argument('attempt_id');c.add_argument('--reason',required=True)
     x=s.add_parser('export',help='Export private contact/evidence/provider categories separately');x.add_argument('directory')
-    s.add_parser('status');s.add_parser('audit')
+    s.add_parser('status',help='Workspace contacts, budgets, provider pauses, and audit flag')
+    s.add_parser('audit',help='Verify the hash-chained ledger; exit 2 if it is broken')
+    s.add_parser('schema',help='List every command, flag, output shape, and exit code as JSON')
+    s.add_parser('commands',help='Alias for schema --json')
+    ws=s.add_parser('workspace',help='Show the workspace this CLI invocation is using')
+    wss=ws.add_subparsers(dest='workspace_action',required=True)
+    wss.add_parser('show',help='Path, init state, team, filters, and latest daily batch')
+    op=s.add_parser('ops',help='Set or read lead stage, owner, and notes (same file the dashboard shows)')
+    ops=op.add_subparsers(dest='ops_action',required=True)
+    osg=ops.add_parser('set',help='Save stage, owner, and/or notes for one lead')
+    osg.add_argument('--email',help='Work email (preferred key)')
+    osg.add_argument('--key',help='ops key: email, or name|company')
+    osg.add_argument('--stage',choices=['new','contacted','replied','qualified','disqualified'])
+    osg.add_argument('--owner')
+    osg.add_argument('--notes')
+    ogg=ops.add_parser('get',help='Read one lead\'s outreach fields')
+    ogg.add_argument('--email');ogg.add_argument('--key')
+    ops.add_parser('list',help='All saved stage/owner/notes rows')
+    ld=s.add_parser('leads',help='List or export delivered and team leads')
+    lds=ld.add_subparsers(dest='leads_action',required=True)
+    ll=lds.add_parser('list',help='JSON lead rows; optional saved filter or ICP flags')
+    _lead_select_args(ll)
+    le=lds.add_parser('export',help='Write a CSV (same columns as the dashboard Export CSV button)')
+    le.add_argument('--output',required=True,help='Destination .csv')
+    _lead_select_args(le)
     cl=s.add_parser('clean',help='Clean and score any lead CSV/JSON into the 6-column format (offline, no workspace needed)')
     cl.add_argument('input');cl.add_argument('--output',required=True,help='Output directory');_target_args(cl)
     cr=s.add_parser('crawl',help='Crawl company websites in parallel for published people, titles, emails and LinkedIn links')
@@ -129,6 +169,7 @@ def parser():
     cr.add_argument('--limit',type=int,default=0,help='Only crawl the first N domains');cr.add_argument('--no-cache',action='store_true')
     j=s.add_parser('jobs',help='Prepare lead-source jobs for `run` (nothing is sent)')
     js=j.add_subparsers(dest='jobs_action',required=True)
+    js.add_parser('list',help='Show saved job attempts from the ledger')
     jx=js.add_parser('xray',help='Search-engine LinkedIn profile queries (Serper or Brave)')
     jx.add_argument('--provider',choices=['serper','brave'],default='serper');jx.add_argument('--titles',help='Comma-separated titles (default: decision-maker titles)')
     jx.add_argument('--locations',help='Semicolon-separated, e.g. "Austin, Texas;Miami, Florida"');jx.add_argument('--states',help='Comma-separated US state codes, or "all"')
@@ -154,6 +195,8 @@ def parser():
     dy.add_argument('--max-domains',type=int,help='Domains to crawl today (default: target / 0.3 x 1.2)');dy.add_argument('--workers',type=int,default=24)
     dy.add_argument('--allow-missing-email',action='store_true',help='Also deliver leads without a work email');dy.add_argument('--min-tier',choices=['A','B'],default='B')
     dy.add_argument('--cap',action='append',default=[],help='Per-source daily cap, e.g. hunter-domains=50 (repeatable)')
+    dy.add_argument('--filter',dest='targeting_filter',help='Apply a saved filter (including ICP) when picking today\'s leads')
+    _targeting_args(dy)
     da=s.add_parser('daily-audit',help='Spot-check a sample of a day\'s delivered leads against their evidence (also: `daily audit`)')
     da.add_argument('--date',help='YYYY-MM-DD (default: today)');da.add_argument('--sample',type=int,default=20);da.add_argument('--seed',type=int)
     da.add_argument('--output-root',help='Folder with dated outputs (default: <workspace>/daily)')
@@ -206,6 +249,7 @@ def parser():
     fs.add_argument('--owner');fs.add_argument('--area');fs.add_argument('--source')
     fs.add_argument('--risk',choices=['low','medium','high']);fs.add_argument('--date',help='YYYY-MM-DD or "team"')
     fs.add_argument('--verified',choices=['verified','unverified']);fs.add_argument('--found-by')
+    _targeting_args(fs)
     fs.add_argument('--pin',action='store_true',help='Pin so it stays at the top of filter list and the dashboard')
     fls.add_parser('list',help='List saved filters; pinned first')
     fp=fls.add_parser('pin',help='Pin a saved filter');fp.add_argument('name')
@@ -218,6 +262,79 @@ def _target_args(p):
     p.add_argument('--min-tier',choices=['A','B','C'],default='B',help='Lowest tier written to leads-clean.csv')
     p.add_argument('--allow-personal-email',action='store_true',help='Keep gmail/ISP addresses in the Email column')
     p.add_argument('--keep-non-decision-makers',action='store_true',help='Do not reject agents, VPs, investors and other non-owner titles')
+
+
+def _targeting_args(p):
+    p.add_argument('--country',help='ISO country or US/USA/United States')
+    p.add_argument('--revenue-min',help='Minimum known revenue/ARR, e.g. 5000000 or 5M')
+    p.add_argument('--industry',help='Comma-separated industry keywords')
+    p.add_argument('--include-titles',help='Comma-separated titles to keep (CEO, COO, Partner, ...)')
+    p.add_argument('--exclude-titles',help='Comma-separated titles to drop')
+    p.add_argument('--exclude-junior',action='store_true',help='Drop intern/assistant/associate/agent titles')
+
+
+def _lead_select_args(p):
+    p.add_argument('--date',help='YYYY-MM-DD or team')
+    p.add_argument('--filter',dest='filter_name',help='Apply a saved filter by name')
+    p.add_argument('--stage',choices=['new','contacted','replied','qualified','disqualified'])
+    p.add_argument('--owner');p.add_argument('--area');p.add_argument('--source')
+    p.add_argument('--risk',choices=['low','medium','high'])
+    p.add_argument('--verified',choices=['verified','unverified']);p.add_argument('--found-by')
+    _targeting_args(p)
+
+
+def _targeting_from_args(args):
+    query = {
+        'country': getattr(args, 'country', None),
+        'revenue_min': getattr(args, 'revenue_min', None),
+        'industry': getattr(args, 'industry', None),
+        'include_titles': getattr(args, 'include_titles', None),
+        'exclude_titles': getattr(args, 'exclude_titles', None),
+    }
+    if getattr(args, 'exclude_junior', False):
+        query['exclude_junior'] = True
+    return {key: value for key, value in query.items() if value not in (None, '', False)}
+
+
+def _listing_from_args(args):
+    query = {
+        'stage': getattr(args, 'stage', None),
+        'owner': getattr(args, 'owner', None),
+        'area': getattr(args, 'area', None),
+        'source': getattr(args, 'source', None),
+        'risk': getattr(args, 'risk', None),
+        'date': getattr(args, 'date', None),
+        'verified': getattr(args, 'verified', None),
+        'found_by': getattr(args, 'found_by', None),
+    }
+    query.update(_targeting_from_args(args))
+    return {key: value for key, value in query.items() if value not in (None, '')}
+
+
+def _workspace_show(work):
+    from .daily import today_iso
+    from .filters import list_filters
+    from .team import load_state
+    path = Path(work)
+    daily = path / 'daily'
+    batches = []
+    if daily.is_dir():
+        for folder in sorted(daily.iterdir()):
+            if folder.is_dir() and (folder / 'report.json').exists() and not folder.name.endswith('-preview'):
+                batches.append(folder.name)
+    state = load_state(path) if (path / 'team.json').exists() else {}
+    filters = list_filters(path) if (path / 'saved-filters.json').exists() else {'filters': [], 'pinned': [], 'count': 0}
+    return {
+        'workspace': str(path),
+        'initialized': (path / 'providers.json').exists(),
+        'today': today_iso(),
+        'latest_daily': batches[-1] if batches else None,
+        'daily_batches': batches,
+        'team_joined': bool(state.get('member')),
+        'team_name': state.get('team_name') or '',
+        'filters': filters['count'],
+        'pinned_filters': [item['name'] for item in filters.get('pinned') or []],
+    }
 
 
 def _target(args):
@@ -264,8 +381,32 @@ def _offline_command(args,work):
         people=sum(len(x['people']) for x in sites)
         emails=sum(1 for x in sites for p in x['people'] if p.get('email'))
         return {'dry_run':False,**plan,'output':str(out),'sites_ok':sum(x['status']=='ok' for x in sites),'sites_unreachable':sum(x['status']=='unreachable' for x in sites),'sites_blocked':sum(x['status']=='blocked' for x in sites),'people_found':people,'people_with_email':emails,'sites_with_email_pattern':sum(bool(x.get('pattern')) for x in sites)}
+    if args.command=='schema' or args.command=='commands':
+        from .schema import command_catalog
+        return command_catalog(parser())
+    if args.command=='workspace':
+        return _workspace_show(work)
+    if args.command=='ops':
+        from .ops import get_ops, list_ops, set_ops
+        if args.ops_action=='set':
+            if not (args.email or args.key):
+                raise PolicyError('ops_key_required')
+            if args.stage is None and args.owner is None and args.notes is None:
+                raise PolicyError('ops_patch_required')
+            return set_ops(work,key=args.key,email=args.email,stage=args.stage,owner=args.owner,notes=args.notes)
+        if args.ops_action=='get':
+            return get_ops(work,key=args.key,email=args.email)
+        return list_ops(work)
+    if args.command=='leads':
+        from .leads import export_leads, list_leads
+        query=_listing_from_args(args)
+        if args.leads_action=='export':
+            return export_leads(work,args.output,date=args.date,filter_name=args.filter_name,query=query)
+        return list_leads(work,date=args.date,filter_name=args.filter_name,query=query)
     if args.command=='jobs':
         from . import discovery
+        if args.jobs_action=='list':
+            return None
         if args.jobs_action=='xray':
             from .policy import US_STATES
             titles=[t.strip() for t in args.titles.split(',')] if args.titles else list(discovery.DEFAULT_DM_TITLES)
@@ -345,8 +486,12 @@ def main(argv=None):
         data=fetch_source(args.source,since=args.since,max_rows=args.max_rows) if args.records_action=='fetch' else load_local_file(args.source,args.path)
         out=Path(args.output);out.parent.mkdir(parents=True,exist_ok=True);out.write_text(json.dumps(data,indent=2,ensure_ascii=False)+'\n',encoding='utf-8');out.chmod(0o600)
         emit({'source':data['source'],'companies':len(data['companies']),'prospects':len(data['prospects']),'output':str(out),'terms':data.get('terms_note')});return 0
-    if args.command in ('clean','jobs'):
-        emit(_offline_command(args,work),getattr(args,'output',None) if args.command=='jobs' else None);return 0
+    if args.command in ('schema','commands','workspace','ops','leads'):
+        emit(_offline_command(args,work));return 0
+    if args.command=='clean':
+        emit(_offline_command(args,work));return 0
+    if args.command=='jobs' and args.jobs_action!='list':
+        emit(_offline_command(args,work),getattr(args,'output',None));return 0
     work.mkdir(mode=0o700,parents=True,exist_ok=True);work.chmod(0o700)
     if args.command=='crawl':
         emit(_offline_command(args,work));return 0
@@ -413,9 +558,19 @@ def main(argv=None):
                 caps[name.strip()]=int(value)
             records=[json.loads(Path(f).read_text(encoding='utf-8')) for f in args.records]
             names=tuple(x.strip() for x in args.record_sources.split(',') if x.strip())
+            targeting=_targeting_from_args(args)
+            if args.targeting_filter:
+                from .filters import list_filters
+                from .targeting import TARGET_FIELDS, normalize_targeting
+                item=next((row for row in list_filters(work)['filters'] if row['name'].casefold()==args.targeting_filter.casefold()),None)
+                if not item:
+                    raise PolicyError('unknown_filter')
+                saved={field: item['query'].get(field) for field in TARGET_FIELDS if field in item['query']}
+                saved.update(targeting)
+                targeting=normalize_targeting(saved)
             result=run_daily(work,store,config,target=args.target,execute=args.execute,day=args.date,sources=sources+('build',),output_root=args.output_root,
                              max_domains=args.max_domains,workers=args.workers,require_email=not args.allow_missing_email,min_tier=args.min_tier,caps=caps,record_sources=records,
-                             record_source_names=names,search_provider=args.search_provider)
+                             record_source_names=names,search_provider=args.search_provider,targeting=targeting or None)
         elif args.command=='daily-audit':
             from .audit import run_audit
             from .daily import today_iso, render_report
@@ -456,6 +611,8 @@ def main(argv=None):
                         result={'refills':h.refills(),'note':'operator-attested free allowances; the daily run resets each pool to this amount once per period, never adds on top'}
                     else:result=h.stats()
                 finally:h.close()
+        elif args.command=='jobs' and args.jobs_action=='list':
+            result={'attempts':[{'id':a['id'],'provider':a.get('provider'),'operation':a.get('operation'),'state':a.get('state')} for a in store.attempts()]}
         elif args.command=='collect':
             from .discovery import collect
             result=collect(store)
@@ -488,6 +645,7 @@ def main(argv=None):
                 result=save_filter(work,args.name,{
                     'stage':args.stage,'owner':args.owner,'area':args.area,'source':args.source,
                     'risk':args.risk,'date':args.date,'verified':args.verified,'found_by':args.found_by,
+                    **_targeting_from_args(args),
                 },pin=args.pin)
             elif args.filter_action=='list':
                 result=list_filters(work)
@@ -498,7 +656,7 @@ def main(argv=None):
             else:
                 result=apply_filter(work,args.name)
         else:result={'contacts':len(store.contacts()),'held':sum(bool(r.get('held')) for r in store.contacts()),'budgets':store.budgets(),'providers':{p:store.provider_state(p) for p in config['providers']},'unresolved_attempts':[{'id':a['id'],'provider':a['provider'],'state':a['state']} for a in store.attempts() if a['state'] in ('reserved','sent','pending','uncertain')],'audit_ok':store.verify_audit()}
-        emit(result,getattr(args,'output',None) if args.command not in ('demo','build','daily','daily-audit','history','team','filter') else None)
+        emit(result,getattr(args,'output',None) if args.command not in ('demo','build','daily','daily-audit','history','team','filter','leads','ops','schema','commands','workspace') else None)
         if isinstance(result,dict) and result.get('stopped'):return 2
         return 0
     finally:store.close()

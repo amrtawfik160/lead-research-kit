@@ -29,7 +29,11 @@ Teammates run on their own machines. One shared `veinore-team.json` (folder, Dri
 
 ## Saved filters
 
-`filter save NAME --stage --owner --area --source --risk --date --verified --found-by [--pin] --json`. Then `filter list`, `filter pin` / `unpin`, `filter apply NAME --json`. Pinned filters also appear at the top of the Leads page.
+`filter save NAME --stage --owner --area --source --risk --date --verified --found-by [--country --revenue-min --industry --include-titles --exclude-titles --exclude-junior] [--pin] --json`. Then `filter list`, `filter pin` / `unpin`, `filter apply NAME --json`. Use the same saved filter as daily targeting: `daily --filter NAME`. Pinned filters also appear at the top of the Leads page.
+
+Lead outreach (dashboard drawer): `ops set --email EMAIL --stage contacted --owner NAME --notes TEXT --json`. Export: `leads export --output FILE.csv`. Catalog: `schema --json` (alias `commands --json`). Exit `0` ok, `2` error+hint on stderr.
+
+Example ICP: `filter save "US CRE decision makers 5M" --country US --revenue-min 5M --industry "real estate development,real estate,commercial real estate,property management,construction" --include-titles "CEO,COO,CFO,President,Partner,Managing Partner,Managing Director,VP of Strategy,President of Strategy,Founder,Owner,Principal,EVP,SVP" --exclude-junior --pin`. Unknown revenue/country stays unknown.
 
 ## Fast path: a clean 6-column list
 
