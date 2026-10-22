@@ -9,6 +9,8 @@ import type {
   LeadOpsRecord,
   Overview,
   ProviderRow,
+  SavedFilter,
+  TeamView,
 } from "@/lib/types";
 
 function sleep(ms: number): Promise<void> {
@@ -141,4 +143,6 @@ export const api = {
       body: JSON.stringify(body),
     }),
   budget: () => request<BudgetView>("/api/budget"),
+  team: () => request<TeamView>("/api/team"),
+  filters: () => request<{ filters: SavedFilter[]; pinned: SavedFilter[]; count: number }>("/api/filters"),
 };

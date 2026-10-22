@@ -39,6 +39,7 @@ def seed_sample(root, force=False):
         _seed_history(history, store)
         _seed_daily(root, history)
         _seed_ops(root)
+        _seed_team(root)
     finally:
         history.close()
         store.close()
@@ -376,3 +377,55 @@ def _seed_ops(root):
         },
     }, indent=2) + '\n', encoding='utf-8')
     os.chmod(path, 0o600)
+
+
+def _seed_team(root):
+    """Synthetic roster + pinned filters so the optional dashboard has something to show."""
+    from lead_research.daily import load_daily_records
+    from lead_research.filters import save_filter
+    from lead_research.team import join, load_leads, load_state, record_finds, save_leads, save_state
+
+    join(
+        root,
+        name='Operator',
+        area_kind='industry',
+        area='real estate',
+        team_name='Veinore sample',
+        member_id='sample-operator',
+    )
+    state = load_state(root)
+    members = list(state.get('members') or [])
+    if not any(m.get('id') == 'sample-jordan' for m in members):
+        members.append({
+            'id': 'sample-jordan',
+            'name': 'Jordan Sample',
+            'area': {'kind': 'region', 'value': 'Texas'},
+            'joined_at': '2026-10-19T00:00:00Z',
+        })
+    state['members'] = members
+    save_state(root, state)
+    record_finds(root, load_daily_records(Path(root) / 'daily' / '2026-10-20'), '2026-10-20')
+    leads = load_leads(root)
+    if not any(str(lead.get('email') or '').lower() == 'casey@harborrealty.example' for lead in leads):
+        leads.append({
+            'full_name': 'Casey Morgan',
+            'title': 'Designated Broker',
+            'company': 'Harbor Realty Group',
+            'company_website': 'harborrealty.example',
+            'linkedin_url': 'https://www.linkedin.com/in/example-synthetic-casey-morgan/',
+            'email': 'casey@harborrealty.example',
+            'city': 'Austin',
+            'state': 'TX',
+            'source': 'website_published',
+            'email_risk': 'low',
+            'email_verification': 'valid',
+            'found_by': 'sample-jordan',
+            'found_by_name': 'Jordan Sample',
+            'area_kind': 'region',
+            'area': 'Texas',
+            'found_at': '2026-10-19T12:00:00Z',
+            'batch_date': '2026-10-19',
+        })
+        save_leads(root, leads)
+    save_filter(root, 'Austin contacted', {'stage': 'contacted', 'date': '2026-10-20'}, pin=True)
+    save_filter(root, 'Team Texas', {'area': 'Texas', 'date': 'team'}, pin=True)

@@ -23,6 +23,13 @@ ERROR_HINTS = {
     'sec_user_agent_required': 'Set SEC_USER_AGENT="Your Name you@example.com" before fetching sec-form-d.',
     'synthetic_workspace_no_live_requests': 'Sample/demo workspaces contain synthetic records and cannot send live network requests.',
     'demo_requires_empty_workspace': 'The `demo` command requires a fresh empty workspace directory.',
+    'team_join_required': 'Join first: `team join --name YOUR_NAME --area-kind industry|region|source|icp --area "your slice"`.',
+    'team_bundle_not_found': 'Point at a team file or shared folder: `team import FILE` or `team import --shared /path/to/folder`.',
+    'team_id_mismatch': 'That file belongs to a different team. Use the shared veinore-team.json your group already started.',
+    'area_already_claimed': 'Someone on the team already owns that area. Pick a different industry, region, source, or ICP slice.',
+    'unknown_area_kind': 'Area kind must be industry, region, source, or icp.',
+    'filter_name_required': 'Give the filter a short name: `filter save austin-new --date 2026-10-20 --stage new`.',
+    'unknown_filter': 'No saved filter with that name. Run `filter list --json`.',
 }
 
 
@@ -173,6 +180,37 @@ def parser():
     rr=rfs.add_parser('remove');rr.add_argument('provider');rr.add_argument('--pool',required=True)
     d=s.add_parser('demo',help='Run a synthetic offline demonstration in an empty workspace')
     d.add_argument('--output',required=True)
+    tm=s.add_parser('team',help='Join a team, claim one area, and merge lead lists from a shared file (no server)')
+    tms=tm.add_subparsers(dest='team_action',required=True)
+    tj=tms.add_parser('join',help='Set your name and area; write yourself into a shared team file if --shared is set')
+    tj.add_argument('--name',required=True,help='Your name, used as attribution on leads you find')
+    tj.add_argument('--area-kind',choices=['industry','region','source','icp'],required=True,help='What kind of slice you own')
+    tj.add_argument('--area',required=True,help='The slice itself, e.g. "commercial real estate" or "Texas"')
+    tj.add_argument('--team-id',help='Join this existing team id (default: create or read from --shared)')
+    tj.add_argument('--team-name',help='Human team label')
+    tj.add_argument('--shared',help='Shared folder or veinore-team.json path (Drive, git repo, USB). No hosted server.')
+    tj.add_argument('--member-id',help='Stable id if you move machines; default is name + this workspace')
+    te=tms.add_parser('export',help='Write the merged team list (with who found each lead) to a file')
+    te.add_argument('--output',help='Destination .json file (default: <workspace>/exports/veinore-team.json)')
+    te.add_argument('--shared',help='Also the shared folder or file your teammates import')
+    ti=tms.add_parser('import',help='Merge a teammate bundle into this workspace (dedupe + skip their leads)')
+    ti.add_argument('file',nargs='?',help='veinore-team.json from a teammate')
+    ti.add_argument('--shared',help='Shared folder or file')
+    tg=tms.add_parser('merge',help='Same as import: merge and dedupe a team bundle')
+    tg.add_argument('file',nargs='?');tg.add_argument('--shared')
+    tms.add_parser('list',help='Show members, areas, and the conjoined lead list')
+    fl=s.add_parser('filter',help='Save, pin, and apply named lead filters (CLI first; pins also show in the dashboard)')
+    fls=fl.add_subparsers(dest='filter_action',required=True)
+    fs=fls.add_parser('save',help='Create or update a named filter')
+    fs.add_argument('name');fs.add_argument('--stage',choices=['new','contacted','replied','qualified','disqualified'])
+    fs.add_argument('--owner');fs.add_argument('--area');fs.add_argument('--source')
+    fs.add_argument('--risk',choices=['low','medium','high']);fs.add_argument('--date',help='YYYY-MM-DD or "team"')
+    fs.add_argument('--verified',choices=['verified','unverified']);fs.add_argument('--found-by')
+    fs.add_argument('--pin',action='store_true',help='Pin so it stays at the top of filter list and the dashboard')
+    fls.add_parser('list',help='List saved filters; pinned first')
+    fp=fls.add_parser('pin',help='Pin a saved filter');fp.add_argument('name')
+    fu=fls.add_parser('unpin',help='Unpin a saved filter');fu.add_argument('name')
+    fa=fls.add_parser('apply',help='Return matching leads as JSON');fa.add_argument('name')
     return p
 
 
@@ -433,8 +471,34 @@ def main(argv=None):
             if not (imports or prospects or sites):raise PolicyError('no_lead_sources_given')
             written=write_build(build(imports=imports,prospects=prospects,site_results=sites,companies=companies,store=store,target=_target(args)),args.output)
             result={'output':written['paths'],'summary':written['summary']}
+        elif args.command=='team':
+            from .team import export_team, import_team, join, list_team
+            if args.team_action=='join':
+                result=join(work,name=args.name,area_kind=args.area_kind,area=args.area,team_id=args.team_id,
+                            team_name=args.team_name,shared=args.shared,member_id=args.member_id)
+            elif args.team_action=='export':
+                result=export_team(work,output=args.output,shared=args.shared)
+            elif args.team_action in ('import','merge'):
+                result=import_team(work,args.file,shared=args.shared)
+            else:
+                result=list_team(work)
+        elif args.command=='filter':
+            from .filters import apply_filter, list_filters, pin_filter, save_filter, unpin_filter
+            if args.filter_action=='save':
+                result=save_filter(work,args.name,{
+                    'stage':args.stage,'owner':args.owner,'area':args.area,'source':args.source,
+                    'risk':args.risk,'date':args.date,'verified':args.verified,'found_by':args.found_by,
+                },pin=args.pin)
+            elif args.filter_action=='list':
+                result=list_filters(work)
+            elif args.filter_action=='pin':
+                result=pin_filter(work,args.name)
+            elif args.filter_action=='unpin':
+                result=unpin_filter(work,args.name)
+            else:
+                result=apply_filter(work,args.name)
         else:result={'contacts':len(store.contacts()),'held':sum(bool(r.get('held')) for r in store.contacts()),'budgets':store.budgets(),'providers':{p:store.provider_state(p) for p in config['providers']},'unresolved_attempts':[{'id':a['id'],'provider':a['provider'],'state':a['state']} for a in store.attempts() if a['state'] in ('reserved','sent','pending','uncertain')],'audit_ok':store.verify_audit()}
-        emit(result,getattr(args,'output',None) if args.command not in ('demo','build','daily','daily-audit','history') else None)
+        emit(result,getattr(args,'output',None) if args.command not in ('demo','build','daily','daily-audit','history','team','filter') else None)
         if isinstance(result,dict) and result.get('stopped'):return 2
         return 0
     finally:store.close()
@@ -448,6 +512,8 @@ def entrypoint():
         code=str(error)
         payload={'error':code}
         if code in ERROR_HINTS:payload['hint']=ERROR_HINTS[code]
+        details=getattr(error,'details',None)
+        if isinstance(details,dict):payload['details']=details
         print(json.dumps(payload),file=sys.stderr);return 2
     except (OSError,ValueError,KeyError,TypeError):
         print(json.dumps({'error':'invalid_input_or_local_io'}),file=sys.stderr);return 2

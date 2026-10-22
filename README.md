@@ -87,6 +87,49 @@ cd dashboard && npm run build && npm start
 
 Daily execute, budget confirm, and `resume --execute` stay on the CLI. See [`dashboard/README.md`](dashboard/README.md).
 
+## Give this to your agent
+
+Veinore is built so an AI agent can do the work. The dashboard is optional tracking. If you are not technical, copy the box below into your own agent (Cursor, Claude, ChatGPT, etc.).
+
+```text
+Clone, install, and run https://github.com/amrtawfik160/lead-research-kit
+
+I am not technical. Follow AGENTS.md section "Set up Veinore with your own agent" and this README. Do everything from the CLI with --json. The dashboard is optional.
+
+1. Clone the repo. Run `make setup`.
+2. Make a private folder for my work, outside the repo. Never put API keys in git.
+3. Ask me which area I own (industry, region, source, or ICP slice). Join the team with `team join` so I do not overlap anyone. If we already have a shared veinore-team.json, use `--shared` on that file or folder.
+4. Help me add keys only if I have them (private env file, chmod 600). The tool works with zero keys.
+5. Run a dry daily preview. Execute only if I say so.
+6. After a run, `team export --shared` so the group list stays one list.
+7. Save and pin the filters I care about (`filter save` / `filter pin`).
+
+Guide me in plain words. Stop and ask when you need a choice or a secret.
+```
+
+### Set up Veinore with your own agent (plain words)
+
+The agent should do this, in order, and pause when it needs a choice from you.
+
+1. **Get the code.** `git clone https://github.com/amrtawfik160/lead-research-kit.git` then `cd lead-research-kit` and `make setup`.
+2. **Make a private work folder** outside the repo, for example `~/Documents/veinore-work`. Run `scripts/lead-research --workspace ~/Documents/veinore-work init --json`.
+3. **Pick your area** so two people do not hunt the same slice. Industry, region, source, or ICP. Example: you take Texas, a teammate takes SaaS founders.
+4. **Join the team** (creates or updates a shared file — no hosted server):
+   ```bash
+   scripts/lead-research --workspace ~/Documents/veinore-work team join \
+     --name "Your Name" --area-kind region --area "Texas" \
+     --shared /path/to/shared-folder --json
+   ```
+   Put that shared folder on a team Drive, a private git repo, or a USB stick. The file is `veinore-team.json`.
+5. **Keys are optional.** The kit runs with zero keys. If you have some, keep them in a private env file (`chmod 600`) and load with `set -a; . /private/path/keys.env; set +a`. Never paste keys into chat, git, or the dashboard.
+6. **Daily run.** Preview first (`daily --target 10 --json`). Add `--execute` only when you mean to spend or write today's file.
+7. **Share your finds.** `team export --shared /path/to/shared-folder --json`. Teammates run `team import --shared /path/to/shared-folder --json`. Same email, LinkedIn, or name+company website collapses to one row. The first finder keeps credit.
+8. **Filters.** `filter save NAME --stage new --area Texas --pin --json`. `filter apply NAME --json` returns the matching leads. Pinned filters also sit at the top of the Leads page if you open the dashboard.
+
+Team commands: `team join`, `team export`, `team import` (same as `team merge`), `team list --json`.
+
+Filter commands: `filter save`, `filter list`, `filter pin`, `filter unpin`, `filter apply --json`.
+
 ## Providers
 
 All start **disabled** with **zero** budget. Free allowances change; confirm balances each run. Env names only — never commit values.

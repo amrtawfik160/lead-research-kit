@@ -32,6 +32,10 @@ const GROUPS: Array<{ title: string; keys: string[] }> = [
     keys: ["Confidence", "Tier", "Score", "Issues"],
   },
   {
+    title: "Team",
+    keys: ["Found By", "Area", "Area Kind", "Batch Date"],
+  },
+  {
     title: "Evidence",
     keys: ["Source URL", "email_evidence_url"],
   },

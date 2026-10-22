@@ -649,6 +649,15 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
     try:
         from . import discovery
         from .policy import US_STATES
+        from .team import partition_owned, pull_shared, record_finds
+
+        pulled = pull_shared(work)
+        if pulled:
+            report['team_pulled'] = {
+                'added': pulled.get('added', 0),
+                'duplicates': pulled.get('duplicates', 0),
+                'leads_count': pulled.get('leads_count', 0),
+            }
 
         def run(label, jobs, cap):
             step = _run_jobs(store, config, jobs, execute, env, transport, cap)
@@ -841,8 +850,10 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
         annotate_email_risk(result['clean'], mx_facts, _risk_context(store, history.prospects()))
         safety = {'mx_check': mx_on, 'mx': emailcheck.summarize(mx_facts), 'dropped': {},
                   'locations_filled': fill_locations(result['clean'], discover_locations(store))}
+        owned_by_team, team_skipped = partition_owned(result['clean'], work)
+        report['skipped_team_owned'] = len(team_skipped)
         pool = []
-        for r in result['clean']:
+        for r in owned_by_team:
             if not ((r.get('email') or not require_email) and history.is_fresh(r)):
                 continue
             if r.get('email_risk') == 'high':
@@ -906,6 +917,7 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
         report['files'] = write_daily(merged, out_dir)
         if execute:
             history.mark_delivered(picked, day)
+            report['team_recorded'] = record_finds(work, picked, day)
         report['history'] = history.stats()
         report['source_quality'] = source_quality
         report['budgets_left'] = {f"{b['provider']}.{b['pool']}": b['remaining'] for b in store.budgets()}
@@ -1228,6 +1240,8 @@ def render_report(report):
     safety = steps.get('email-safety') or {}
     if safety.get('dropped'):
         lines.append('Dropped unsafe emails: ' + ', '.join(f'{k} {v}' for k, v in sorted(safety['dropped'].items(), key=lambda kv: -kv[1])))
+    if report.get('skipped_team_owned'):
+        lines.append(f"Skipped {report['skipped_team_owned']} leads already owned by a teammate")
     crawl = steps.get('crawl', {})
     if crawl.get('sites_ok') is not None:
         lines.append(f"Crawled {crawl.get('domains_planned', 0)} sites, {crawl.get('sites_ok', 0)} reachable, {crawl.get('people_with_email', 0)} people with emails")

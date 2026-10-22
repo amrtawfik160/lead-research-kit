@@ -13,8 +13,9 @@ import { QueryGate, useQuery } from "@/components/query-state";
 import { Card, CardPanel } from "@/components/ui/card";
 import { ThemeCards } from "@/components/theme-cards";
 import { api } from "@/lib/api";
-import { explainError } from "@/lib/format";
+import { explainError, humanName } from "@/lib/format";
 import type { SettingsPayload } from "@/lib/load";
+import type { TeamView } from "@/lib/types";
 
 function failureText(error: unknown): string {
   return explainError(error instanceof Error ? error.message : "request_failed");
@@ -23,6 +24,7 @@ function failureText(error: unknown): string {
 export function SettingsPage({ initial = null }: { initial?: SettingsPayload | null }): React.ReactElement {
   const router = useRouter();
   const { data, error, loading, reload } = useQuery(() => api.settings(), [], initial);
+  const teamQuery = useQuery(() => api.team(), []);
   const [workspace, setWorkspace] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -180,6 +182,7 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
               </CardPanel>
             </Card>
             <div className="flex flex-col gap-4">
+              <TeamCard team={teamQuery.data} />
               <Card>
                 <CardPanel className="flex flex-col gap-4 p-4">
                   <div>
@@ -214,5 +217,54 @@ export function SettingsPage({ initial = null }: { initial?: SettingsPayload | n
         ) : null}
       </QueryGate>
     </PageShell>
+  );
+}
+
+function TeamCard({ team }: { team?: TeamView | null }): React.ReactElement {
+  const members = team?.members || [];
+  return (
+    <Card>
+      <CardPanel className="flex flex-col gap-4 p-4">
+        <div>
+          <h2 className="font-heading text-lg font-semibold">Team list</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Tracking only. Join, export, and merge from the CLI so everyone keeps one shared list.
+          </p>
+        </div>
+        {team?.joined ? (
+          <dl className="grid grid-cols-[120px_minmax(0,1fr)] items-start gap-y-2 text-sm">
+            <dt className="text-muted-foreground">Team</dt>
+            <dd>{team.team_name || team.team_id || "—"}</dd>
+            <dt className="text-muted-foreground">You</dt>
+            <dd>
+              {team.me?.name || "—"}
+              {team.me?.area?.value ? ` · ${humanName(team.me.area.kind || "area")} ${team.me.area.value}` : ""}
+            </dd>
+            <dt className="text-muted-foreground">Leads</dt>
+            <dd>{team.leads_count ?? 0} on the shared list</dd>
+            <dt className="text-muted-foreground">People</dt>
+            <dd>
+              {members.length ? (
+                <ul className="space-y-1">
+                  {members.map((member) => (
+                    <li key={member.id}>
+                      {member.name}
+                      {member.area?.value ? ` · ${member.area.value}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                "—"
+              )}
+            </dd>
+          </dl>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No team file yet. Ask your agent to run <span className="font-mono">team join</span> and{" "}
+            <span className="font-mono">team export --shared</span>.
+          </p>
+        )}
+      </CardPanel>
+    </Card>
   );
 }
