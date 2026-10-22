@@ -76,6 +76,29 @@ class SampleWorkspaceTests(unittest.TestCase):
         self.assertTrue(payload['markdown'].startswith('Leads 2026-10-20'))
         self.assertTrue(payload['report']['advice'] or payload['report']['delivered'] >= payload['report']['target'])
 
+    def test_sample_has_team_list_and_pinned_filters(self):
+        team = self.dash.team_view()
+        self.assertTrue(team['joined'])
+        self.assertGreaterEqual(len(team['members']), 2)
+        self.assertGreaterEqual(team['leads_count'], 1)
+        self.assertTrue(any(m.get('name') == 'Jordan Sample' for m in team['members']))
+        casey = next(row for row in team['leads'] if row.get('Email') == 'casey@harborrealty.example')
+        self.assertEqual(casey['Found By'], 'Jordan Sample')
+        self.assertEqual(casey['Area'], 'Texas')
+        filters = self.dash.filters_view()
+        self.assertGreaterEqual(len(filters['pinned']), 1)
+        names = {item['name'] for item in filters['filters']}
+        self.assertIn('Austin contacted', names)
+        payload = self.dash.leads('2026-10-20')
+        self.assertTrue(payload['pinned_filters'])
+        jane = next(row for row in payload['leads'] if row.get('Email') == 'jane@harborrealty.example')
+        self.assertEqual(jane.get('Found By'), 'Operator')
+        team_leads = self.dash.leads('team')
+        self.assertEqual(team_leads['date'], 'team')
+        self.assertGreaterEqual(len(team_leads['leads']), 1)
+        dates = [row['date'] for row in payload['batches']]
+        self.assertIn('team', dates)
+
     def test_hold_uses_store(self):
         self.dash.hold('example-robin', 'stale_leadership_claim', 'https://example.net/team')
         contact = self.dash.contact('example-robin')['contact']

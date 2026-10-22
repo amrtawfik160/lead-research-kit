@@ -18,6 +18,19 @@ Use `lead-research --help`, or the bundled `scripts/lead-research` launcher. Its
 
 Completion: today's file exists, has exactly the 6 headers, contains only people never delivered before, and the shortfall (if any) is explained with the next concrete fix
 
+## Team list (no server)
+
+Teammates run on their own machines. One shared `veinore-team.json` (folder, Drive, or private git) is the list.
+
+1. Each person claims one area: `team join --name NAME --area-kind industry|region|source|icp --area SLICE --shared PATH --json`. A taken area fails with `area_already_claimed`
+2. After `daily --execute`, `team export --shared PATH --json`. Others `team import --shared PATH --json` (same as `team merge`)
+3. Dedupe is email, LinkedIn, or name + company website. `Found By` stays with the first finder. Daily runs skip leads a teammate already owns (`skipped_team_owned`)
+4. `team list --json` is the conjoined list. The dashboard only tracks it
+
+## Saved filters
+
+`filter save NAME --stage --owner --area --source --risk --date --verified --found-by [--pin] --json`. Then `filter list`, `filter pin` / `unpin`, `filter apply NAME --json`. Pinned filters also appear at the top of the Leads page.
+
 ## Fast path: a clean 6-column list
 
 1. Existing list: `lead-research clean INPUT --output DIR`. Read `quality-summary.json`; report clean/review/rejected counts and top issues

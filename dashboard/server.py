@@ -141,6 +141,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(dash.update_ops(body))
         if method == 'GET' and path == '/api/budget':
             return self._json(dash.budget_view())
+        if method == 'GET' and path == '/api/team':
+            return self._json(dash.team_view())
+        if method == 'GET' and path == '/api/filters':
+            return self._json(dash.filters_view())
         raise PolicyError('unknown_route')
 
     def _body(self):

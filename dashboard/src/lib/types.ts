@@ -166,6 +166,45 @@ export type ContactDetail = {
 
 export type LeadRow = Record<string, string | number | null | undefined>;
 
+export type SavedFilterQuery = {
+  stage?: string;
+  owner?: string;
+  area?: string;
+  source?: string;
+  risk?: string;
+  date?: string;
+  verified?: string;
+  found_by?: string;
+};
+
+export type SavedFilter = {
+  name: string;
+  pinned: boolean;
+  query: SavedFilterQuery;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type TeamMember = {
+  id: string;
+  name: string;
+  area?: { kind?: string; value?: string } | null;
+  joined_at?: string;
+};
+
+export type TeamView = {
+  team_id?: string;
+  team_name?: string;
+  joined?: boolean;
+  me?: TeamMember | null;
+  shared_path?: string | null;
+  members?: TeamMember[];
+  areas?: Array<{ member?: string; member_id?: string; kind?: string; value?: string }>;
+  leads_count?: number;
+  by_finder?: Record<string, number>;
+  leads?: LeadRow[];
+};
+
 export type DailyPayload = {
   date: string;
   report: DailyReport;
@@ -180,6 +219,9 @@ export type DailyPayload = {
   leads: LeadRow[];
   batches: DailyBatch[];
   duplicates?: DuplicateWarning[];
+  filters?: SavedFilter[];
+  pinned_filters?: SavedFilter[];
+  team?: TeamView;
 };
 
 export type LeadOpsRecord = {

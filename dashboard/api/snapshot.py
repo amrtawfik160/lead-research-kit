@@ -316,12 +316,26 @@ class Dashboard:
             })
         # Executed batches first so a same-day dry preview cannot hide delivery.
         rows.sort(key=lambda row: (bool(row.get('execute')), str(row.get('date') or '')), reverse=True)
+        team = self.team_view()
+        if team.get('leads_count'):
+            rows.append({
+                'date': 'team',
+                'target': team['leads_count'],
+                'delivered': team['leads_count'],
+                'execute': True,
+                'shortfall': 0,
+                'has_audit': False,
+                'has_leads': True,
+            })
         return rows
 
     def daily(self, date=None):
         batches = self.daily_list()
         if date is None:
-            date = batches[0]['date'] if batches else today_iso()
+            date = next((row['date'] for row in batches if row.get('date') != 'team'), None)
+            date = date or (batches[0]['date'] if batches else today_iso())
+        if date == 'team':
+            return self._team_leads_payload(batches)
         folder = self.workspace / 'daily' / date
         report = {}
         if (folder / 'report.json').exists():
@@ -334,8 +348,8 @@ class Dashboard:
         audit = None
         if (folder / 'audit.json').exists():
             audit = json.loads((folder / 'audit.json').read_text(encoding='utf-8'))
-        leads = self._attach_ops(self._read_daily_leads(date))
-        return {
+        leads = self._attach_team(self._attach_ops(self._read_daily_leads(date)))
+        payload = {
             'date': date,
             'report': report,
             'markdown': markdown,
@@ -344,6 +358,9 @@ class Dashboard:
             'batches': batches,
             'duplicates': self._duplicate_warnings(leads, date),
         }
+        payload.update(self._filter_payload())
+        payload['team'] = self.team_view(include_leads=False)
+        return payload
 
     def leads(self, date=None):
         return self.daily(date)
@@ -496,6 +513,65 @@ class Dashboard:
             )
         finally:
             store.close()
+
+    def team_view(self, include_leads=True):
+        from lead_research.team import list_team
+        return list_team(self.workspace, include_leads=include_leads)
+
+    def filters_view(self):
+        from lead_research.filters import list_filters
+        return list_filters(self.workspace)
+
+    def _filter_payload(self):
+        filters = self.filters_view()
+        return {'filters': filters.get('filters') or [], 'pinned_filters': filters.get('pinned') or []}
+
+    def _team_leads_payload(self, batches):
+        from lead_research.filters import collect_leads
+        leads = self._attach_ops(collect_leads(self.workspace, 'team'))
+        team = self.team_view()
+        payload = {
+            'date': 'team',
+            'report': {
+                'date': 'team',
+                'execute': True,
+                'target': team.get('leads_count') or 0,
+                'delivered': team.get('leads_count') or 0,
+                'shortfall': 0,
+            },
+            'markdown': 'Team list: %s leads · %s people' % (
+                team.get('leads_count') or 0, len(team.get('members') or []),
+            ),
+            'audit': None,
+            'leads': leads,
+            'batches': batches,
+            'duplicates': self._duplicate_warnings(leads, 'team'),
+            'team': team,
+        }
+        payload.update(self._filter_payload())
+        return payload
+
+    def _attach_team(self, leads):
+        from lead_research.daily import History
+        from lead_research.team import lookup_attribution
+        index = lookup_attribution(self.workspace)
+        if not index:
+            return leads
+        attached = []
+        for row in leads:
+            record = dict(row)
+            extra = None
+            for key in History.keys_for(row):
+                extra = index.get(key)
+                if extra:
+                    break
+            if extra:
+                record.setdefault('Found By', extra.get('Found By') or '')
+                record.setdefault('Area', extra.get('Area') or '')
+                record.setdefault('Area Kind', extra.get('Area Kind') or '')
+                record.setdefault('Found By Id', extra.get('Found By Id') or '')
+            attached.append(record)
+        return attached
 
     def ops(self):
         return {'ops': self._load_ops(), 'stages': list(LEAD_STAGES)}

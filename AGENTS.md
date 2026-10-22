@@ -22,6 +22,8 @@ Veinore (`lead-research-kit`) is an evidence-first B2B lead research toolkit con
 ├── pyproject.toml                   # Python package metadata (Python >= 3.11, zero dependencies)
 ├── src/lead_research/               # Core Python package
 │   ├── cli.py                       # CLI parser & JSON-first command dispatcher (`python3 -m lead_research`)
+│   ├── team.py                      # Offline team roster, territories, and shared lead-list bundle
+│   ├── filters.py                   # Named, pinned lead filters (`filter save/list/pin/apply`)
 │   ├── daily.py                     # Daily fresh-lead engine, History SQLite store, market rotation
 │   ├── store.py                     # Hash-chained SQLite ledger (`research.sqlite3`), budgets, attempts, holds
 │   ├── runner.py                    # Serial dry-first job planner/runner & GET-only pending job polling
@@ -74,6 +76,8 @@ make setup
 | `make status` | Print workspace status & provider states as JSON |
 | `make providers` | Print all 41 providers with required/optional env var names & key presence as JSON |
 | `make demo` | Run an offline synthetic end-to-end demo in a temporary directory |
+| `make team-list` | Print the conjoined team list as JSON (`WORKSPACE=...`) |
+| `make filters` | Print saved / pinned filters as JSON (`WORKSPACE=...`) |
 | `make test` | Run the offline Python unit test suite (`PYTHONPATH=src python3 -m unittest discover -s tests -v`) |
 | `make layout-check` | Run `python3 scripts/check_dashboard_layout.py` |
 | `make release-check` | Run `python3 scripts/release_check.py .` |
@@ -310,3 +314,78 @@ When modifying anything under `dashboard/src/`:
    - Keep Recharts compact with clear axis labels (`interval={0}` on categorical `<YAxis>`), hover tooltips (`ChartTooltip`), and sort quota/budget pools by active spend first so spent pools are never sliced off.
 6. **Lead-generation domain terminology only**:
    - Navigation and labels must strictly fit lead generation (`Overview`, `Daily`, `Leads`, `Quality`, `Contacts`, `Research`, `Companies`, `Providers`, `Budget`, `Jobs`, `History`, `Settings`).
+
+---
+
+## 8. Set up Veinore with your own agent (plain words)
+
+Use this when a non-technical teammate pastes the README prompt or says “clone, install and run https://github.com/amrtawfik160/lead-research-kit”. Guide them. Do not dump jargon. Stop and ask when you need a choice or a secret. Never print, log, or commit API keys.
+
+1. **Clone and install**
+   ```bash
+   git clone https://github.com/amrtawfik160/lead-research-kit.git
+   cd lead-research-kit
+   make setup
+   ```
+   `make setup` only installs the dashboard packages and a fake sample workspace. No keys needed.
+
+2. **Make a private work folder** outside this repo. Example: `/tmp/veinore-$USER` or a folder in their Documents. Then:
+   ```bash
+   scripts/lead-research --workspace /private/their-folder init --json
+   ```
+
+3. **Ask which area they own** so two people do not cover the same slice. One of: `industry`, `region`, `source`, `icp`. Write it down. Examples: `Texas`, `commercial real estate`, `public records`, `SaaS founders`.
+
+4. **Join the team** (this is how lists stay one list; there is no website to log into):
+   ```bash
+   scripts/lead-research --workspace /private/their-folder team join \
+     --name "Their Name" --area-kind region --area "Texas" \
+     --shared /path/to/shared-folder-or-veinore-team.json --json
+   ```
+   If that area is taken, the command exits `2` with `area_already_claimed`. Ask them to pick another slice. Then `team list --json`.
+
+5. **Keys (optional).** The CLI and dashboard work with zero keys. If they have keys, load them into the process environment only (`set -a; . /private/keys.env; set +a` or `--env-file` with mode `0600`). Never put values in git, screenshots, or chat. `provider list --json` shows names and whether a key is present, not the value.
+
+6. **First daily run.** Preview, then execute only if they say yes:
+   ```bash
+   scripts/lead-research --workspace /private/their-folder daily --target 10 --json
+   scripts/lead-research --workspace /private/their-folder daily --target 10 --execute --json
+   ```
+   A second `--execute` the same day merges. Leads already found by a teammate are skipped (`skipped_team_owned`).
+
+7. **Share finds into the team list**
+   ```bash
+   scripts/lead-research --workspace /private/their-folder team export --shared /path/to/shared-folder --json
+   scripts/lead-research --workspace /private/their-folder team import --shared /path/to/shared-folder --json
+   ```
+   Same as `team merge`. Dedupe is email, LinkedIn, or name + company website. `Found By` stays with the first person who had the lead.
+
+8. **Save and pin filters** they will reuse:
+   ```bash
+   scripts/lead-research --workspace /private/their-folder filter save today-new --date 2026-10-22 --stage new --pin --json
+   scripts/lead-research --workspace /private/their-folder filter list --json
+   scripts/lead-research --workspace /private/their-folder filter apply today-new --json
+   ```
+   Pinned filters also show at the top of the Leads page. The UI is optional.
+
+9. **Dashboard (optional).** `make dev` then open http://127.0.0.1:3000. Settings shows the roster. Leads has a “Team list” date and the pinned chips. Do not use the UI to join, export, or spend.
+
+---
+
+## 9. Team lists and saved filters (CLI first)
+
+Sync is a JSON bundle (`veinore-team.json`). No hosted server. Put the file in a shared folder or a private git repo.
+
+| Command | What it does |
+|---|---|
+| `team join --name NAME --area-kind industry\|region\|source\|icp --area SLICE [--shared PATH]` | Create or join a team and claim one area. Duplicate areas are blocked. |
+| `team export [--output FILE] [--shared PATH]` | Write the merged list with who found each lead. Merges an existing shared file so you do not wipe teammates. |
+| `team import [FILE] [--shared PATH]` | Merge a bundle: dedupe, keep first finder, skip those leads on your next daily run. |
+| `team merge` | Same as `import`. |
+| `team list --json` | Members, areas, and the conjoined list. |
+| `filter save NAME [--stage --owner --area --source --risk --date --verified --found-by] [--pin]` | Create or update a named filter. |
+| `filter list --json` | Saved filters; pinned first. |
+| `filter pin NAME` / `filter unpin NAME` | Pin or unpin. |
+| `filter apply NAME --json` | Matching leads. |
+
+`--json` is accepted on every command. Workspaces and filled env files stay outside the repo.

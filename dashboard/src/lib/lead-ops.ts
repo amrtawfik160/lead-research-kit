@@ -65,6 +65,8 @@ const CSV_HEADERS = [
   "Stage",
   "Owner",
   "Notes",
+  "Found By",
+  "Area",
 ];
 
 function csvCell(value: unknown): string {
