@@ -397,7 +397,7 @@ scripts/lead-research --workspace /private/their-folder filter save "US CRE deci
 scripts/lead-research --workspace /private/their-folder daily --target 20 --filter "US CRE decision makers 5M" --json
 ```
 
-Unknown revenue or country is left unknown (not treated as a match or a miss). A known value below $5M or outside the US is dropped.
+Unknown revenue, country, or industry is left unknown (not treated as a match or a miss). A known value below $5M, outside the US, or in a conflicting industry is dropped.
 
 ---
 

@@ -1,7 +1,7 @@
 """ICP / targeting rules for saved filters and daily runs.
 
-Unknown country or revenue stays unknown: a missing value does not fail the
-minimum, and a conflicting known value does. Title rules are explicit.
+Unknown country, revenue, or industry stays unknown: a missing value does not
+fail the rule, and a conflicting known value does. Title rules are explicit.
 """
 from __future__ import annotations
 
@@ -237,9 +237,19 @@ def title_matches_include(title, include_titles):
         compact = needle.replace(' of ', ' ').replace(' / ', ' ')
         if compact and compact in text:
             return True
-        if needle in ('ceo', 'chief executive officer') and info['label'] == 'ceo':
+        if needle in ('ceo', 'chief executive officer') and (
+            info['label'] == 'ceo' or 'chief executive officer' in text
+        ):
             return True
-        if needle in ('coo', 'cfo', 'cto', 'cio') and info['label'] == needle:
+        if needle in ('coo', 'chief operating officer') and (
+            info['label'] == 'coo' or 'chief operating officer' in text
+        ):
+            return True
+        if needle in ('cfo', 'chief financial officer') and (
+            info['label'] == 'cfo' or 'chief financial officer' in text
+        ):
+            return True
+        if needle in ('cto', 'cio') and info['label'] == needle:
             return True
         if needle in ('evp', 'svp', 'avp', 'vp') and info['seniority'] == 'vp':
             return True
@@ -274,14 +284,20 @@ def title_matches_exclude(title, exclude_titles):
 def industry_matches(row, keywords):
     if not keywords:
         return True
-    blob = _text_blob(
+    declared = _text_blob(row, 'Industry', 'industry').casefold()
+    extra = _text_blob(
         row,
-        'Company', 'company', 'Industry', 'industry', 'Company Type', 'company_type',
-        'Area', 'area', 'Source', 'source',
+        'Company Type', 'company_type', 'Area', 'area',
+        'Company', 'company', 'Source', 'source',
     ).casefold()
-    if not blob.strip():
+    blob = f'{declared} {extra}'.strip()
+    if any(keyword.casefold() in blob for keyword in keywords):
         return True
-    return any(keyword.casefold() in blob for keyword in keywords)
+    # Only a declared Industry value can miss. company_type is an internal label
+    # (brokerage/other/...) and does not count as known industry.
+    if declared.strip():
+        return False
+    return True
 
 
 def match_targeting(row, query):

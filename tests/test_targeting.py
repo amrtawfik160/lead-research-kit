@@ -49,6 +49,8 @@ class TargetingUnitTests(unittest.TestCase):
         self.assertTrue(title_matches_include('Managing Partner', DEFAULT_ICP_TITLES))
         self.assertTrue(title_matches_include('EVP of Strategy', DEFAULT_ICP_TITLES))
         self.assertTrue(title_matches_include('Founder & CEO', DEFAULT_ICP_TITLES))
+        self.assertTrue(title_matches_include('Chief Financial Officer', DEFAULT_ICP_TITLES))
+        self.assertTrue(title_matches_include('Chief Operating Officer', DEFAULT_ICP_TITLES))
         self.assertTrue(is_junior_title('Marketing Coordinator'))
         self.assertTrue(is_junior_title('Sales Associate'))
         self.assertFalse(is_junior_title('Managing Partner'))
@@ -62,6 +64,9 @@ class TargetingUnitTests(unittest.TestCase):
         self.assertFalse(match_targeting(_lead(Revenue='100000'), query))
         self.assertTrue(match_targeting(_lead(Revenue=''), query))  # unknown revenue kept
         self.assertFalse(match_targeting(_lead(Company='Apex Software', Industry='saas'), query))
+        self.assertTrue(match_targeting(_lead(Company='Sunset Residences', Industry=''), query))
+        self.assertTrue(match_targeting(_lead(Company='Harbor Commercial Real Estate', Industry=''), query))
+        self.assertTrue(match_targeting(_lead(Company='Sunset Residences', Industry='', **{'company_type': 'other'}), query))
         self.assertTrue(match_targeting(_lead(Title='COO'), query))
 
 
