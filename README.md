@@ -133,6 +133,15 @@ Team commands: `team join`, `team export`, `team import` (same as `team merge`),
 Filter commands: `filter save`, `filter list`, `filter pin`, `filter unpin`, `filter apply --json`.
 
 
+### HeyReach export
+
+```bash
+lead-research --json leads export --format heyreach --date 2026-10-22 --output heyreach.csv
+lead-research --json leads export --format heyreach --filter "US CRE decision makers $5M+" --output heyreach.csv
+```
+
+Columns follow HeyReach's "Import from CSV" layout (Profile URL, First Name, Last Name, Full Name, Headline, Email Address, Job Title, Location, Company, Company URL), then Company Website, City, State, Company Type, Source, Email Risk, Email Verification and Confidence. HeyReach needs a LinkedIn Profile URL on every row, so leads without one go to `heyreach-no-linkedin.csv` with the same columns. Company URL is the company's LinkedIn page when known, otherwise its website. Every daily run also writes `leads-heyreach.csv` (and `leads-heyreach-no-linkedin.csv`).
+
 ### Targeting a state, industry and titles (`daily --filter`)
 
 ```bash

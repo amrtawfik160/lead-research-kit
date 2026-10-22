@@ -63,7 +63,7 @@ def normalize_query(raw):
             value = value.lower()
             if value not in ('low', 'medium', 'high'):
                 raise PolicyError('unknown_risk_filter')
-        if field == 'date' and value != 'team' and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        if field == 'date' and value != 'team' and not re.fullmatch(r'\d{4}-\d{2}-\d{2}(?:-[A-Za-z0-9-]+)?', value):
             raise PolicyError('invalid_filter_date')
         query[field] = value
     query.update(normalize_targeting({field: raw.get(field) for field in TARGET_FIELDS if field in raw}))
