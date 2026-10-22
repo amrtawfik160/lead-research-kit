@@ -22,12 +22,10 @@ function toIssue(row: LeadRow, index: number): IssueItem<LeadRow> {
   const risk = String(row["Email Risk"] || "low");
   const owner = String(row.Owner || "").trim();
   const foundBy = String(row["Found By"] || "").trim();
-  const area = String(row.Area || "").trim();
-  const bits = [owner ? `Owner: ${owner}` : "", foundBy ? `Found by ${foundBy}` : "", area ? area : ""].filter(Boolean);
   return {
     id: issueKey("LEA", index),
     title: display(row["Full Name"]),
-    subtitle: bits.length ? bits.join(" · ") : undefined,
+    subtitle: owner ? `Owner: ${owner}` : foundBy ? `Found by ${foundBy}` : undefined,
     leadGlyph: stage !== "new" ? stage : risk,
     project: display(row.Company),
     status: humanName(leadSource(row)),
