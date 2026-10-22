@@ -15,6 +15,17 @@ from .runner import Runner
 from .workflow import route_run, verification_jobs
 
 
+ERROR_HINTS = {
+    'run_init_first': 'Workspace is not initialized yet. Run `lead-research --workspace <dir> init` first.',
+    'env_file_must_be_private_0600': 'Environment file must have private 0600 permissions (`chmod 600 <file>`).',
+    'missing_auth': 'Required provider API key environment variable is not set.',
+    'provider_disabled_or_paused': 'Provider is disabled or paused. Enable it (`provider enable <name>`) and check `status`.',
+    'sec_user_agent_required': 'Set SEC_USER_AGENT="Your Name you@example.com" before fetching sec-form-d.',
+    'synthetic_workspace_no_live_requests': 'Sample/demo workspaces contain synthetic records and cannot send live network requests.',
+    'demo_requires_empty_workspace': 'The `demo` command requires a fresh empty workspace directory.',
+}
+
+
 def load_env_file(path):
     """Load KEY=VALUE lines into os.environ without overriding variables already set."""
     file=Path(path).expanduser()
@@ -35,10 +46,38 @@ def emit(value, output=None):
     else: print(text,end='')
 
 
+def _provider_rows(config, store, env=None):
+    env = os.environ if env is None else env
+    rows = []
+    for name in config['providers']:
+        entry = config['providers'][name]
+        adapter = get_provider(name)
+        required = tuple(getattr(adapter, 'auth_env', ()) or ())
+        optional = tuple(getattr(adapter, 'optional_auth_env', ()) or ())
+        if name == 'verifalia':
+            key_present = bool(env.get('VERIFALIA_TOKEN') or (env.get('VERIFALIA_USERNAME') and env.get('VERIFALIA_PASSWORD')))
+        else:
+            key_present = True if not required else all(bool(env.get(k)) for k in required)
+        state = store.provider_state(name)
+        rows.append({
+            'id': name,
+            'enabled': bool(entry.get('enabled', False)),
+            'operations': list(getattr(adapter, 'operations', ()) or ()),
+            'required_env': list(required),
+            'optional_env': list(optional),
+            'key_present': key_present,
+            'paused': bool(state.get('paused', False)),
+            'pause_reason': state.get('pause_reason'),
+            'charges': entry.get('charges', {}),
+        })
+    return rows
+
+
 def parser():
     p=argparse.ArgumentParser(prog='lead-research',description='Evidence-first lead research with explicit budgets and dry-first API requests')
     p.add_argument('--workspace',default='workspace',help='Private workspace directory, never commit it')
     p.add_argument('--env-file',help='KEY=VALUE file with API keys (kept private, 0600); existing environment variables win')
+    p.add_argument('--json',action='store_true',default=True,help='Emit machine-readable JSON output (default; accepted anywhere on argv)')
     s=p.add_subparsers(dest='command',required=True)
     s.add_parser('init',help='Create an empty private workspace; all providers disabled, all budgets zero')
     i=s.add_parser('import',help='Import user-supplied CSV, JSON or JSONL')
@@ -63,8 +102,9 @@ def parser():
     bs=b.add_subparsers(dest='budget_action',required=True);bs.add_parser('list')
     bc=bs.add_parser('confirm');bc.add_argument('provider',choices=list(PROVIDERS));bc.add_argument('--pools',required=True,help='JSON mapping of pool to remaining decimal-string amount');bc.add_argument('--source',required=True);bc.add_argument('--free',action='store_true',required=True,help='Explicitly attest these are authorized free allowances, not purchased funds')
     by=bs.add_parser('sync');by.add_argument('provider',choices=['hunter','verifalia','clearout','zerobounce']);by.add_argument('--execute',action='store_true')
-    z=s.add_parser('provider',help='Enable configuration or manage durable access pauses')
+    z=s.add_parser('provider',help='Enable configuration, inspect env/key status, or manage durable access pauses')
     zs=z.add_subparsers(dest='provider_action',required=True)
+    zs.add_parser('list',help='List all providers, required/optional env var names, key presence, and pause state')
     for action in ('enable','disable'):
         a=zs.add_parser(action);a.add_argument('provider',choices=list(PROVIDERS))
     a=zs.add_parser('pause');a.add_argument('provider',choices=list(PROVIDERS));a.add_argument('--reason',required=True)
@@ -248,8 +288,9 @@ def _demo(store,output):
 
 
 def _daily_audit_alias(argv):
-    """`daily audit ...` -> `daily-audit ...` (daily itself takes only options)."""
-    argv=list(sys.argv[1:] if argv is None else argv)
+    """`daily audit ...` -> `daily-audit ...` and accept `--json` anywhere on argv."""
+    raw=list(sys.argv[1:] if argv is None else argv)
+    argv=[tok for tok in raw if tok!='--json']
     for i,token in enumerate(argv[:-1]):
         if token=='daily' and argv[i+1]=='audit':return argv[:i]+['daily-audit']+argv[i+2:]
     return argv
@@ -308,9 +349,12 @@ def main(argv=None):
                 for pool,amount in pools.items():store.confirm_budget(args.provider,pool,amount,args.source,attested_free=args.free)
                 result={'provider':args.provider,'confirmation':'operator_attested_not_remotely_verified','budgets':store.budgets()}
         elif args.command=='provider':
-            if args.provider_action in ('enable','disable'):
+            if args.provider_action=='list':
+                result={'providers':_provider_rows(config,store)}
+            elif args.provider_action in ('enable','disable'):
                 config['providers'][args.provider]['enabled']=args.provider_action=='enable';save_config(cfg,config)
-                result={'provider':args.provider,'enabled':config['providers'][args.provider]['enabled'],'runtime_pause':store.provider_state(args.provider).get('paused',False)}
+                row=next(r for r in _provider_rows(config,store) if r['id']==args.provider)
+                result={'provider':args.provider,'enabled':row['enabled'],'runtime_pause':row['paused'],'required_env':row['required_env'],'optional_env':row['optional_env'],'key_present':row['key_present']}
             elif args.provider_action=='pause':result=store.pause(args.provider,args.reason)
             else:result=store.review_provider(args.provider,args.reason,args.evidence)
         elif args.command=='cancel-unsent':result=store.cancel_reserved(args.attempt_id,args.reason)
@@ -401,7 +445,10 @@ def entrypoint():
     try:return main()
     except (PolicyError,ProviderError,BudgetError,BusyError,RecordsError) as error:
         # These exceptions carry stable public codes, not raw provider messages
-        print(json.dumps({'error':str(error)}),file=sys.stderr);return 2
+        code=str(error)
+        payload={'error':code}
+        if code in ERROR_HINTS:payload['hint']=ERROR_HINTS[code]
+        print(json.dumps(payload),file=sys.stderr);return 2
     except (OSError,ValueError,KeyError,TypeError):
         print(json.dumps({'error':'invalid_input_or_local_io'}),file=sys.stderr);return 2
     except Exception:
