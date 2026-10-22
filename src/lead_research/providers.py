@@ -1825,6 +1825,10 @@ class Deepline(Provider):
             return _error('auth')
         if response.status == 429 or 'rate_limit' in text:
             return _error('rate_limit')
+        category = str(j.get('error_category') or j.get('code') or '').lower()
+        blob = f'{text} {category}'
+        if response.status == 400 and ('validation' in blob or 'upstream_validation' in blob):
+            return _error('provider_application_error')
         return _error(default)
 
     def _run(self, j):

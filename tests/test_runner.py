@@ -82,6 +82,18 @@ class RunnerTests(unittest.TestCase):
             r.run([{**second,'crosscheck':True}],execute=True)
         self.assertEqual(len(self.t.requests),2)
 
+    def test_http_402_is_quota_not_generic_http_error(self):
+        r=self.runner([Response(402, {'error': 'payment_required'})])
+        result=r.run([self.job],execute=True)
+        self.assertEqual(result['results'][0]['outcome']['error'],'quota')
+        self.assertTrue(result['stopped'])
+        self.assertTrue(self.s.provider_state('one')['paused'])
+
+    def test_plan_surfaces_policy_reason_for_incomplete_find_job(self):
+        r=self.runner([])
+        plan=r.plan([{'provider':'one','operation':'find','payload':{'name':'Jane Sample','domain':'example.org'}}])
+        self.assertEqual(plan[0]['reason'],'finding_requires_name_domain_evidence')
+
 
 class PlanSpeedTests(unittest.TestCase):
     def test_planning_many_verify_jobs_against_big_ledger_is_fast(self):

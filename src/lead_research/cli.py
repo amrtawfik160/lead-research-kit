@@ -41,9 +41,9 @@ def load_env_file(path):
 
 def emit(value, output=None):
     text=json.dumps(value,indent=2,ensure_ascii=False)+'\n'
+    print(text,end='')
     if output:
         path=Path(output);path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text,encoding='utf-8');path.chmod(0o600)
-    else: print(text,end='')
 
 
 def _provider_rows(config, store, env=None):
