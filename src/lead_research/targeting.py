@@ -9,11 +9,13 @@ import re
 
 from .models import PolicyError
 from .policy import US_STATES
-from .quality import classify_title
+from .quality import classify_title, fold, us_state_code
 
 TARGET_FIELDS = (
     'country', 'revenue_min', 'industry', 'include_titles', 'exclude_titles', 'exclude_junior',
+    'states', 'revenue_unknown',
 )
+REVENUE_UNKNOWN = ('keep', 'drop')
 
 DEFAULT_ICP_TITLES = (
     'CEO', 'COO', 'CFO', 'President', 'Partner', 'Managing Partner', 'Managing Director',
@@ -153,7 +155,37 @@ def normalize_targeting(raw):
     junior = parse_bool(raw.get('exclude_junior'))
     if junior is not None:
         query['exclude_junior'] = junior
+    states = parse_states(raw.get('states'))
+    if states:
+        query['states'] = states
+        query.setdefault('country', 'US')
+    unknown_revenue = raw.get('revenue_unknown')
+    if unknown_revenue not in (None, '', 'all'):
+        unknown_revenue = str(unknown_revenue).strip().lower()
+        if unknown_revenue not in REVENUE_UNKNOWN:
+            raise PolicyError('invalid_revenue_unknown')
+        query['revenue_unknown'] = unknown_revenue
     return query
+
+
+def parse_states(value):
+    """'CA', ['California', 'NY'], 'CA,TX' -> ['CA', 'NY', ...] (US state codes)."""
+    if value in (None, '', 'all'):
+        return None
+    items = value if isinstance(value, (list, tuple)) else str(value).replace(';', ',').split(',')
+    codes = []
+    for item in items:
+        text = ' '.join(str(item).split())
+        if not text:
+            continue
+        code = us_state_code(text)
+        if not code:
+            raise PolicyError('unknown_us_state')
+        if code not in codes:
+            codes.append(code)
+    if len(codes) > 60:
+        raise PolicyError('too_many_states')
+    return codes or None
 
 
 def merge_targeting(base, override):
@@ -197,7 +229,7 @@ def lead_country(row):
 
 
 def lead_revenue(row):
-    for name in ('Revenue', 'revenue', 'ARR', 'arr', 'Annual Revenue', 'annual_revenue', 'revenue_usd'):
+    for name in ('Revenue', 'revenue', 'ARR', 'arr', 'Annual Revenue', 'annual_revenue', 'annual_revenue_usd', 'revenue_usd'):
         value = row.get(name)
         if value in (None, ''):
             continue
@@ -225,47 +257,60 @@ def _title_phrases(title):
     return text
 
 
+ABBREVIATIONS = {'ceo': 'chief executive officer', 'coo': 'chief operating officer', 'cfo': 'chief financial officer',
+                 'cso': 'chief strategy officer', 'cio': 'chief investment officer', 'cto': 'chief technology officer',
+                 'evp': 'executive vice president', 'svp': 'senior vice president', 'avp': 'assistant vice president',
+                 'vp': 'vice president', 'md': 'managing director', 'cofounder': 'co founder'}
+_STOPWORDS = {'of', 'the', 'and', 'for', 'to', 'at', 'in'}
+
+
+def _title_words(text):
+    tokens = re.findall(r'[a-z0-9]+', fold(str(text or '')).replace('&', ' and ').replace('-', ' '))
+    out = []
+    for token in tokens:
+        out.extend(ABBREVIATIONS.get(token, token).split())
+    return [t for t in out if t not in _STOPWORDS]
+
+
+def title_matches(title, phrase):
+    """Whole-word title match with abbreviations: 'CEO' = 'Chief Executive Officer',
+    'VP of Strategy' = 'Vice President, Strategy'. 'President' never matches 'Vice President'."""
+    words, needle = _title_words(title), _title_words(phrase)
+    if not needle:
+        return False
+    for i in range(len(words) - len(needle) + 1):
+        if words[i:i + len(needle)] != needle:
+            continue
+        if needle[0] != 'vice' and i > 0 and words[i - 1] == 'vice':
+            continue
+        return True
+    return False
+
+
 def title_matches_include(title, include_titles):
     if not include_titles:
         return True
-    text = _title_phrases(title)
     info = classify_title(title)
+    is_vice = 'vice' in _title_words(title)
     for phrase in include_titles:
+        if title_matches(title, phrase):
+            return True
         needle = ' '.join(phrase.casefold().split())
-        if needle and needle in text:
-            return True
-        compact = needle.replace(' of ', ' ').replace(' / ', ' ')
-        if compact and compact in text:
-            return True
-        if needle in ('ceo', 'chief executive officer') and (
-            info['label'] == 'ceo' or 'chief executive officer' in text
-        ):
-            return True
-        if needle in ('coo', 'chief operating officer') and (
-            info['label'] == 'coo' or 'chief operating officer' in text
-        ):
-            return True
-        if needle in ('cfo', 'chief financial officer') and (
-            info['label'] == 'cfo' or 'chief financial officer' in text
-        ):
-            return True
-        if needle in ('cto', 'cio') and info['label'] == needle:
-            return True
-        if needle in ('evp', 'svp', 'avp', 'vp') and info['seniority'] == 'vp':
-            return True
-        if 'vice president' in needle and info['seniority'] == 'vp':
-            return True
+        # Seniority fallbacks for spellings the word match misses ("Co-Founder/CEO", "Owner/Broker").
+        # VP titles are never broadened: "EVP" or "VP of Strategy" must match the words themselves.
         if needle in ('founder', 'co-founder', 'cofounder') and info['seniority'] == 'founder':
             return True
-        if needle in ('owner',) and info['seniority'] == 'owner':
+        if needle == 'owner' and info['seniority'] == 'owner':
             return True
-        if 'partner' in needle and info['seniority'] == 'partner':
+        if needle in ('partner', 'managing partner') and info['seniority'] == 'partner' and not is_vice:
+            return needle == 'partner' or 'managing' in str(title).casefold()
+        if needle == 'president' and info['seniority'] == 'president' and not is_vice:
             return True
-        if needle in ('president',) and info['seniority'] == 'president':
+        if needle == 'principal' and info['seniority'] == 'principal':
             return True
-        if needle in ('principal',) and info['seniority'] == 'principal':
+        if needle == 'managing director' and info['seniority'] == 'managing_director':
             return True
-        if 'managing director' in needle and info['seniority'] == 'managing_director':
+        if needle in ('ceo', 'coo', 'cfo', 'cto', 'cio') and info['label'] == needle:
             return True
     return False
 
@@ -273,12 +318,7 @@ def title_matches_include(title, include_titles):
 def title_matches_exclude(title, exclude_titles):
     if not exclude_titles:
         return False
-    text = _title_phrases(title)
-    for phrase in exclude_titles:
-        needle = ' '.join(phrase.casefold().split())
-        if needle and needle in text:
-            return True
-    return False
+    return any(title_matches(title, phrase) for phrase in exclude_titles)
 
 
 def industry_matches(row, keywords):
@@ -293,6 +333,11 @@ def industry_matches(row, keywords):
     blob = f'{declared} {extra}'.strip()
     if any(keyword.casefold() in blob for keyword in keywords):
         return True
+    words = ' ' + ' '.join(_title_words(blob)) + ' '
+    for keyword in keywords:
+        options = INDUSTRY_SYNONYMS.get(' '.join(_title_words(keyword)), ())
+        if any(' ' + ' '.join(_title_words(o)) + ' ' in words for o in options):
+            return True
     # Only a declared Industry value can miss. company_type is an internal label
     # (brokerage/other/...) and does not count as known industry.
     if declared.strip():
@@ -300,30 +345,108 @@ def industry_matches(row, keywords):
     return True
 
 
-def match_targeting(row, query):
+def targeting_reason(row, query):
+    """None when the row passes, else the first failing rule (for report counts)."""
     query = normalize_targeting(query)
     if not query:
-        return True
+        return None
     title = _field(row, 'Title', 'title')
     if query.get('exclude_titles') and title_matches_exclude(title, query['exclude_titles']):
-        return False
+        return 'excluded_title'
     if query.get('exclude_junior') and is_junior_title(title):
-        return False
+        return 'junior_title'
     if query.get('include_titles') and not title_matches_include(title, query['include_titles']):
-        return False
+        return 'title'
     wanted = query.get('country')
     if wanted:
         known = lead_country(row)
         if known and known != wanted:
-            return False
+            return 'country'
+    if query.get('states'):
+        # A state filter drives discovery, so the lead's state must be known and listed
+        state = us_state_code(_field(row, 'State', 'state'))
+        if not state:
+            return 'state_unknown'
+        if state not in query['states']:
+            return 'state'
     minimum = query.get('revenue_min')
     if minimum is not None:
         revenue = lead_revenue(row)
+        if revenue is None and query.get('revenue_unknown') == 'drop':
+            return 'revenue_unknown'
         if revenue is not None and revenue < minimum:
-            return False
+            return 'revenue'
     if query.get('industry') and not industry_matches(row, query['industry']):
-        return False
-    return True
+        return 'industry'
+    return None
+
+
+def match_targeting(row, query):
+    return targeting_reason(row, query) is None
+
+
+def filter_records(records, query):
+    """(kept, step). Kept records with a revenue rule but no revenue data get revenue_status='unknown'."""
+    query = normalize_targeting(query)
+    kept, dropped, unknown = [], {}, 0
+    for record in records:
+        reason = targeting_reason(record, query)
+        if reason:
+            dropped[reason] = dropped.get(reason, 0) + 1
+            continue
+        if query.get('revenue_min') is not None and lead_revenue(record) is None:
+            record['revenue_status'] = 'unknown'
+            unknown += 1
+        kept.append(record)
+    return kept, {'checked': len(records), 'kept': len(kept), 'dropped': dropped,
+                  'notes': {'revenue_unknown': unknown} if unknown else {}}
+
+
+# Single-state public license feeds; sec-form-d and generic files span all states
+RECORD_SOURCE_STATES = {'tx-trec': 'TX', 'ny-dos': 'NY', 'co-dora': 'CO', 'ct-dls': 'CT', 'fl-dbpr-file': 'FL', 'de-dpr': 'DE'}
+# Industry keyword -> extra Hunter Discover industries (names from hunter.io/files/industries.json)
+HUNTER_INDUSTRY_HINTS = {
+    'construction': ('Construction', 'Building Construction', 'Residential Building Construction',
+                     'Nonresidential Building Construction'),
+    'commercial real estate': ('Commercial Real Estate',),
+}
+INDUSTRY_SYNONYMS = {
+    'construction': ('construction', 'builders', 'builder', 'homebuilder', 'homebuilders', 'contractor', 'contractors',
+                     'contracting', 'general contractor', 'design build'),
+    'real estate': ('realty', 'realtor', 'realtors', 'properties', 'brokerage', 'reit'),
+    'commercial real estate': ('cre', 'commercial property', 'commercial properties', 'investment sales'),
+    'real estate development': ('development', 'developer', 'developers', 'devco', 'land development'),
+    'property management': ('property manager', 'property managers', 'management company', 'property_manager'),
+}
+
+
+def discovery_plan(query, metros, all_states, base_industries):
+    """Where and what discovery searches for this targeting (states, Hunter industries, keywords)."""
+    query = query or {}
+    states = query.get('states') or []
+    plan = {'metros': [m for m in metros if not states or us_state_code(m[1]) in states],
+            'states': list(states) or list(all_states), 'industries': list(base_industries), 'keywords': []}
+    for keyword in query.get('industry') or []:
+        for industry in HUNTER_INDUSTRY_HINTS.get(' '.join(_title_words(keyword)), ()):
+            if industry not in plan['industries']:
+                plan['industries'].append(industry)
+        plan['keywords'].append(keyword)
+    return plan
+
+
+def allowed_record_sources(names, query):
+    """(kept source names, {skipped: reason}) for the targeting's states."""
+    states = (query or {}).get('states')
+    if not states:
+        return tuple(names), {}
+    kept, skipped = [], {}
+    for name in names:
+        state = RECORD_SOURCE_STATES.get(name)
+        if state and state not in states:
+            skipped[name] = f'outside filter states ({state})'
+        else:
+            kept.append(name)
+    return tuple(kept), skipped
 
 
 def example_cre_targeting():

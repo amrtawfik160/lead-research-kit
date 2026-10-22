@@ -36,9 +36,12 @@ ERROR_HINTS = {
     'unknown_country': 'Country must be an ISO code or US/USA/United States.',
     'invalid_revenue_min': 'Revenue minimum looks like 5000000, 5M, or $5M.',
     'leads_output_required': 'Give --output FILE.csv for `leads export`.',
-    'invalid_filter_name': 'Filter names are letters, numbers, spaces, _ . - and cannot include $ or punctuation. Example: US CRE decision makers 5M.',
+    'invalid_filter_name': 'Filter names use letters, numbers, spaces and _ . - $ + & ( ). Example: US CRE decision makers $5M+.',
+    'unknown_us_state': 'Use US state codes or names, e.g. `--state CA` or `--state "CA,New York"`.',
+    'too_many_states': 'At most 60 states.',
+    'invalid_revenue_unknown': 'Use `--revenue-unknown keep` (label leads without revenue data) or `drop`.',
     'filter_name_too_long': 'Keep filter names at 40 characters or fewer.',
-    'unknown_filter_field': 'Unknown filter field. Listing: stage, owner, area, source, risk, date, verified, found_by. Targeting: country, revenue_min, industry, include_titles, exclude_titles, exclude_junior.',
+    'unknown_filter_field': 'Unknown filter field. Listing: stage, owner, area, source, risk, date, verified, found_by. Targeting: country, states, revenue_min, revenue_unknown, industry, include_titles, exclude_titles, exclude_junior.',
     'too_many_titles': 'At most 40 include/exclude titles.',
     'title_too_long': 'Each title must be 80 characters or fewer.',
     'too_many_industry_keywords': 'At most 30 industry keywords.',
@@ -255,6 +258,7 @@ def parser():
     fp=fls.add_parser('pin',help='Pin a saved filter');fp.add_argument('name')
     fu=fls.add_parser('unpin',help='Unpin a saved filter');fu.add_argument('name')
     fa=fls.add_parser('apply',help='Return matching leads as JSON');fa.add_argument('name')
+    fw=fls.add_parser('show',help='One saved filter with all its fields');fw.add_argument('name')
     return p
 
 
@@ -271,6 +275,8 @@ def _targeting_args(p):
     p.add_argument('--include-titles',help='Comma-separated titles to keep (CEO, COO, Partner, ...)')
     p.add_argument('--exclude-titles',help='Comma-separated titles to drop')
     p.add_argument('--exclude-junior',action='store_true',help='Drop intern/assistant/associate/agent titles')
+    p.add_argument('--state',help='Comma-separated US states (CA, "New York"). Daily runs search only these states; leads must be in them')
+    p.add_argument('--revenue-unknown',choices=['keep','drop'],help='Leads with no revenue data when --revenue-min is set: keep and label them (default) or drop. Revenue is never estimated')
 
 
 def _lead_select_args(p):
@@ -290,6 +296,8 @@ def _targeting_from_args(args):
         'industry': getattr(args, 'industry', None),
         'include_titles': getattr(args, 'include_titles', None),
         'exclude_titles': getattr(args, 'exclude_titles', None),
+        'states': getattr(args, 'state', None),
+        'revenue_unknown': getattr(args, 'revenue_unknown', None),
     }
     if getattr(args, 'exclude_junior', False):
         query['exclude_junior'] = True
@@ -570,7 +578,8 @@ def main(argv=None):
                 targeting=normalize_targeting(saved)
             result=run_daily(work,store,config,target=args.target,execute=args.execute,day=args.date,sources=sources+('build',),output_root=args.output_root,
                              max_domains=args.max_domains,workers=args.workers,require_email=not args.allow_missing_email,min_tier=args.min_tier,caps=caps,record_sources=records,
-                             record_source_names=names,search_provider=args.search_provider,targeting=targeting or None)
+                             record_source_names=names,search_provider=args.search_provider,targeting=targeting or None,
+                             targeting_name=item['name'] if args.targeting_filter else None)
         elif args.command=='daily-audit':
             from .audit import run_audit
             from .daily import today_iso, render_report
@@ -653,6 +662,10 @@ def main(argv=None):
                 result=pin_filter(work,args.name)
             elif args.filter_action=='unpin':
                 result=unpin_filter(work,args.name)
+            elif args.filter_action=='show':
+                item=next((row for row in list_filters(work)['filters'] if row['name'].casefold()==' '.join(args.name.split()).casefold()),None)
+                if not item:raise PolicyError('unknown_filter')
+                result={'filter':item}
             else:
                 result=apply_filter(work,args.name)
         else:result={'contacts':len(store.contacts()),'held':sum(bool(r.get('held')) for r in store.contacts()),'budgets':store.budgets(),'providers':{p:store.provider_state(p) for p in config['providers']},'unresolved_attempts':[{'id':a['id'],'provider':a['provider'],'state':a['state']} for a in store.attempts() if a['state'] in ('reserved','sent','pending','uncertain')],'audit_ok':store.verify_audit()}

@@ -634,7 +634,7 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
               output_root=None, max_domains=None, workers=48, require_email=True, min_tier='B',
               caps=None, env=None, transport=None, fetcher=None, record_sources=(), record_source_names=DEFAULT_RECORD_SOURCES,
               search_provider='serper', records_getter=None, resolver=None, clock=time.time, mx_check=None, mx_resolver=None,
-              targeting=None):
+              targeting=None, targeting_name=None):
     """One daily cycle. Returns a report; writes files under ``output_root/day``.
 
     ``mx_check`` (free DNS lookups of email domains) defaults to on for live runs
@@ -647,6 +647,15 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
     max_domains = max_domains or int(target / EXPECTED_LEADS_PER_DOMAIN * 1.2)
     history = History(work / 'lead-history.sqlite3')
     report = {'date': day, 'execute': execute, 'target': target, 'steps': {}}
+    from . import targeting as targeting_mod
+    rules = targeting_mod.normalize_targeting(targeting)
+    if rules:
+        report['targeting'] = rules
+        if targeting_name:
+            report['targeting_name'] = targeting_name
+        record_source_names, skipped_records = targeting_mod.allowed_record_sources(record_source_names, rules)
+        if skipped_records:
+            report['targeting_record_sources_skipped'] = skipped_records
     try:
         from . import discovery
         from .policy import US_STATES
@@ -706,16 +715,32 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
 
         backlog = history.backlog()
         report['backlog_before'] = backlog
+
+        def in_state_queue(limit):
+            # With a state filter the crawl queue is the in-state part of the backlog (located by
+            # Hunter's headquarters match); other domains wait for an unfiltered run
+            places = discover_locations(store)
+            pool = history.domains_to_crawl(max(limit * 20, 2000))
+            return [d for d in pool if (places.get(d) or ('', ''))[1] in rules['states']][:limit]
+
+        def current_backlog():
+            return len(in_state_queue(max_domains)) if rules.get('states') else history.backlog()
+
+        if rules.get('states'):
+            backlog = current_backlog()
+            report['targeting_state_backlog'] = backlog
         if backlog < max_domains and 'hunter-discover' in sources:
             # Free calls; rotate cities (most distinct results), states x sizes, and keyword niches
             cap = caps['hunter-discover']
             per_city = len(HEADCOUNTS)
-            cities = history.next_markets('hunter_city', list(METROS), max(1, int(cap * 0.6) // per_city))
-            states = history.next_markets('hunter_state', list(US_STATES), max(1, int(cap * 0.2) // per_city))
-            kw_states = history.next_markets('hunter_keyword_state', list(US_STATES), 1)
-            kw_sets = history.next_markets('hunter_keyword', [k[0] for k in KEYWORD_SETS], max(1, int(cap * 0.2) // per_city))
-            jobs = (discovery.hunter_discover_city_jobs(cities, headcounts=HEADCOUNTS)
-                    + discovery.hunter_discover_jobs(states, headcounts=HEADCOUNTS)
+            plan = targeting_mod.discovery_plan(rules, METROS, US_STATES, discovery.HUNTER_REAL_ESTATE_INDUSTRIES)
+            keyword_pool = list(dict.fromkeys(plan['keywords'] + [k[0] for k in KEYWORD_SETS]))
+            cities = history.next_markets('hunter_city', plan['metros'], max(1, int(cap * 0.6) // per_city)) if plan['metros'] else []
+            states = history.next_markets('hunter_state', plan['states'], max(1, int(cap * 0.2) // per_city))
+            kw_states = history.next_markets('hunter_keyword_state', plan['states'], 1)
+            kw_sets = history.next_markets('hunter_keyword', keyword_pool, max(1, int(cap * 0.2) // per_city))
+            jobs = (discovery.hunter_discover_city_jobs(cities, headcounts=HEADCOUNTS, industries=plan['industries'])
+                    + discovery.hunter_discover_jobs(states, headcounts=HEADCOUNTS, industries=plan['industries'])
                     + discovery.hunter_discover_keyword_jobs(kw_states, [[k] for k in kw_sets], headcounts=HEADCOUNTS))
             step = run('hunter-discover', jobs, cap)
             step['markets'] = {'cities': [':'.join(c) for c in cities], 'states': states, 'keywords': kw_sets, 'keyword_state': kw_states}
@@ -728,22 +753,22 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                     history.mark_market('hunter_keyword_state', state, day)
                 for kw in kw_sets:
                     history.mark_market('hunter_keyword', kw, day)
-        if history.backlog() < max_domains and 'google-places' in sources:
-            metros = history.next_markets('places_metro', list(METROS), max(1, caps['google-places'] // 3))
+        if current_backlog() < max_domains and 'google-places' in sources:
+            metros = history.next_markets('places_metro', targeting_mod.discovery_plan(rules, METROS, US_STATES, ())['metros'] or list(METROS), max(1, caps['google-places'] // 3))
             step = run('google-places', discovery.places_jobs(metros), caps['google-places'])
             step['markets'] = [':'.join(m) for m in metros]
             if execute and step['sent']:
                 for metro in metros:
                     history.mark_market('places_metro', metro, day)
-        if history.backlog() < max_domains and 'osm' in sources:
-            areas = history.next_markets('osm_area', list(METROS), caps['osm'])
+        if current_backlog() < max_domains and 'osm' in sources:
+            areas = history.next_markets('osm_area', targeting_mod.discovery_plan(rules, METROS, US_STATES, ())['metros'] or list(METROS), caps['osm'])
             step = run('osm', discovery.osm_jobs(areas), caps['osm'])
             step['markets'] = [':'.join(a) for a in areas]
             if execute and step['sent']:
                 for area in areas:
                     history.mark_market('osm_area', area, day)
         if 'apollo' in sources:
-            states = history.next_markets('apollo_state', list(US_STATES), 1)
+            states = history.next_markets('apollo_state', list(rules.get('states') or US_STATES), 1)
             step = run('apollo', discovery.apollo_jobs(list(discovery.DEFAULT_DM_TITLES), [US_STATES[s] + ', US' for s in states], pages=caps['apollo']), caps['apollo'])
             if execute and step['sent']:
                 history.mark_market('apollo_state', states[0], day)
@@ -751,7 +776,7 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                 run('apollo-enrich', discovery.apollo_enrich_jobs(partial), caps['apollo-enrich'])
 
         if 'crawl' in sources:
-            domains = history.domains_to_crawl(max_domains)
+            domains = in_state_queue(max_domains) if rules.get('states') else history.domains_to_crawl(max_domains)
             step = {'domains_planned': len(domains)}
             if execute and domains:
                 from .extract import crawl_domains
@@ -851,10 +876,7 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
         annotate_email_risk(result['clean'], mx_facts, _risk_context(store, history.prospects()))
         safety = {'mx_check': mx_on, 'mx': emailcheck.summarize(mx_facts), 'dropped': {},
                   'locations_filled': fill_locations(result['clean'], discover_locations(store))}
-        from .targeting import match_targeting, normalize_targeting
-        rules = normalize_targeting(targeting)
-        if rules:
-            report['targeting'] = rules
+        from .targeting import match_targeting
         owned_by_team, team_skipped = partition_owned(result['clean'], work)
         if rules.get('include_titles'):
             review_owned, _review_skip = partition_owned(result.get('review') or [], work)
@@ -877,10 +899,11 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                 if require_email:
                     continue
                 r['rejected_email'], r['email'], r['email_risk'] = r['email'], '', ''
-            if rules and not match_targeting(r, rules):
-                skipped_targeting += 1
-                continue
             pool.append(r)
+        if rules:
+            pool, targeting_step = targeting_mod.filter_records(pool, rules)
+            skipped_targeting = targeting_step['checked'] - targeting_step['kept']
+            report['steps']['targeting'] = {'name': targeting_name, **targeting_step}
         report['skipped_targeting'] = skipped_targeting
         report['steps']['email-safety'] = safety
         source_quality = history.source_quality()
@@ -1262,8 +1285,18 @@ def render_report(report):
         lines.append('Dropped unsafe emails: ' + ', '.join(f'{k} {v}' for k, v in sorted(safety['dropped'].items(), key=lambda kv: -kv[1])))
     if report.get('skipped_team_owned'):
         lines.append(f"Skipped {report['skipped_team_owned']} leads already owned by a teammate")
-    if report.get('skipped_targeting'):
+    tstep = steps.get('targeting') or {}
+    if tstep:
+        line = (f"Filter \"{tstep.get('name')}\": " if tstep.get('name') else 'Targeting: ') + f"{tstep.get('kept', 0)} of {tstep.get('checked', 0)} candidates matched"
+        if tstep.get('dropped'):
+            line += ' (dropped: ' + ', '.join(f'{k} {v}' for k, v in sorted(tstep['dropped'].items(), key=lambda kv: -kv[1])) + ')'
+        lines.append(line)
+        if (tstep.get('notes') or {}).get('revenue_unknown'):
+            lines.append(f"Revenue unknown for {tstep['notes']['revenue_unknown']} matched leads (kept and labeled; revenue is never estimated)")
+    elif report.get('skipped_targeting'):
         lines.append(f"Skipped {report['skipped_targeting']} leads that did not match the ICP / targeting filter")
+    if report.get('targeting_record_sources_skipped'):
+        lines.append('Record feeds skipped by the filter: ' + ', '.join(sorted(report['targeting_record_sources_skipped'])))
     crawl = steps.get('crawl', {})
     if crawl.get('sites_ok') is not None:
         lines.append(f"Crawled {crawl.get('domains_planned', 0)} sites, {crawl.get('sites_ok', 0)} reachable, {crawl.get('people_with_email', 0)} people with emails")
@@ -1359,7 +1392,7 @@ def attach_linkedin(records, prospects):
 
 
 DETAIL_EXTRA_HEADERS = ['Tier', 'Score', 'Email Source', 'Source URL', 'Issues', 'Email Risk', 'Email Risk Reason',
-                        'MX Provider', 'Email Verification']
+                        'MX Provider', 'Email Verification', 'Annual Revenue']
 
 
 def load_daily_records(out_dir):
@@ -1425,7 +1458,8 @@ def write_daily(records, out_dir):
                        [quality.daily_row(r) + [r['tier'], r['score'], r.get('email_source', ''),
                                                 r.get('email_evidence_url') or r.get('source_url', ''), '; '.join(r['issues']),
                                                 r.get('email_risk') or quality.email_risk(r)[0], r.get('email_risk_reason', ''),
-                                                r.get('mx_provider', ''), r.get('email_verification', '')]
+                                                r.get('mx_provider', ''), r.get('email_verification', ''),
+                                                r.get('annual_revenue_usd') or ('unknown' if r.get('revenue_status') == 'unknown' else '')]
                         for r in records])
     return {'leads': str(leads), 'details': str(details)}
 

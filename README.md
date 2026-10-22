@@ -132,6 +132,25 @@ Team commands: `team join`, `team export`, `team import` (same as `team merge`),
 
 Filter commands: `filter save`, `filter list`, `filter pin`, `filter unpin`, `filter apply --json`.
 
+
+### Targeting a state, industry and titles (`daily --filter`)
+
+```bash
+lead-research --json filter save "US CRE decision makers $5M+" --country US --state CA --revenue-min 5M --revenue-unknown keep \
+  --industry "real estate development,real estate,commercial real estate,property management,construction" \
+  --include-titles "CEO,COO,CFO,President,Partner,Managing Partner,Managing Director,VP of Strategy,Founder,Owner,Principal,EVP,SVP" \
+  --exclude-titles "junior,assistant,coordinator,intern" --exclude-junior --pin
+lead-research --json filter show "US CRE decision makers $5M+"
+lead-research --json daily --filter "US CRE decision makers $5M+" --target 500            # dry preview
+lead-research --json daily --filter "US CRE decision makers $5M+" --target 500 --execute  # real run
+```
+
+- `--state`: Hunter Discover, Places and OSM search only these states, out-of-state license feeds are skipped, and the crawl queue is the in-state backlog. Delivered leads must have a known, listed state
+- `--industry`: also adds matching Hunter industries to discovery (e.g. Construction) and runs keyword searches with them. Unknown industry is kept; a declared industry that doesn't match is dropped
+- Titles: whole-word match with abbreviations (CEO = Chief Executive Officer, VP of Strategy = Vice President, Strategy). "President" never matches "Vice President", and EVP/SVP never widen to every VP. Exclusions win
+- `--revenue-min`: never estimated. None of the free providers report revenue, so with `--revenue-unknown keep` (default) matches are delivered and marked `unknown` in the details file's Annual Revenue column; `drop` keeps only leads with known revenue at or above the minimum
+- The report shows matched and dropped counts by reason
+
 ## Providers
 
 All start **disabled** with **zero** budget. Free allowances change; confirm balances each run. Env names only — never commit values.
