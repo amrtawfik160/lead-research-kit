@@ -580,7 +580,7 @@ class RunnerDiscoveryTests(unittest.TestCase):
         self.assertEqual(statuses[1], ('ready', None))  # dry-run plans each job against the confirmed pool
         self.assertEqual(statuses[2], ('skipped', 'insufficient_confirmed_free_budget'))
         self.assertEqual(report['results'][2]['charges'], {'requests': '1'})
-        self.assertEqual(statuses[3], ('skipped', 'invalid_job'))
+        self.assertEqual(statuses[3], ('skipped', 'paging_not_supported_by_provider'))
         self.assertEqual((self.transport.requests, self.store.attempts()), ([], []))
         self.config['providers']['overpass']['enabled'] = False
         self.assertEqual(self.runner().run(osm_jobs(['Austin']))['results'][0]['reason'], 'provider_disabled')

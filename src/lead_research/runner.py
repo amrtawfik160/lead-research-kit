@@ -144,6 +144,8 @@ class Runner:
                 if key in seen:
                     item.update(status='skipped', reason='duplicate_input')
                 seen.add(key)
+            except PolicyError as exc:
+                item = {'status': 'skipped', 'reason': str(exc)}
             except Exception:
                 item = {'status': 'skipped', 'reason': 'invalid_job'}
             result.append(item)
@@ -168,6 +170,8 @@ class Runner:
         # Never let any adapter accidentally treat failed HTTP as a mailbox vote.
         if response.status in (401, 403):
             return Outcome('error', error='auth')
+        if response.status == 402:
+            return Outcome('error', error='quota')
         if response.status == 429:
             return Outcome('error', error='rate_limit')
         if response.status >= 500:

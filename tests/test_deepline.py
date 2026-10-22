@@ -167,6 +167,9 @@ class FinderParseTests(unittest.TestCase):
 
     def test_errors(self):
         self.assertEqual(parse({'error': {'code': 'INSUFFICIENT_CREDITS', 'message': SECRET}}, status=402).error, 'quota')
+        self.assertEqual(parse({'code': 'UPSTREAM_VALIDATION_ERROR', 'error_category': 'validation', 'error': 'x'}, status=400).error, 'provider_application_error')
+        self.assertEqual(parse({'error': 'UPSTREAM_VALIDATION_ERROR'}, status=400).error, 'provider_application_error')
+        self.assertEqual(parse({'error': {'code': 'UPSTREAM_VALIDATION_ERROR'}}, status=400).error, 'provider_application_error')
         self.assertEqual(parse({'error': {'code': 'INSUFFICIENT_CREDITS'}}, status=400).error, 'quota')
         self.assertEqual(parse({'error': 'Workspace balance is empty'}, status=409).error, 'quota')
         self.assertEqual(parse({'error': {'code': 'INVALID_INPUT', 'message': 'x'}}, status=422).error, 'http_error')

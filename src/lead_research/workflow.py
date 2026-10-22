@@ -32,7 +32,9 @@ def route_run(store, config, jobs, *, execute=False, limit=10, env=None, transpo
                 if not execute and any(available.get((q['provider'],p),0)<parse_units(v,positive=True) for p,v in q['charges'].items()):continue
                 selected=q;break
         if selected is None:
-            results.append({'status':'skipped','reason':'no_eligible_funded_provider','options':quotes});continue
+            reasons={q.get('reason') for q in quotes if q.get('reason')}
+            reason=reasons.pop() if len(reasons)==1 else 'no_eligible_funded_provider'
+            results.append({'status':'skipped','reason':reason,'options':quotes});continue
         if selected['status']=='ready' and calls>=limit:
             results.append({**selected,'status':'skipped','reason':'execution_limit'});continue
         if not execute:

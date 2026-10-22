@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -80,6 +81,29 @@ class CliTests(unittest.TestCase):
         self.assertEqual(jina['required_env'],[])
         self.assertEqual(jina['optional_env'],['JINA_API_KEY'])
         self.assertTrue(jina['key_present'])
+
+    def test_jobs_output_also_prints_json_to_stdout(self):
+        self.call('init')
+        dest=self.root/'xray.json'
+        code,r=self.call('jobs','xray','--states','RI','--pages','1','--output',str(dest))
+        self.assertEqual(code,0)
+        self.assertIsInstance(r,list)
+        self.assertTrue(r)
+        self.assertTrue(dest.is_file())
+        self.assertEqual(json.loads(dest.read_text()),r)
+
+    def test_no_key_execute_skips_with_missing_auth(self):
+        self.call('init')
+        self.call('provider','enable','hunter')
+        self.call('budget','confirm','hunter','--pools','{"credits":"1"}','--source','synthetic free','--free')
+        jobs=self.root/'jobs.json'
+        jobs.write_text(json.dumps([{'provider':'hunter','operation':'verify','payload':{'email':'alex@example.org'}}]))
+        with patch.dict(os.environ, clear=False):
+            os.environ.pop('HUNTER_API_KEY', None)
+            code,r=self.call('run',str(jobs),'--execute','--limit','1')
+        self.assertEqual(code,0)
+        self.assertEqual(r['results'][0]['status'],'skipped')
+        self.assertEqual(r['results'][0]['reason'],'missing_auth')
 
     def test_entrypoint_emits_structured_error_with_hint_when_uninitialized(self):
         from lead_research.cli import entrypoint

@@ -157,7 +157,7 @@ class DailyTests(unittest.TestCase):
             report = run_daily(self.work, self.store, self.config, target=5, sources=('hunter-discover', 'osm', 'build'), execute=True,
                                day='2026-01-01')
         self.assertEqual(report['steps']['hunter-discover']['sent'], 0)
-        self.assertIn('no_eligible_funded_provider', report['steps']['hunter-discover']['skipped_reasons'])
+        self.assertIn('provider_disabled', report['steps']['hunter-discover']['skipped_reasons'])
 
     def test_market_rotation(self):
         h = History(self.work / 'lead-history.sqlite3')
