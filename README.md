@@ -102,7 +102,8 @@ I am not technical. Follow AGENTS.md section "Set up Veinore with your own agent
 4. Help me add keys only if I have them (private env file, chmod 600). The tool works with zero keys.
 5. Run a dry daily preview. Execute only if I say so.
 6. After a run, `team export --shared` so the group list stays one list.
-7. Save and pin the filters I care about (`filter save` / `filter pin`).
+7. Save and pin the filters I care about (`filter save` / `filter pin`), including ICP (country, $ revenue, industry keywords, titles).
+8. After a run, set stage/owner/notes with `ops set` and export CSV with `leads export`. `schema --json` lists every command.
 
 Guide me in plain words. Stop and ask when you need a choice or a secret.
 ```
@@ -124,7 +125,8 @@ The agent should do this, in order, and pause when it needs a choice from you.
 5. **Keys are optional.** The kit runs with zero keys. If you have some, keep them in a private env file (`chmod 600`) and load with `set -a; . /private/path/keys.env; set +a`. Never paste keys into chat, git, or the dashboard.
 6. **Daily run.** Preview first (`daily --target 10 --json`). Add `--execute` only when you mean to spend or write today's file.
 7. **Share your finds.** `team export --shared /path/to/shared-folder --json`. Teammates run `team import --shared /path/to/shared-folder --json`. Same email, LinkedIn, or name+company website collapses to one row. The first finder keeps credit.
-8. **Filters.** `filter save NAME --stage new --area Texas --pin --json`. `filter apply NAME --json` returns the matching leads. Pinned filters also sit at the top of the Leads page if you open the dashboard.
+8. **Filters and ICP.** `filter save NAME --stage new --area Texas --pin --json`. Add `--country US --revenue-min 5M --industry "..." --include-titles "CEO,..." --exclude-junior` for targeting. `daily --filter NAME` uses that ICP. `filter apply NAME --json` returns matching leads. Then `ops set --email ... --stage contacted` and `leads export --output FILE.csv`.
+9. **Ask the catalog.** `schema --json` (or `commands --json`) lists every command, flag, output shape, and exit code. `--help` works on every command. Exit `0` is OK; exit `2` is an error with a hint.
 
 Team commands: `team join`, `team export`, `team import` (same as `team merge`), `team list --json`.
 

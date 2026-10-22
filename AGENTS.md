@@ -360,7 +360,7 @@ Use this when a non-technical teammate pastes the README prompt or says “clone
    ```
    Same as `team merge`. Dedupe is email, LinkedIn, or name + company website. `Found By` stays with the first person who had the lead.
 
-8. **Save and pin filters** they will reuse:
+8. **Save and pin filters** they will reuse, including ICP targeting:
    ```bash
    scripts/lead-research --workspace /private/their-folder filter save today-new --date 2026-10-22 --stage new --pin --json
    scripts/lead-research --workspace /private/their-folder filter list --json
@@ -368,7 +368,36 @@ Use this when a non-technical teammate pastes the README prompt or says “clone
    ```
    Pinned filters also show at the top of the Leads page. The UI is optional.
 
-9. **Dashboard (optional).** `make dev` then open http://127.0.0.1:3000. Settings shows the roster. Leads has a “Team list” date and the pinned chips. Do not use the UI to join, export, or spend.
+9. **Stage, owner, notes, export** from the CLI (same sidecar the dashboard shows):
+   ```bash
+   scripts/lead-research --workspace /private/their-folder ops set --email casey@harbor.example --stage contacted --owner Ada --notes "Intro this week" --json
+   scripts/lead-research --workspace /private/their-folder leads export --output /private/their-folder/leads.csv --json
+   ```
+
+10. **Dashboard (optional).** `make dev` then open http://127.0.0.1:3000. Settings shows the roster. Leads has a “Team list” date and the pinned chips. Do not use the UI to join, export, or spend.
+
+### Example: Jess’s US CRE $5M+ filter (paste to your agent)
+
+```text
+Save and pin a filter named "US CRE decision makers 5M". Target US commercial real estate decision makers with at least $5M revenue or ARR.
+
+Industry keywords: real estate development, real estate, commercial real estate, property management, construction.
+
+Include titles: CEO, COO, CFO, President, Partner, Managing Partner, Managing Director, VP of Strategy, President of Strategy, Founder, Owner, Principal, EVP, SVP. Exclude junior roles.
+
+Use that filter as daily targeting (`daily --filter "US CRE decision makers 5M"`). Preview first. Execute only if I say so. Do everything from the CLI with --json. The dashboard is optional.
+```
+
+```bash
+scripts/lead-research --workspace /private/their-folder filter save "US CRE decision makers 5M" \
+  --country US --revenue-min 5M \
+  --industry "real estate development,real estate,commercial real estate,property management,construction" \
+  --include-titles "CEO,COO,CFO,President,Partner,Managing Partner,Managing Director,VP of Strategy,President of Strategy,Founder,Owner,Principal,EVP,SVP" \
+  --exclude-junior --pin --json
+scripts/lead-research --workspace /private/their-folder daily --target 20 --filter "US CRE decision makers 5M" --json
+```
+
+Unknown revenue, country, or industry is left unknown (not treated as a match or a miss). A known value below $5M, outside the US, or in a conflicting industry is dropped.
 
 ---
 
@@ -383,9 +412,29 @@ Sync is a JSON bundle (`veinore-team.json`). No hosted server. Put the file in a
 | `team import [FILE] [--shared PATH]` | Merge a bundle: dedupe, keep first finder, skip those leads on your next daily run. |
 | `team merge` | Same as `import`. |
 | `team list --json` | Members, areas, and the conjoined list. |
-| `filter save NAME [--stage --owner --area --source --risk --date --verified --found-by] [--pin]` | Create or update a named filter. |
+| `filter save NAME [--stage --owner --area --source --risk --date --verified --found-by] [--country --revenue-min --industry --include-titles --exclude-titles --exclude-junior] [--pin]` | Create or update a named filter, including ICP targeting. |
 | `filter list --json` | Saved filters; pinned first. |
 | `filter pin NAME` / `filter unpin NAME` | Pin or unpin. |
 | `filter apply NAME --json` | Matching leads. |
+| `ops set --email EMAIL [--stage --owner --notes]` | Lead stage, owner, notes (dashboard Outreach panel). |
+| `ops get --email EMAIL` / `ops list` | Read one or all outreach rows. |
+| `leads list [--date] [--filter NAME]` | JSON leads. |
+| `leads export --output FILE.csv [--date] [--filter NAME]` | Same CSV columns as the dashboard Export button. |
+| `daily --filter NAME` | Use a saved filter (ICP included) when picking today's leads. |
+| `workspace show` | Path, init, team, pins, latest daily. |
+| `schema` / `commands` | Every command, flags, output shape, exit codes. |
+| `jobs list` | Ledger job attempts. |
 
-`--json` is accepted on every command. Workspaces and filled env files stay outside the repo.
+`--json` is accepted on every command. `--help` is on every command. Exit `0` is OK; exit `2` is a usage/policy/provider/budget/audit error with `{"error","hint"}` on stderr. Workspaces and filled env files stay outside the repo.
+
+The dashboard never does anything the CLI cannot. Workspace switch in Settings is `--workspace` on the next command. Sample reset is `demo`. Run locally is `daily` / `daily --execute`.
+
+---
+
+## 10. Full command reference (agent catalog)
+
+Run `scripts/lead-research schema --json` (same as `commands --json`) for the live list. Top-level commands:
+
+`init`, `import`, `evidence`, `hold`, `research-queue`, `generate`, `verify-queue`, `find-queue`, `run`, `resume`, `budget` (`list`/`confirm`/`sync`), `provider` (`list`/`enable`/`disable`/`pause`/`review`), `cancel-unsent`, `export`, `status`, `audit`, `clean`, `crawl`, `jobs` (`list`/`xray`/`hunter-discover`/`hunter-domains`/`osm`), `collect`, `build`, `daily`, `daily-audit`, `records`, `history`, `demo`, `team`, `filter`, `ops`, `leads`, `workspace`, `schema`, `commands`.
+
+Non-interactive: never prompt. `--execute` is required to spend or write a live daily file. Dry is the default.

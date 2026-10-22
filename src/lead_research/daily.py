@@ -633,7 +633,8 @@ def annotate_email_risk(records, mx_facts, context):
 def run_daily(work, store, config, *, target=500, execute=False, day=None, sources=DEFAULT_SOURCES,
               output_root=None, max_domains=None, workers=48, require_email=True, min_tier='B',
               caps=None, env=None, transport=None, fetcher=None, record_sources=(), record_source_names=DEFAULT_RECORD_SOURCES,
-              search_provider='serper', records_getter=None, resolver=None, clock=time.time, mx_check=None, mx_resolver=None):
+              search_provider='serper', records_getter=None, resolver=None, clock=time.time, mx_check=None, mx_resolver=None,
+              targeting=None):
     """One daily cycle. Returns a report; writes files under ``output_root/day``.
 
     ``mx_check`` (free DNS lookups of email domains) defaults to on for live runs
@@ -850,9 +851,24 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
         annotate_email_risk(result['clean'], mx_facts, _risk_context(store, history.prospects()))
         safety = {'mx_check': mx_on, 'mx': emailcheck.summarize(mx_facts), 'dropped': {},
                   'locations_filled': fill_locations(result['clean'], discover_locations(store))}
+        from .targeting import match_targeting, normalize_targeting
+        rules = normalize_targeting(targeting)
+        if rules:
+            report['targeting'] = rules
         owned_by_team, team_skipped = partition_owned(result['clean'], work)
+        if rules.get('include_titles'):
+            review_owned, _review_skip = partition_owned(result.get('review') or [], work)
+            seen_keys = set()
+            for record in owned_by_team:
+                seen_keys |= set(History.keys_for(record))
+            for record in review_owned:
+                keys = set(History.keys_for(record))
+                if keys and not (keys & seen_keys) and match_targeting(record, rules):
+                    owned_by_team.append(record)
+                    seen_keys |= keys
         report['skipped_team_owned'] = len(team_skipped)
         pool = []
+        skipped_targeting = 0
         for r in owned_by_team:
             if not ((r.get('email') or not require_email) and history.is_fresh(r)):
                 continue
@@ -861,7 +877,11 @@ def run_daily(work, store, config, *, target=500, execute=False, day=None, sourc
                 if require_email:
                     continue
                 r['rejected_email'], r['email'], r['email_risk'] = r['email'], '', ''
+            if rules and not match_targeting(r, rules):
+                skipped_targeting += 1
+                continue
             pool.append(r)
+        report['skipped_targeting'] = skipped_targeting
         report['steps']['email-safety'] = safety
         source_quality = history.source_quality()
         pool.sort(key=lambda r: _selection_key(r, source_quality))
@@ -1242,6 +1262,8 @@ def render_report(report):
         lines.append('Dropped unsafe emails: ' + ', '.join(f'{k} {v}' for k, v in sorted(safety['dropped'].items(), key=lambda kv: -kv[1])))
     if report.get('skipped_team_owned'):
         lines.append(f"Skipped {report['skipped_team_owned']} leads already owned by a teammate")
+    if report.get('skipped_targeting'):
+        lines.append(f"Skipped {report['skipped_targeting']} leads that did not match the ICP / targeting filter")
     crawl = steps.get('crawl', {})
     if crawl.get('sites_ok') is not None:
         lines.append(f"Crawled {crawl.get('domains_planned', 0)} sites, {crawl.get('sites_ok', 0)} reachable, {crawl.get('people_with_email', 0)} people with emails")

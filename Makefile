@@ -1,4 +1,4 @@
-.PHONY: help setup dev api web start build test layout-check layout-test release-check check run-daily run-daily-execute status providers demo team-list filters
+.PHONY: help setup dev api web start build test layout-check layout-test release-check check run-daily run-daily-execute status providers demo team-list filters schema
 
 PYTHON ?= python3
 WORKSPACE ?= $(abspath dashboard/.data/sample-workspace)
@@ -25,6 +25,7 @@ help:
 	@echo "  make demo               Run offline synthetic demo into a temporary directory"
 	@echo "  make team-list          Print the conjoined team list as JSON (WORKSPACE=...)"
 	@echo "  make filters            Print saved filters as JSON (WORKSPACE=...)"
+	@echo "  make schema             Print the CLI command catalog as JSON"
 	@echo ""
 	@echo "Checks & Verification:"
 	@echo "  make test               Run all Python unit tests (offline)"
@@ -96,3 +97,6 @@ team-list:
 
 filters:
 	$(CLI) --workspace "$(WORKSPACE)" filter list --json
+
+schema:
+	$(CLI) schema --json

@@ -9,14 +9,16 @@ from pathlib import Path
 
 from .daily import load_daily_records
 from .models import PolicyError
+from .ops import OPS_FILE, ops_key as _ops_key
+from .targeting import TARGET_FIELDS, match_targeting, normalize_targeting
 from .team import lead_row, load_leads, load_state
 
 FILTER_FILE = 'saved-filters.json'
 FILTER_NAME_MAX = 40
-FILTER_FIELDS = ('stage', 'owner', 'area', 'source', 'risk', 'date', 'verified', 'found_by')
+LISTING_FIELDS = ('stage', 'owner', 'area', 'source', 'risk', 'date', 'verified', 'found_by')
+FILTER_FIELDS = LISTING_FIELDS + TARGET_FIELDS
 STAGES = ('new', 'contacted', 'replied', 'qualified', 'disqualified')
 VERIFIED_VALUES = ('verified', 'unverified')
-OPS_FILE = 'veinore-ops.json'
 
 
 def now_iso(clock=time.time):
@@ -39,11 +41,11 @@ def normalize_query(raw):
         raw = {}
     if not isinstance(raw, dict):
         raise PolicyError('invalid_filter_query')
-    query = {}
     unknown = set(raw) - set(FILTER_FIELDS)
     if unknown:
         raise PolicyError('unknown_filter_field')
-    for field in FILTER_FIELDS:
+    query = {}
+    for field in LISTING_FIELDS:
         if field not in raw or raw[field] in (None, '', 'all'):
             continue
         value = ' '.join(str(raw[field]).split())
@@ -64,6 +66,7 @@ def normalize_query(raw):
         if field == 'date' and value != 'team' and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
             raise PolicyError('invalid_filter_date')
         query[field] = value
+    query.update(normalize_targeting({field: raw.get(field) for field in TARGET_FIELDS if field in raw}))
     return query
 
 
@@ -167,15 +170,6 @@ def _ops_map(work):
     return data if isinstance(data, dict) else {}
 
 
-def _ops_key(row):
-    email = str(row.get('Email') or row.get('email') or '').strip().lower()
-    if email:
-        return email
-    name = str(row.get('Full Name') or row.get('full_name') or '').strip().lower()
-    company = str(row.get('Company') or row.get('company') or '').strip().lower()
-    return f'{name}|{company}'
-
-
 def _as_row(record, ops=None, batch_date=''):
     if 'Full Name' in record or 'Email' in record:
         row = dict(record)
@@ -266,7 +260,7 @@ def match_lead(row, query):
         return False
     if query.get('found_by') and str(row.get('Found By') or '').casefold() != query['found_by'].casefold():
         return False
-    return True
+    return match_targeting(row, {field: query.get(field) for field in TARGET_FIELDS if field in query})
 
 
 def apply_filter(work, name):
