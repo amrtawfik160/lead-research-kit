@@ -162,6 +162,7 @@ def parser():
     _lead_select_args(ll)
     le=lds.add_parser('export',help='Write a CSV (same columns as the dashboard Export CSV button)')
     le.add_argument('--output',required=True,help='Destination .csv')
+    le.add_argument('--format',dest='export_format',choices=['default','heyreach'],default='default',help='heyreach: HeyReach import layout (Profile URL, First/Last Name, Headline, Email Address, ...) plus our fields; leads without LinkedIn go to <name>-no-linkedin.csv')
     _lead_select_args(le)
     cl=s.add_parser('clean',help='Clean and score any lead CSV/JSON into the 6-column format (offline, no workspace needed)')
     cl.add_argument('input');cl.add_argument('--output',required=True,help='Output directory');_target_args(cl)
@@ -409,7 +410,7 @@ def _offline_command(args,work):
         from .leads import export_leads, list_leads
         query=_listing_from_args(args)
         if args.leads_action=='export':
-            return export_leads(work,args.output,date=args.date,filter_name=args.filter_name,query=query)
+            return export_leads(work,args.output,date=args.date,filter_name=args.filter_name,query=query,fmt=args.export_format)
         return list_leads(work,date=args.date,filter_name=args.filter_name,query=query)
     if args.command=='jobs':
         from . import discovery

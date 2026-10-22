@@ -1461,7 +1461,9 @@ def write_daily(records, out_dir):
                                                 r.get('mx_provider', ''), r.get('email_verification', ''),
                                                 r.get('annual_revenue_usd') or ('unknown' if r.get('revenue_status') == 'unknown' else '')]
                         for r in records])
-    return {'leads': str(leads), 'details': str(details)}
+    from .leads import write_heyreach
+    heyreach = write_heyreach(records, out_dir / 'leads-heyreach.csv')
+    return {'leads': str(leads), 'details': str(details), **heyreach['files']}
 
 
 def import_history(work, files, batch='imported'):
